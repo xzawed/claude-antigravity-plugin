@@ -118,17 +118,32 @@ function getDefaultAppCandidates(deps: DetectorDeps): string[] {
   ];
 }
 
+function inferCliBinaryFromPath(binaryPath: string): string | undefined {
+  const base = path.basename(binaryPath).toLowerCase().replace(/\.(exe|cmd|bat|app)$/, '');
+  if (base === 'agy' || base.includes('agy')) {
+    return 'agy';
+  }
+  if (base === 'antigravity' || base.includes('antigravity')) {
+    return 'antigravity';
+  }
+  if (base === 'ag') {
+    return 'ag';
+  }
+  return undefined;
+}
+
 export function detectSubscriptionApp(
   config: BridgeConfig,
   deps: DetectorDeps = getDefaultDetectorDeps(),
 ): SubscriptionDetection {
   const triggerMethod = config.subscription.trigger_method;
 
-  // 1. Explicit app_path override
+  // 1. Explicit app_path override (infer cliBinary so agy flags still apply)
   if (config.subscription.app_path && config.subscription.app_path !== 'auto') {
     if (deps.existsSync(config.subscription.app_path)) {
       return {
         detected: true,
+        cliBinary: inferCliBinaryFromPath(config.subscription.app_path),
         appPath: config.subscription.app_path,
         cliPath: config.subscription.app_path,
         triggerMethod,

@@ -11,7 +11,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
-[![Tests](https://img.shields.io/badge/tests-33%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](./.claude-plugin/plugin.json)
 
@@ -25,8 +25,8 @@
 
 | ⚡ Diagnostics Speed | 🛡️ Automated Verification | 🌍 Cross-Platform CI | 🔒 Dependency Security |
 | :---: | :---: | :---: | :---: |
-| **`162.6 ms`** avg | **`33 / 33`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
-| `check_ag_environment` (`4.0×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
+| **`149.9 ms`** avg | **`35 / 35`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
+| `check_ag_environment` (`4.3×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
 
@@ -67,9 +67,9 @@ Every performance target (`NFR-005`) and cross-platform edge case is empirically
 
 | Metric | Target (`NFR-005`) | Before Optimization | After Optimization | Status |
 | :--- | :---: | :---: | :---: | :---: |
-| `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`162.6 ms` avg** (`4.0×` faster) | ✅ **PASS** |
-| `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`98.0 ms` avg** (`3×` headroom) | ✅ **PASS** |
-| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`33 / 33` tests (6 suites)** | ✅ **PASS** |
+| `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`149.9 ms` avg** (`4.3×` faster) | ✅ **PASS** |
+| `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`90.3 ms` avg** (`3.3×` headroom) | ✅ **PASS** |
+| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`35 / 35` tests (6 suites)** | ✅ **PASS** |
 | Windows `.cmd` CLI Spawn (Node 20.12+/24) | No `EINVAL` crash | `spawn EINVAL` | `buildCliSpawnSpec` safe wrapper | ✅ **PASS** |
 
 ---
@@ -100,7 +100,7 @@ cd server
 npm install
 npm run build        # Compile TypeScript -> server/dist/
 npm run typecheck    # Strict type check (tsc --noEmit)
-npm test             # Run all 33 automated tests (unit, security, integration, Stdio MCP)
+npm test             # Run all 35 automated tests (unit, security, integration, Stdio MCP)
 npm run verify       # Live manifest + space-path cli-init + Stdio MCP handshake check
 ```
 
@@ -185,7 +185,8 @@ claude-antigravity-plugin/
     "timeout_sec": 300,
     "poll_interval_ms": 2000,
     "agy_mode": "accept-edits",
-    "agy_sandbox": true
+    "agy_sandbox": true,
+    "agy_stream_heartbeat": true
   },
   "api": {
     "api_key_env": "GEMINI_API_KEY",
@@ -222,10 +223,10 @@ All engineering docs follow the [Antigravity Documentation Standard](./docs/00-s
 | 항목 | 내용 | 실측 / 검증 결과 |
 | :--- | :--- | :--- |
 | **듀얼 실행 엔진** | `auto` 모드에서 로컬 Antigravity(`agy`/`antigravity`) 구독 우선 감지 → 미감지 시 `GEMINI_API_KEY` 자동 폴백 | 로컬 `agy.exe` 자동 감지 (`resolved=subscription`) |
-| **초고속 환경 진단** | 서브프로세스 없는 순수 JS `PATH` 탐색 + 단일 `git status --porcelain=v1 -b` 통합 | `check_ag_environment` **`162.6ms`** (`4.0×` 개선), `cli-init` **`98.0ms`** |
+| **초고속 환경 진단** | 서브프로세스 없는 순수 JS `PATH` 탐색 + 단일 `git status --porcelain=v1 -b` 통합 | `check_ag_environment` **`149.9ms`** (`4.3×` 개선), `cli-init` **`90.3ms`** |
 | **보안·경로 격리** | `realpathSync` 기반 `lockedPaths` 쓰기 제한, `.git/`·`.env*` 차단, 명령 허용목록, API 키 마스킹 | 보안 테스트 `TC-S01`~`TC-S05` 100% 통과, `npm audit` **0건** |
 | **무손실 Git Guard** | `git stash create` 핀 고정 + `untrackedBaseline` 스냅샷으로 위임 전 작업 100% 보존 | Staged/Unstaged/삭제 파일 완벽 원복 (`TC-U07`~`U11`, `TC-I06`) |
-| **크로스플랫폼 CI** | Ubuntu · macOS · Windows × Node 20 / 22 매트릭스 + 문서 링크 무결성 자동 검사 | **7 / 7 CI 잡** 및 **33 / 33 테스트** 전원 통과 |
+| **크로스플랫폼 CI** | Ubuntu · macOS · Windows × Node 20 / 22 매트릭스 + 문서 링크 무결성 자동 검사 | **7 / 7 CI 잡** 및 **35 / 35 테스트** 전원 통과 |
 
 ### 빠른 시작 (한국어)
 
@@ -234,7 +235,7 @@ cd server
 npm install
 npm run typecheck    # TypeScript strict 타입 검사
 npm run build        # server/dist/ 컴파일
-npm test             # 전체 33개 자동화 테스트 실행
+npm test             # 전체 35개 자동화 테스트 실행
 npm run verify       # 매니페스트 · 공백경로 cli-init · 라이브 Stdio MCP 헬스체크
 ```
 
