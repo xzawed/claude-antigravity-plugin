@@ -73,9 +73,10 @@ export interface ExecutionEngine {
    - `.ag-bridge/dispatch.md`와 `.ag-bridge/manifest.json`(`DISPATCHED`)이 디스크에 완전히 플러시되었는지 확인.
 3. **로컬 Antigravity 트리거 (3단계 폴백 체인):**
    - **1차 (CLI 트리거 — 권장):** 감지된 CLI(`agy` 또는 `antigravity`)를 비동기 실행하여 대상 워크스페이스에서 `/claude-handoff` 지시를 전달한다.
-     - `agy` 공식 비대화형 인자: `agy --print "<handoff prompt>" --mode <agy_mode> --print-timeout <timeout_sec>s [--sandbox]` (기본 `agy_mode: "accept-edits"`, `agy_sandbox: true`)
+     - `agy` 공식 비대화형 인자: `agy --print "<handoff prompt>" --mode <agy_mode> --print-timeout <timeout_sec>s [--sandbox] [--output-format stream-json]` (기본 `agy_mode: "accept-edits"`, `agy_sandbox: true`, `agy_stream_heartbeat: true`)
+     - `agy_stream_heartbeat` 활성 시 `stdout` NDJSON 스트림을 파싱(`attachStreamJsonHeartbeat`)해 진행 이벤트마다 `manifest.json`을 `RUNNING` + 최신 `updatedAt` 하트비트로 자동 갱신(장기 실행 작업의 오탐 Stale Lock 방지, `VERIFIED`/`FAILED` 종료 상태는 절대 덮어쓰지 않음).
      - 레거시 `antigravity` / `ag`: `run --workflow claude-handoff`
-     - 실행 로그는 `.ag-bridge/artifacts/<taskId>/agy-cli.log`에 기록하여 디버깅 가시성을 확보한다.
+     - 실행 로그는 민감 키 마스킹 후 `.ag-bridge/artifacts/<taskId>/agy-cli.log`에 기록하여 디버깅 가시성을 확보한다.
      - CLI가 인자 오류로 즉시 비정상 종료(exit code != 0)하면 2차로 자동 폴백한다.
    - **2차 (OS IPC / 창 포커스 폴백):**
      - `trigger_method`가 `cli_or_ipc`일 때 OS별 스크립트로 Antigravity 앱 활성화 및 프롬프트 주입 시도.

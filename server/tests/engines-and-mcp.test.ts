@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   getArtifactsDir,
@@ -14,6 +15,7 @@ import {
   validateCommandPolicy,
 } from '../src/engines/api-worker.js';
 import {
+  attachStreamJsonHeartbeat,
   buildCliInvocationArgs,
   buildCliSpawnSpec,
   SubscriptionEngine,
@@ -350,6 +352,36 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     expect(agyArgs).toContain('--print-timeout');
     expect(agyArgs).toContain('300s');
     expect(agyArgs).toContain('--sandbox');
+    expect(agyArgs).toContain('--output-format');
+    expect(agyArgs).toContain('stream-json');
+
+    const agyNoStreamArgs = buildCliInvocationArgs({
+      ...baseCtx,
+      config: {
+        ...DEFAULT_BRIDGE_CONFIG,
+        subscription: { ...DEFAULT_BRIDGE_CONFIG.subscription, agy_stream_heartbeat: false },
+      },
+      detection: {
+        configuredMode: 'auto',
+        resolvedMode: 'subscription',
+        platform: 'win32',
+        subscription: {
+          detected: true,
+          cliBinary: 'agy',
+          cliPath: 'C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe',
+          triggerMethod: 'cli_or_ipc',
+        },
+        api: {
+          configured: false,
+          source: 'none',
+          envVarName: 'GEMINI_API_KEY',
+          model: 'gemini-2.5-pro',
+          maxTurns: 15,
+        },
+        recommendations: [],
+      },
+    });
+    expect(agyNoStreamArgs).not.toContain('stream-json');
 
     const legacyArgs = buildCliInvocationArgs({
       ...baseCtx,
@@ -388,6 +420,59 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     const winExeSpec = buildCliSpawnSpec('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe', agyArgs, 'win32');
     expect(winExeSpec.command).toBe('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe');
     expect(winExeSpec.args).toEqual(agyArgs);
+  });
+
+  it('TC-U12: attachStreamJsonHeartbeat parses split NDJSON, updates manifest heartbeat, masks logs, and never overwrites VERIFIED', () => {
+    const initialTime = '2026-01-01T00:00:00.000Z';
+    writeManifest(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-hb-1',
+      title: 'Stream heartbeat test',
+      mode: 'subscription',
+      status: 'DISPATCHED',
+      lockedPaths: ['src/ui/'],
+      createdAt: initialTime,
+      updatedAt: initialTime,
+      artifacts: [],
+    });
+
+    const logFilePath = path.join(getArtifactsDir(tmpRoot, 'ag-hb-1'), 'agy-cli.log');
+    const stream = new PassThrough();
+    const seenEvents: Array<Record<string, unknown>> = [];
+
+    const handle = attachStreamJsonHeartbeat(stream, {
+      workspaceRoot: tmpRoot,
+      taskId: 'ag-hb-1',
+      logFilePath,
+      minHeartbeatIntervalMs: 0,
+      onEvent: (ev) => seenEvents.push(ev),
+    });
+
+    // Feed split JSON chunks + malformed non-JSON line + secret token
+    stream.write('{"type":"turn_start","step":1');
+    stream.write('}\nnot-json-diagnostic-line AIzaSySecretTokenLeakTest1234567890\n');
+    stream.write('{"type":"tool_call","name":"write_file"}\n');
+
+    expect(seenEvents.length).toBe(2);
+    const updated = readManifest(tmpRoot);
+    expect(updated?.status).toBe('RUNNING');
+    expect(updated?.updatedAt).not.toBe(initialTime);
+
+    const logContent = fs.readFileSync(logFilePath, 'utf8');
+    expect(logContent).toContain('[REDACTED]');
+    expect(logContent).not.toContain('AIzaSySecretTokenLeakTest');
+
+    // Mark terminal VERIFIED, then emit late stream event -> must NOT revert to RUNNING
+    writeManifest(tmpRoot, {
+      ...updated!,
+      status: 'VERIFIED',
+      updatedAt: '2026-11-22T23:00:00.000Z',
+    });
+    stream.write('{"type":"late_event"}\n');
+    stream.end();
+    handle.stop();
+
+    expect(readManifest(tmpRoot)?.status).toBe('VERIFIED');
   });
 
   it('API worker recovers from transient 429 retry, nudges build verification, slices read_file, and blocks .env reads', async () => {
