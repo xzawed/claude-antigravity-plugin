@@ -28,7 +28,10 @@ npm install
 npm run build        # TypeScript 컴파일 -> server/dist/
 npm run typecheck    # Strict 타입 검사 (tsc --noEmit)
 npm test             # 단위·보안·통합·Stdio MCP 테스트 실행
+npm run verify       # 실환경 매니페스트·cli-init·라이브 Stdio MCP 헬스체크
 ```
+
+> **CI / PR 워크플로우:** 모든 변경은 전용 브랜치 → GitHub Pull Request 단위로 진행하며, `.github/workflows/ci.yml`이 Ubuntu/Windows/macOS × Node 20/22 매트릭스에서 빌드·테스트·문서 링크 무결성을 자동 검증합니다.
 
 ### Claude Code 플러그인 등록
 

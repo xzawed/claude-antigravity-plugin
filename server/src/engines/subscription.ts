@@ -1,6 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import {
+  getArtifactsDir,
   getBridgeDir,
   listTaskArtifacts,
   readManifest,
@@ -71,27 +73,68 @@ function tryDesktopNotify(title: string, message: string, platform: NodeJS.Platf
   }
 }
 
+export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
+  const { cliBinary } = ctx.detection.subscription;
+  const prompt = buildHandoffPrompt(ctx.manifest.taskId);
+
+  if (cliBinary === 'agy') {
+    const args = [
+      '--print',
+      prompt,
+      '--mode',
+      ctx.config.subscription.agy_mode,
+      '--print-timeout',
+      `${ctx.config.subscription.timeout_sec}s`,
+    ];
+    if (ctx.config.subscription.agy_sandbox) {
+      args.push('--sandbox');
+    }
+    return args;
+  }
+
+  return ['run', '--workflow', 'claude-handoff'];
+}
+
 async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
-  const { cliBinary, cliPath } = ctx.detection.subscription;
+  const { cliPath } = ctx.detection.subscription;
   if (!cliPath) {
     return false;
   }
 
-  const prompt = buildHandoffPrompt(ctx.manifest.taskId);
-  const args =
-    cliBinary === 'agy'
-      ? ['--prompt', prompt]
-      : ['run', '--workflow', 'claude-handoff'];
+  const args = buildCliInvocationArgs(ctx);
+
+  let logFd: number | null = null;
+  try {
+    const artDir = getArtifactsDir(ctx.workspaceRoot, ctx.manifest.taskId);
+    fs.mkdirSync(artDir, { recursive: true });
+    logFd = fs.openSync(path.join(artDir, 'agy-cli.log'), 'a');
+  } catch {
+    logFd = null;
+  }
 
   return new Promise<boolean>((resolve) => {
     let settled = false;
+    const closeLogFd = (): void => {
+      if (logFd !== null) {
+        try {
+          fs.closeSync(logFd);
+        } catch {
+          // ignore
+        }
+        logFd = null;
+      }
+    };
+
     try {
       const child = spawn(cliPath, args, {
         cwd: ctx.workspaceRoot,
-        stdio: 'ignore',
+        stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
         detached: true,
         shell: false,
       });
+
+      // Child inherited logFd; close parent descriptor immediately
+      closeLogFd();
 
       child.once('error', () => {
         if (!settled) {
@@ -120,6 +163,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
         }
       }, 400).unref();
     } catch {
+      closeLogFd();
       if (!settled) {
         settled = true;
         resolve(false);

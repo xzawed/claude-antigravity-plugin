@@ -46,6 +46,25 @@ export function getDefaultDetectorDeps(): DetectorDeps {
   };
 }
 
+function getDefaultCliCandidates(deps: DetectorDeps): Array<{ binary: string; path: string }> {
+  if (deps.platform === 'win32') {
+    const localAppData = deps.env.LOCALAPPDATA ?? path.join(deps.homedir, 'AppData', 'Local');
+    return [
+      { binary: 'agy', path: path.join(localAppData, 'agy', 'bin', 'agy.exe') },
+      { binary: 'agy', path: path.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy.exe') },
+      { binary: 'agy', path: path.join(deps.homedir, '.local', 'bin', 'agy.exe') },
+      { binary: 'antigravity', path: path.join(localAppData, 'Programs', 'Antigravity', 'bin', 'antigravity.cmd') },
+    ];
+  }
+  return [
+    { binary: 'agy', path: path.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy') },
+    { binary: 'agy', path: path.join(deps.homedir, '.local', 'bin', 'agy') },
+    { binary: 'agy', path: '/usr/local/bin/agy' },
+    { binary: 'antigravity', path: path.join(deps.homedir, '.local', 'bin', 'antigravity') },
+    { binary: 'antigravity', path: '/usr/local/bin/antigravity' },
+  ];
+}
+
 function getDefaultAppCandidates(deps: DetectorDeps): string[] {
   if (deps.platform === 'darwin') {
     return [
@@ -86,7 +105,7 @@ export function detectSubscriptionApp(
     }
   }
 
-  // 2. CLI binaries in priority order (ADR-003: agy -> antigravity -> ag)
+  // 2. CLI binaries via PATH (ADR-003: agy -> antigravity -> ag)
   let cliBinary: string | undefined;
   let cliPath: string | undefined;
   for (const bin of ['agy', 'antigravity', 'ag']) {
@@ -95,6 +114,17 @@ export function detectSubscriptionApp(
       cliBinary = bin;
       cliPath = found;
       break;
+    }
+  }
+
+  // 2b. Fallback to standard known CLI installation paths (handles stripped MCP host PATH)
+  if (!cliPath) {
+    for (const candidate of getDefaultCliCandidates(deps)) {
+      if (deps.existsSync(candidate.path)) {
+        cliBinary = candidate.binary;
+        cliPath = candidate.path;
+        break;
+      }
     }
   }
 
