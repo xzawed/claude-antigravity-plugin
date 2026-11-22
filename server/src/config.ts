@@ -25,6 +25,7 @@ export const PartialBridgeConfigSchema = z
         poll_interval_ms: z.number().int().min(100).max(30000).optional(),
         agy_mode: AgyModeSchema.optional(),
         agy_sandbox: z.boolean().optional(),
+        agy_stream_heartbeat: z.boolean().optional(),
       })
       .partial()
       .optional(),

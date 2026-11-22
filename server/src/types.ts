@@ -45,6 +45,7 @@ export interface SubscriptionConfig {
   poll_interval_ms: number;
   agy_mode: AgyExecutionMode;
   agy_sandbox: boolean;
+  agy_stream_heartbeat: boolean;
 }
 
 export interface ApiConfig {
@@ -72,6 +73,7 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
     poll_interval_ms: 2000,
     agy_mode: 'accept-edits',
     agy_sandbox: true,
+    agy_stream_heartbeat: true,
   },
   api: {
     api_key_env: 'GEMINI_API_KEY',

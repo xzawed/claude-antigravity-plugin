@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Readable } from 'node:stream';
 import {
   getArtifactsDir,
   getBridgeDir,
@@ -10,6 +11,7 @@ import {
   syncHandoffTemplate,
   writeManifest,
 } from '../bridge-fs.js';
+import { maskSecrets } from '../config.js';
 import { listGitChangedFiles } from '../git-guard.js';
 import { BridgeManifest } from '../types.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
@@ -73,6 +75,105 @@ function tryDesktopNotify(title: string, message: string, platform: NodeJS.Platf
   }
 }
 
+export interface StreamHeartbeatOptions {
+  workspaceRoot: string;
+  taskId: string;
+  logFilePath?: string;
+  minHeartbeatIntervalMs?: number;
+  onEvent?: (event: Record<string, unknown>) => void;
+}
+
+export function attachStreamJsonHeartbeat(
+  stream: Readable,
+  options: StreamHeartbeatOptions,
+): { stop: () => void } {
+  const minInterval = options.minHeartbeatIntervalMs ?? 2000;
+  let buffer = '';
+  let lastBeatMs = 0;
+  let stopped = false;
+
+  const appendLog = (line: string): void => {
+    if (!options.logFilePath) return;
+    try {
+      fs.mkdirSync(path.dirname(options.logFilePath), { recursive: true });
+      fs.appendFileSync(options.logFilePath, `${maskSecrets(line)}\n`, 'utf8');
+    } catch {
+      // ignore non-fatal log write failure
+    }
+  };
+
+  const maybeBeatManifest = (): void => {
+    const nowMs = Date.now();
+    if (nowMs - lastBeatMs < minInterval) {
+      return;
+    }
+    try {
+      const current = readManifest(options.workspaceRoot);
+      if (!current || current.taskId !== options.taskId) {
+        return;
+      }
+      // Never overwrite terminal VERIFIED or FAILED statuses
+      if (current.status !== 'DISPATCHED' && current.status !== 'RUNNING') {
+        return;
+      }
+      lastBeatMs = nowMs;
+      writeManifest(options.workspaceRoot, {
+        ...current,
+        status: 'RUNNING',
+        updatedAt: new Date(nowMs).toISOString(),
+      });
+    } catch {
+      // ignore transient manifest lock errors
+    }
+  };
+
+  const processLine = (rawLine: string): void => {
+    const trimmed = rawLine.trim();
+    if (!trimmed) return;
+    appendLog(trimmed);
+
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        options.onEvent?.(parsed as Record<string, unknown>);
+        maybeBeatManifest();
+      }
+    } catch {
+      // Non-JSON diagnostic lines are still logged but do not break stream parsing
+    }
+  };
+
+  const onData = (chunk: Buffer | string): void => {
+    if (stopped) return;
+    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      processLine(line);
+    }
+  };
+
+  const onEnd = (): void => {
+    if (stopped) return;
+    if (buffer.trim()) {
+      processLine(buffer);
+      buffer = '';
+    }
+  };
+
+  stream.on('data', onData);
+  stream.on('end', onEnd);
+
+  return {
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      stream.off('data', onData);
+      stream.off('end', onEnd);
+    },
+  };
+}
+
 export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
   const { cliBinary } = ctx.detection.subscription;
   const prompt = buildHandoffPrompt(ctx.manifest.taskId);
@@ -88,6 +189,9 @@ export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
     ];
     if (ctx.config.subscription.agy_sandbox) {
       args.push('--sandbox');
+    }
+    if (ctx.config.subscription.agy_stream_heartbeat) {
+      args.push('--output-format', 'stream-json');
     }
     return args;
   }
@@ -116,21 +220,27 @@ export function buildCliSpawnSpec(
 }
 
 async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
-  const { cliPath } = ctx.detection.subscription;
+  const { cliBinary, cliPath } = ctx.detection.subscription;
   if (!cliPath) {
     return false;
   }
 
   const args = buildCliInvocationArgs(ctx);
   const spawnSpec = buildCliSpawnSpec(cliPath, args, ctx.detection.platform);
+  const useStreamHeartbeat =
+    cliBinary === 'agy' && ctx.config.subscription.agy_stream_heartbeat;
+
+  const artDir = getArtifactsDir(ctx.workspaceRoot, ctx.manifest.taskId);
+  const logFilePath = path.join(artDir, 'agy-cli.log');
 
   let logFd: number | null = null;
-  try {
-    const artDir = getArtifactsDir(ctx.workspaceRoot, ctx.manifest.taskId);
-    fs.mkdirSync(artDir, { recursive: true });
-    logFd = fs.openSync(path.join(artDir, 'agy-cli.log'), 'a');
-  } catch {
-    logFd = null;
+  if (!useStreamHeartbeat) {
+    try {
+      fs.mkdirSync(artDir, { recursive: true });
+      logFd = fs.openSync(logFilePath, 'a');
+    } catch {
+      logFd = null;
+    }
   }
 
   return new Promise<boolean>((resolve) => {
@@ -149,8 +259,12 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
     try {
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: ctx.workspaceRoot,
-        stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
-        detached: true,
+        stdio: useStreamHeartbeat
+          ? ['ignore', 'pipe', 'pipe']
+          : logFd !== null
+            ? ['ignore', logFd, logFd]
+            : 'ignore',
+        detached: !useStreamHeartbeat,
         shell: false,
         windowsHide: spawnSpec.windowsHide,
       });
@@ -158,7 +272,28 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
       // Child inherited logFd; close parent descriptor immediately
       closeLogFd();
 
+      let heartbeatHandle: { stop: () => void } | null = null;
+      if (useStreamHeartbeat && child.stdout) {
+        heartbeatHandle = attachStreamJsonHeartbeat(child.stdout, {
+          workspaceRoot: ctx.workspaceRoot,
+          taskId: ctx.manifest.taskId,
+          logFilePath,
+        });
+      }
+      if (useStreamHeartbeat && child.stderr) {
+        child.stderr.on('data', (chunk: Buffer | string) => {
+          try {
+            fs.mkdirSync(artDir, { recursive: true });
+            const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+            fs.appendFileSync(logFilePath, maskSecrets(text), 'utf8');
+          } catch {
+            // ignore
+          }
+        });
+      }
+
       child.once('error', () => {
+        heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
           resolve(false);
@@ -166,6 +301,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
       });
 
       child.once('exit', (code) => {
+        heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
           resolve(code === 0);
@@ -176,10 +312,12 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
       setTimeout(() => {
         if (!settled) {
           settled = true;
-          try {
-            child.unref();
-          } catch {
-            // ignore
+          if (!useStreamHeartbeat) {
+            try {
+              child.unref();
+            } catch {
+              // ignore
+            }
           }
           resolve(true);
         }
