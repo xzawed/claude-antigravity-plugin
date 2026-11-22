@@ -11,6 +11,7 @@ import {
 const ExecutionModeSchema = z.enum(['auto', 'subscription', 'api']);
 const GitGuardPolicySchema = z.enum(['best_effort', 'required']);
 const TriggerMethodSchema = z.enum(['cli_or_ipc', 'cli_only', 'clipboard']);
+const AgyModeSchema = z.enum(['accept-edits', 'auto', 'plan']);
 
 export const PartialBridgeConfigSchema = z
   .object({
@@ -22,6 +23,8 @@ export const PartialBridgeConfigSchema = z
         trigger_method: TriggerMethodSchema.optional(),
         timeout_sec: z.number().int().min(1).max(3600).optional(),
         poll_interval_ms: z.number().int().min(100).max(30000).optional(),
+        agy_mode: AgyModeSchema.optional(),
+        agy_sandbox: z.boolean().optional(),
       })
       .partial()
       .optional(),

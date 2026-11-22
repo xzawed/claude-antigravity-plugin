@@ -13,12 +13,15 @@ import {
   ModelTurnResponse,
   validateCommandPolicy,
 } from '../src/engines/api-worker.js';
-import { SubscriptionEngine } from '../src/engines/subscription.js';
+import {
+  buildCliInvocationArgs,
+  SubscriptionEngine,
+} from '../src/engines/subscription.js';
 import {
   handleCheckEnvironment,
   handleDelegateToAntigravity,
 } from '../src/index.js';
-import { AgPluginError } from '../src/types.js';
+import { AgPluginError, DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
 describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
   let tmpRoot: string;
@@ -295,6 +298,81 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;
     }
+  });
+
+  it('builds official agy non-interactive CLI flags and legacy antigravity workflow flags', () => {
+    const baseCtx = {
+      workspaceRoot: tmpRoot,
+      pluginRoot,
+      manifest: {
+        schemaVersion: 1 as const,
+        taskId: 'ag-cli-flags-1',
+        title: 'CLI flags test',
+        mode: 'subscription' as const,
+        status: 'DISPATCHED' as const,
+        lockedPaths: ['src/ui/'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        artifacts: [],
+      },
+      config: DEFAULT_BRIDGE_CONFIG,
+      instructions: 'Build UI',
+      acceptanceCriteria: ['Works'],
+    };
+
+    const agyArgs = buildCliInvocationArgs({
+      ...baseCtx,
+      detection: {
+        configuredMode: 'auto',
+        resolvedMode: 'subscription',
+        platform: 'win32',
+        subscription: {
+          detected: true,
+          cliBinary: 'agy',
+          cliPath: 'C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe',
+          triggerMethod: 'cli_or_ipc',
+        },
+        api: {
+          configured: false,
+          source: 'none',
+          envVarName: 'GEMINI_API_KEY',
+          model: 'gemini-2.5-pro',
+          maxTurns: 15,
+        },
+        recommendations: [],
+      },
+    });
+    expect(agyArgs[0]).toBe('--print');
+    expect(agyArgs[1]).toContain('/claude-handoff');
+    expect(agyArgs).toContain('--mode');
+    expect(agyArgs).toContain('accept-edits');
+    expect(agyArgs).toContain('--print-timeout');
+    expect(agyArgs).toContain('300s');
+    expect(agyArgs).toContain('--sandbox');
+
+    const legacyArgs = buildCliInvocationArgs({
+      ...baseCtx,
+      detection: {
+        configuredMode: 'auto',
+        resolvedMode: 'subscription',
+        platform: 'darwin',
+        subscription: {
+          detected: true,
+          cliBinary: 'antigravity',
+          cliPath: '/usr/local/bin/antigravity',
+          triggerMethod: 'cli_or_ipc',
+        },
+        api: {
+          configured: false,
+          source: 'none',
+          envVarName: 'GEMINI_API_KEY',
+          model: 'gemini-2.5-pro',
+          maxTurns: 15,
+        },
+        recommendations: [],
+      },
+    });
+    expect(legacyArgs).toEqual(['run', '--workflow', 'claude-handoff']);
   });
 
   it('check_ag_environment returns structured bridge and git status', async () => {

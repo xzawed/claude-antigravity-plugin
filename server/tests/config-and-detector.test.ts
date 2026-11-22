@@ -43,6 +43,22 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(assertResolvedMode(res)).toBe('subscription');
   });
 
+  it('detects agy from standard install location even when MCP host strips PATH', () => {
+    const winAgy = path.join('C:\\Users\\tester', 'AppData', 'Local', 'agy', 'bin', 'agy.exe');
+    const deps = makeDeps({
+      platform: 'win32',
+      homedir: 'C:\\Users\\tester',
+      env: {},
+      findBinary: () => undefined,
+      existsSync: (p) => p === winAgy,
+    });
+
+    const res = detectEnvironment(DEFAULT_BRIDGE_CONFIG, undefined, deps);
+    expect(res.resolvedMode).toBe('subscription');
+    expect(res.subscription.cliBinary).toBe('agy');
+    expect(res.subscription.cliPath).toBe(winAgy);
+  });
+
   it('TC-U02: falls back to api mode when subscription app/CLI is absent but GEMINI_API_KEY is set', () => {
     const deps = makeDeps({
       platform: 'darwin',

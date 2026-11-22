@@ -36,11 +36,15 @@ export class AgPluginError extends Error {
   }
 }
 
+export type AgyExecutionMode = 'accept-edits' | 'auto' | 'plan';
+
 export interface SubscriptionConfig {
   app_path: string;
   trigger_method: TriggerMethod;
   timeout_sec: number;
   poll_interval_ms: number;
+  agy_mode: AgyExecutionMode;
+  agy_sandbox: boolean;
 }
 
 export interface ApiConfig {
@@ -66,6 +70,8 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
     trigger_method: 'cli_or_ipc',
     timeout_sec: 300,
     poll_interval_ms: 2000,
+    agy_mode: 'accept-edits',
+    agy_sandbox: true,
   },
   api: {
     api_key_env: 'GEMINI_API_KEY',
