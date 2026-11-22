@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-antigravity-plugin",
+  "owner": {
+    "name": "xzawed"
+  },
+  "plugins": [
+    {
+      "name": "antigravity-delegate",
+      "description": "Delegate frontend UI implementation, multi-file tasks, and browser E2E visual verification from Claude Code to Antigravity (local Subscription CLI/App or Gemini API).",
+      "source": "./"
+    }
+  ]
+}
