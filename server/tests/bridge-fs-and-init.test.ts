@@ -4,7 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   acquireBridgeLock,
+  archiveManifest,
+  atomicWriteFile,
   ensureGitignoreEntry,
+  getBridgeDir,
+  getHistoryDir,
   readArchivedManifest,
   writeManifest,
 } from '../src/bridge-fs.js';
@@ -111,5 +115,51 @@ describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10)', () => {
     });
     expect(second.skippedCustomTemplates).toContain(handoffPath);
     expect(fs.readFileSync(handoffPath, 'utf8')).toBe('# Custom user workflow\n');
+
+    // Outdated plugin template version should upgrade automatically
+    fs.writeFileSync(handoffPath, '<!-- ag-plugin-template-version: 0.9.0 -->\n# Old\n', 'utf8');
+    const upgraded = runCliInit({
+      workspaceRoot: tmpRoot,
+      silent: true,
+      forceTemplate: false,
+      pluginRoot,
+    });
+    expect(upgraded.syncedTemplates).toContain(handoffPath);
+    expect(fs.readFileSync(handoffPath, 'utf8')).toContain('ag-plugin-template-version: 1.0.0');
+
+    // --force-template overwrites custom user file
+    fs.writeFileSync(handoffPath, '# Custom user workflow\n', 'utf8');
+    const forced = runCliInit({
+      workspaceRoot: tmpRoot,
+      silent: true,
+      forceTemplate: true,
+      pluginRoot,
+    });
+    expect(forced.syncedTemplates).toContain(handoffPath);
+    expect(fs.readFileSync(handoffPath, 'utf8')).toContain('ag-plugin-template-version: 1.0.0');
+  });
+
+  it('prunes history archive to 20 most recent tasks and leaves zero stray .tmp files', () => {
+    const target = path.join(getBridgeDir(tmpRoot), 'sample.json');
+    atomicWriteFile(target, '{"ok":true}\n');
+    const strayTmp = fs.readdirSync(getBridgeDir(tmpRoot)).filter((f) => f.endsWith('.tmp'));
+    expect(strayTmp).toEqual([]);
+
+    for (let i = 1; i <= 25; i++) {
+      archiveManifest(tmpRoot, {
+        schemaVersion: 1,
+        taskId: `ag-hist-${String(i).padStart(2, '0')}`,
+        title: `Task ${i}`,
+        mode: 'api',
+        status: 'VERIFIED',
+        lockedPaths: ['src/'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        artifacts: [],
+      });
+    }
+
+    const archivedFiles = fs.readdirSync(getHistoryDir(tmpRoot)).filter((f) => f.endsWith('.json'));
+    expect(archivedFiles.length).toBe(20);
   });
 });

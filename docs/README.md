@@ -29,6 +29,7 @@
 | **04. 구현** | `IMP-002` | [task-checklist.md](./04-implementation/task-checklist.md) | 구현 및 검증을 단계별로 추적하는 실행 체크리스트 | `Active` |
 | **04. 구현** | `IMP-003` | [session-handoff.md](./04-implementation/session-handoff.md) | 세션 간 컨텍스트 인계서 및 다음 세션 착수 가이드 | `Active` |
 | **05. 검증** | `VER-001` | [test-and-qa-plan.md](./05-verification/test-and-qa-plan.md) | 단위/통합/보안/크로스플랫폼 테스트 매트릭스 및 출시 게이트 | `Approved` |
+| **05. 검증** | `VER-002` | [verification-report.md](./05-verification/verification-report.md) | 실측 벤치마크, 발견 결함 수정 및 TDD 확장 검증 리포트 | `Approved` |
 | **06. ADR** | `ADR-IDX` | [06-adr/README.md](./06-adr/README.md) | 아키텍처 의사결정 기록 인덱스 및 템플릿 (`ADR-001` ~ `ADR-003`) | `Approved` |
 
 ---

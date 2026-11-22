@@ -95,6 +95,26 @@ export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
   return ['run', '--workflow', 'claude-handoff'];
 }
 
+export function buildCliSpawnSpec(
+  cliPath: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; windowsHide: boolean } {
+  // Node.js 20.12+/24 on Windows throws EINVAL when spawning .cmd/.bat with shell: false
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(cliPath)) {
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', cliPath, ...args],
+      windowsHide: true,
+    };
+  }
+  return {
+    command: cliPath,
+    args,
+    windowsHide: true,
+  };
+}
+
 async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
   const { cliPath } = ctx.detection.subscription;
   if (!cliPath) {
@@ -102,6 +122,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
   }
 
   const args = buildCliInvocationArgs(ctx);
+  const spawnSpec = buildCliSpawnSpec(cliPath, args, ctx.detection.platform);
 
   let logFd: number | null = null;
   try {
@@ -126,11 +147,12 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
     };
 
     try {
-      const child = spawn(cliPath, args, {
+      const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: ctx.workspaceRoot,
         stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
         detached: true,
         shell: false,
+        windowsHide: spawnSpec.windowsHide,
       });
 
       // Child inherited logFd; close parent descriptor immediately

@@ -3,7 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, maskSecrets } from '../src/config.js';
-import { assertResolvedMode, detectEnvironment, DetectorDeps } from '../src/detector.js';
+import {
+  assertResolvedMode,
+  detectEnvironment,
+  DetectorDeps,
+  findBinaryInPath,
+} from '../src/detector.js';
 import { AgPluginError, DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
 function makeDeps(overrides: Partial<DetectorDeps> = {}): DetectorDeps {
@@ -57,6 +62,26 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(res.resolvedMode).toBe('subscription');
     expect(res.subscription.cliBinary).toBe('agy');
     expect(res.subscription.cliPath).toBe(winAgy);
+  });
+
+  it('findBinaryInPath resolves mixed-case Windows Path and PATHEXT without spawning subprocesses', () => {
+    const winBin = path.win32.join('C:\\CustomBin', 'agy.exe');
+    const foundWin = findBinaryInPath(
+      'agy',
+      'win32',
+      { Path: 'C:\\Other;C:\\CustomBin', PATHEXT: '.EXE;.CMD' },
+      (p) => p === winBin,
+    );
+    expect(foundWin).toBe(winBin);
+
+    const posixBin = path.posix.join('/usr/local/bin', 'agy');
+    const foundPosix = findBinaryInPath(
+      'agy',
+      'linux',
+      { PATH: '/bin:/usr/local/bin' },
+      (p) => p === posixBin,
+    );
+    expect(foundPosix).toBe(posixBin);
   });
 
   it('TC-U02: falls back to api mode when subscription app/CLI is absent but GEMINI_API_KEY is set', () => {

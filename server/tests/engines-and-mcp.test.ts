@@ -15,6 +15,7 @@ import {
 } from '../src/engines/api-worker.js';
 import {
   buildCliInvocationArgs,
+  buildCliSpawnSpec,
   SubscriptionEngine,
 } from '../src/engines/subscription.js';
 import {
@@ -373,6 +374,165 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       },
     });
     expect(legacyArgs).toEqual(['run', '--workflow', 'claude-handoff']);
+
+    // Windows .cmd/.bat spawn spec must wrap via cmd.exe /d /s /c to avoid Node 20+/24 EINVAL
+    const winCmdSpec = buildCliSpawnSpec('C:\\Program Files\\Antigravity\\bin\\antigravity.cmd', legacyArgs, 'win32');
+    expect(winCmdSpec.command).toBe('cmd.exe');
+    expect(winCmdSpec.args.slice(0, 4)).toEqual([
+      '/d',
+      '/s',
+      '/c',
+      'C:\\Program Files\\Antigravity\\bin\\antigravity.cmd',
+    ]);
+
+    const winExeSpec = buildCliSpawnSpec('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe', agyArgs, 'win32');
+    expect(winExeSpec.command).toBe('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe');
+    expect(winExeSpec.args).toEqual(agyArgs);
+  });
+
+  it('API worker recovers from transient 429 retry, nudges build verification, slices read_file, and blocks .env reads', async () => {
+    fs.writeFileSync(path.join(tmpRoot, '.env'), 'TOP_SECRET=do-not-read\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'src', 'ui', 'types.ts'), 'line1\nline2\nline3\nline4\n', 'utf8');
+
+    let attempts = 0;
+    let step = 0;
+    let sawBuildNudge = false;
+    let sawEnvReadBlocked = false;
+    let sawSlicedContent = false;
+
+    const apiEngine = new ApiWorkerEngine({
+      retryBaseDelayMs: 1,
+      adapterFactory: () => ({
+        generateTurn: async ({ contents }) => {
+          // Inspect previous tool responses & user messages
+          const serialized = JSON.stringify(contents);
+          if (serialized.includes('PROTECTED_PATH_BLOCKED')) {
+            sawEnvReadBlocked = true;
+          }
+          if (serialized.includes('line2\\nline3')) {
+            sawSlicedContent = true;
+          }
+          if (serialized.includes('Before finalizing, please run `npx tsc --noEmit`')) {
+            sawBuildNudge = true;
+          }
+
+          // Simulate transient 429 on very first call
+          if (attempts < 2) {
+            attempts += 1;
+            throw new Error('429 RESOURCE_EXHAUSTED transient rate limit');
+          }
+
+          step += 1;
+          if (step === 1) {
+            return {
+              functionCalls: [
+                { name: 'read_file', args: { path: '.env' } },
+                { name: 'read_file', args: { path: 'src/ui/types.ts', startLine: 2, endLine: 3 } },
+                { name: 'write_file', args: { path: 'src/ui/Badge.tsx', content: 'export const Badge = () => null;\n' } },
+              ],
+            };
+          }
+          if (step === 2) {
+            // Try to finish without running build/tsc -> should trigger verification nudge
+            return { text: 'Premature done before build check' };
+          }
+          if (step === 3) {
+            return {
+              functionCalls: [{ name: 'run_command', args: { command: 'npx tsc --noEmit' } }],
+            };
+          }
+          return { text: 'Verified Badge component after tsc check.' };
+        },
+      }),
+      commandRunner: async () => ({
+        exitCode: 0,
+        stdout: '0 errors',
+        stderr: '',
+        timedOut: false,
+      }),
+    });
+
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = 'AIzaSyRetryTestSecretKey1234567890abcd';
+    try {
+      const res = await handleDelegateToAntigravity(
+        {
+          title: 'Retry & nudge verification',
+          instructions: 'Read types, implement Badge, verify build.',
+          lockedPaths: ['src/ui/'],
+          acceptanceCriteria: ['Badge compiles cleanly'],
+          modeOverride: 'api',
+          workspaceRoot: tmpRoot,
+        },
+        {
+          pluginRoot,
+          apiWorkerEngine: apiEngine,
+          detectorDeps: {
+            platform: 'linux',
+            env: { GEMINI_API_KEY: 'AIzaSyRetryTestSecretKey1234567890abcd' },
+            homedir: '/home/tester',
+            existsSync: () => false,
+            findBinary: () => undefined,
+          },
+        },
+      );
+
+      expect(res.ok).toBe(true);
+      expect(attempts).toBe(2);
+      expect(sawEnvReadBlocked).toBe(true);
+      expect(sawSlicedContent).toBe(true);
+      expect(sawBuildNudge).toBe(true);
+      expect(res.reportMarkdown).not.toContain('AIzaSyRetryTestSecretKey');
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+    }
+  });
+
+  it('API worker returns masked GEMINI_API_ERROR on non-retryable API failure', async () => {
+    const dummyKey = 'AIzaSyFatalErrorKey1234567890abcdefg';
+    const apiEngine = new ApiWorkerEngine({
+      retryBaseDelayMs: 1,
+      adapterFactory: () => ({
+        generateTurn: async () => {
+          throw new Error(`401 Unauthorized for key ${dummyKey}`);
+        },
+      }),
+    });
+
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = dummyKey;
+    try {
+      const res = await handleDelegateToAntigravity(
+        {
+          title: 'Fatal API error test',
+          instructions: 'Verify fatal error masking.',
+          lockedPaths: ['src/ui/'],
+          acceptanceCriteria: ['Fails cleanly'],
+          modeOverride: 'api',
+          workspaceRoot: tmpRoot,
+        },
+        {
+          pluginRoot,
+          apiWorkerEngine: apiEngine,
+          detectorDeps: {
+            platform: 'linux',
+            env: { GEMINI_API_KEY: dummyKey },
+            homedir: '/home/tester',
+            existsSync: () => false,
+            findBinary: () => undefined,
+          },
+        },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(res.errorCode).toBe('GEMINI_API_ERROR');
+      expect(res.errorMessage).not.toContain(dummyKey);
+      expect(res.errorMessage).toContain('[REDACTED]');
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+    }
   });
 
   it('check_ag_environment returns structured bridge and git status', async () => {
