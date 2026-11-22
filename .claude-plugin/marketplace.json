@@ -1,6 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "claude-antigravity-plugin",
+  "description": "Official marketplace catalog for claude-antigravity-plugin (dual-engine MCP delegation from Claude Code to Antigravity).",
   "owner": {
     "name": "xzawed"
   },

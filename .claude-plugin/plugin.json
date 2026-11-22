@@ -2,7 +2,9 @@
   "name": "antigravity-delegate",
   "version": "1.0.0",
   "description": "Delegate UI implementation, multi-file frontend tasks, and browser E2E verification from Claude Code to Antigravity (Subscription App or Gemini API).",
-  "author": "xzawed",
+  "author": {
+    "name": "xzawed"
+  },
   "license": "Apache-2.0",
   "keywords": [
     "antigravity",
