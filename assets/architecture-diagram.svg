@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 520" width="1120" height="520" role="img" aria-label="claude-antigravity-plugin System Architecture Diagram">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1120"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accentPurple" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="accentBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="accentGreen" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="accentAmber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34D399"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#FBBF24"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #F8FAFC; }
+    .subtitle { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #94A3B8; }
+    .card-title { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #F1F5F9; }
+    .card-sub { font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #93C5FD; }
+    .body { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #CBD5E1; }
+    .badge { font: 700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #0B1120; }
+    .label { font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #94A3B8; }
+  </style>
+
+  <!-- Canvas -->
+  <rect width="1120" height="520" rx="16" fill="url(#bg)" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="42" class="title">Dual-Engine Delegation Architecture</text>
+  <text x="32" y="64" class="subtitle">Claude Code (Orchestrator)  ↔  Embedded Stdio MCP Server  ↔  Antigravity (Subscription CLI / Gemini API)</text>
+
+  <!-- Column 1: Claude Code -->
+  <rect x="32" y="92" width="240" height="310" rx="12" fill="#131C31" stroke="#6366F1" stroke-width="1.5"/>
+  <rect x="32" y="92" width="240" height="38" rx="12" fill="url(#accentPurple)"/>
+  <rect x="32" y="118" width="240" height="12" fill="url(#accentPurple)"/>
+  <text x="50" y="116" class="card-title">1. Claude Code Session</text>
+
+  <rect x="48" y="146" width="208" height="66" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="60" y="166" class="card-sub">skills/ag-delegate/SKILL.md</text>
+  <text x="60" y="185" class="body">Autonomous delegation criteria</text>
+  <text x="60" y="201" class="body">&amp; mode-aware QA rules</text>
+
+  <rect x="48" y="226" width="208" height="76" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="60" y="246" class="card-sub">Slash Commands</text>
+  <text x="60" y="265" class="body">• /ag-delegate (manual)</text>
+  <text x="60" y="281" class="body">• /ag-config  (mode / model)</text>
+  <text x="60" y="295" class="body">• /ag-status  (diagnostics)</text>
+
+  <rect x="48" y="316" width="208" height="68" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="60" y="336" class="card-sub">hooks/hooks.json</text>
+  <text x="60" y="355" class="body">SessionStart auto-init hook</text>
+  <text x="60" y="371" class="body">cli-init.js --silent (&lt;100ms)</text>
+
+  <!-- Arrow 1 -> 2 -->
+  <line x1="272" y1="210" x2="322" y2="210" stroke="#60A5FA" stroke-width="2.2" marker-end="url(#arrowBlue)"/>
+  <text x="278" y="198" class="label">Stdio</text>
+  <text x="279" y="228" class="label">MCP</text>
+
+  <!-- Column 2: Embedded MCP Server -->
+  <rect x="328" y="92" width="276" height="310" rx="12" fill="#131C31" stroke="#3B82F6" stroke-width="1.5"/>
+  <rect x="328" y="92" width="276" height="38" rx="12" fill="url(#accentBlue)"/>
+  <rect x="328" y="118" width="276" height="12" fill="url(#accentBlue)"/>
+  <text x="346" y="116" class="card-title">2. Embedded MCP Server</text>
+
+  <rect x="344" y="146" width="244" height="72" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="356" y="166" class="card-sub">3 Exposed MCP Tools</text>
+  <text x="356" y="185" class="body">• delegate_to_antigravity</text>
+  <text x="356" y="201" class="body">• check_ag_environment (162ms)</text>
+  <text x="356" y="213" class="body">• rollback_ag_task</text>
+
+  <rect x="344" y="230" width="244" height="74" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="356" y="250" class="card-sub">Safety &amp; Isolation Layer</text>
+  <text x="356" y="269" class="body">• Git Guard: git stash create pin</text>
+  <text x="356" y="285" class="body">• Path Guard: realpath lockedPaths</text>
+  <text x="356" y="298" class="body">• Secret Redaction ([REDACTED])</text>
+
+  <rect x="344" y="316" width="244" height="68" rx="8" fill="#0F172A" stroke="#334155"/>
+  <text x="356" y="336" class="card-sub">Mode Detector (auto)</text>
+  <text x="356" y="355" class="body">Pure-JS PATH + OS install paths</text>
+  <text x="356" y="371" class="body">Subscription Priority → API Fallback</text>
+
+  <!-- Branch Arrows 2 -> 3 -->
+  <path d="M 604 195 C 636 195, 636 165, 668 165" fill="none" stroke="#34D399" stroke-width="2.2" marker-end="url(#arrowGreen)"/>
+  <path d="M 604 295 C 636 295, 636 330, 668 330" fill="none" stroke="#FBBF24" stroke-width="2.2" marker-end="url(#arrowAmber)"/>
+
+  <!-- Column 3A: Subscription Engine -->
+  <rect x="674" y="92" width="414" height="146" rx="12" fill="#0F211E" stroke="#10B981" stroke-width="1.5"/>
+  <rect x="690" y="106" width="116" height="22" rx="11" fill="url(#accentGreen)"/>
+  <text x="703" y="121" class="badge">MODE A · PRIMARY</text>
+  <text x="818" y="122" class="card-title">Subscription Engine (Local)</text>
+
+  <text x="692" y="150" class="body">• Official agy CLI: --print --mode accept-edits --sandbox</text>
+  <text x="692" y="170" class="body">• 3-tier trigger: CLI → OS IPC → Clipboard + Desktop Notify</text>
+  <text x="692" y="190" class="body">• Built-in Browser Subagent E2E visual QA &amp; screenshots</text>
+  <text x="692" y="210" class="body">• Hybrid fs.watch + 2s polling watcher + agy-cli.log</text>
+
+  <!-- Column 3B: API Worker Engine -->
+  <rect x="674" y="256" width="414" height="146" rx="12" fill="#211A10" stroke="#F59E0B" stroke-width="1.5"/>
+  <rect x="690" y="270" width="124" height="22" rx="11" fill="url(#accentAmber)"/>
+  <text x="702" y="285" class="badge">MODE B · FALLBACK</text>
+  <text x="826" y="286" class="card-title">Headless Gemini API Worker</text>
+
+  <text x="692" y="314" class="body">• @google/genai SDK (default: gemini-2.5-pro, max 15 turns)</text>
+  <text x="692" y="334" class="body">• 4 scoped tools: read_file, write_file, list_dir, run_command</text>
+  <text x="692" y="354" class="body">• Command allowlist, 16KB tail cap, 429 exponential backoff</text>
+  <text x="692" y="374" class="body">• Automated tsc --noEmit &amp; project build verification nudge</text>
+
+  <!-- Bottom Bar: .ag-bridge SSOT -->
+  <rect x="32" y="424" width="1056" height="72" rx="12" fill="#131C31" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="52" y="452" class="card-title">Shared SSOT Bridge  (.ag-bridge/  —  auto-registered in .gitignore)</text>
+  <text x="52" y="476" class="card-sub">config.json   ·   manifest.json (atomic .tmp→rename)   ·   dispatch.md   ·   report.md   ·   artifacts/&lt;taskId&gt;/   ·   history/ (20-item FIFO)</text>
+
+  <!-- Return Arrow from Bridge to Claude -->
+  <line x1="880" y1="402" x2="880" y2="420" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrowBlue)"/>
+  <line x1="466" y1="402" x2="466" y2="420" stroke="#94A3B8" stroke-width="1.8" marker-end="url(#arrowBlue)"/>
+  <line x1="152" y1="424" x2="152" y2="406" stroke="#34D399" stroke-width="1.8" marker-end="url(#arrowGreen)"/>
+</svg>

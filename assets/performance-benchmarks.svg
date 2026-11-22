@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 430" width="1120" height="430" role="img" aria-label="Empirical Performance Benchmarks and Quality Metrics">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1120"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="barRed" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </linearGradient>
+    <linearGradient id="barGreen" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="barBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+
+  <style>
+    .title { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #F8FAFC; }
+    .subtitle { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #94A3B8; }
+    .kpi-num { font: 800 28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #F8FAFC; }
+    .kpi-accent-g { font: 800 28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #34D399; }
+    .kpi-accent-b { font: 800 28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #38BDF8; }
+    .kpi-accent-p { font: 800 28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #A78BFA; }
+    .kpi-label { font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #CBD5E1; }
+    .kpi-sub { font: 400 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #94A3B8; }
+    .bar-title { font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #E2E8F0; }
+    .bar-val { font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #F8FAFC; }
+    .target-lbl { font: 600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #FBBF24; }
+  </style>
+
+  <rect width="1120" height="430" rx="16" fill="url(#bg)" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="32" y="42" class="title">Empirical Verification &amp; Quality Benchmarks</text>
+  <text x="32" y="64" class="subtitle">Measured on Windows 11 · Node.js v24.14.1 · Live Stdio MCP Client + GitHub Actions 3-OS Matrix (VER-002)</text>
+
+  <!-- Top KPI Cards (4 columns) -->
+  <rect x="32" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
+  <text x="52" y="124" class="kpi-accent-g">4.0×</text>
+  <text x="52" y="148" class="kpi-label">check_ag_environment Speedup</text>
+  <text x="52" y="166" class="kpi-sub">652.9ms → 162.6ms avg</text>
+
+  <rect x="300" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
+  <text x="320" y="124" class="kpi-accent-b">33 / 33</text>
+  <text x="320" y="148" class="kpi-label">Automated TDD Tests Passing</text>
+  <text x="320" y="166" class="kpi-sub">6 suites · Unit + Security + E2E</text>
+
+  <rect x="568" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
+  <text x="588" y="124" class="kpi-accent-p">7 / 7</text>
+  <text x="588" y="148" class="kpi-label">Cross-Platform CI Matrix</text>
+  <text x="588" y="166" class="kpi-sub">Ubuntu · macOS · Win (Node 20/22)</text>
+
+  <rect x="836" y="86" width="252" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
+  <text x="856" y="124" class="kpi-accent-g">0</text>
+  <text x="856" y="148" class="kpi-label">npm audit Vulnerabilities</text>
+  <text x="856" y="166" class="kpi-sub">vitest 5.1 · zod 4.6 · MCP 1.27</text>
+
+  <!-- Latency Bar Chart Panel -->
+  <rect x="32" y="204" width="1056" height="202" rx="12" fill="#131C31" stroke="#1E293B"/>
+  <text x="52" y="232" class="bar-title">NFR-005 Real-World Latency Benchmark (Lower is Better, ms)</text>
+
+  <!-- Scale: x=290 is 0ms, x=1010 is 720ms (1px = 1ms) -->
+  <!-- Gridlines -->
+  <line x1="290" y1="250" x2="290" y2="380" stroke="#334155" stroke-width="1"/>
+  <line x1="590" y1="250" x2="590" y2="380" stroke="#FBBF24" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="556" y="246" class="target-lbl">300ms target</text>
+
+  <line x1="790" y1="250" x2="790" y2="380" stroke="#FBBF24" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text x="756" y="246" class="target-lbl">500ms target</text>
+
+  <!-- Row 1: check_ag_environment BEFORE -->
+  <text x="52" y="278" class="bar-title">check_ag_environment (Before)</text>
+  <rect x="290" y="261" width="653" height="24" rx="6" fill="url(#barRed)"/>
+  <text x="952" y="278" class="bar-val">652.9 ms (FAIL)</text>
+
+  <!-- Row 2: check_ag_environment AFTER -->
+  <text x="52" y="320" class="bar-title">check_ag_environment (After)</text>
+  <rect x="290" y="303" width="163" height="24" rx="6" fill="url(#barGreen)"/>
+  <text x="462" y="320" class="bar-val">162.6 ms (PASS · 67% headroom)</text>
+
+  <!-- Row 3: cli-init --silent -->
+  <text x="52" y="362" class="bar-title">cli-init.js --silent (SessionStart)</text>
+  <rect x="290" y="345" width="98" height="24" rx="6" fill="url(#barBlue)"/>
+  <text x="398" y="362" class="bar-val">98.0 ms (PASS · 67% headroom)</text>
+
+  <!-- X-axis labels -->
+  <text x="286" y="396" class="kpi-sub">0ms</text>
+  <text x="576" y="396" class="kpi-sub">300ms</text>
+  <text x="776" y="396" class="kpi-sub">500ms</text>
+  <text x="980" y="396" class="kpi-sub">700ms</text>
+</svg>
