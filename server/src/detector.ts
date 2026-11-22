@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,29 +19,60 @@ export interface DetectorDeps {
   findBinary: (name: string) => string | undefined;
 }
 
-function defaultFindBinary(name: string, platform: NodeJS.Platform): string | undefined {
-  const cmd = platform === 'win32' ? 'where' : 'which';
-  try {
-    const out = execFileSync(cmd, [name], {
-      encoding: 'utf8',
-      timeout: 2000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    const firstLine = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
-    return firstLine || undefined;
-  } catch {
+export function findBinaryInPath(
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  existsSyncFn: (p: string) => boolean = fs.existsSync,
+): string | undefined {
+  // Handle Windows case-insensitive PATH/Path env var lookup
+  const pathKey =
+    Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const rawPath = env[pathKey];
+  if (!rawPath) {
     return undefined;
   }
+
+  const dirs = rawPath
+    .split(path.delimiter)
+    .map((d) => d.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean);
+
+  const extensions =
+    platform === 'win32'
+      ? (env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+          .split(';')
+          .map((e) => e.trim().toLowerCase())
+          .filter(Boolean)
+      : [''];
+
+  for (const dir of dirs) {
+    for (const ext of extensions) {
+      const candidate =
+        ext && !name.toLowerCase().endsWith(ext)
+          ? path.join(dir, `${name}${ext}`)
+          : path.join(dir, name);
+      try {
+        if (existsSyncFn(candidate)) {
+          return candidate;
+        }
+      } catch {
+        // ignore unreadable path entries
+      }
+    }
+  }
+  return undefined;
 }
 
 export function getDefaultDetectorDeps(): DetectorDeps {
   const platform = process.platform;
+  const env = process.env;
   return {
     platform,
-    env: process.env,
+    env,
     homedir: os.homedir(),
     existsSync: (p: string) => fs.existsSync(p),
-    findBinary: (name: string) => defaultFindBinary(name, platform),
+    findBinary: (name: string) => findBinaryInPath(name, platform, env, fs.existsSync),
   };
 }
 

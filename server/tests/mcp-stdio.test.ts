@@ -125,4 +125,47 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       await client.close();
     }
   });
+
+  it('TC-I07: returns structured isError responses over clean stdio for missing rollback & protected lockedPaths', async () => {
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [distIndex],
+      cwd: tmpRoot,
+      stderr: 'pipe',
+    });
+    const client = new Client({ name: 'test-mcp-client-err', version: '1.0.0' });
+    await client.connect(transport);
+
+    try {
+      const rbErr = await client.callTool({
+        name: 'rollback_ag_task',
+        arguments: { taskId: 'nonexistent-task', workspaceRoot: tmpRoot },
+      });
+      expect(rbErr.isError).toBe(true);
+      const rbPayload = JSON.parse(
+        ((rbErr.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; errorCode: string };
+      expect(rbPayload.ok).toBe(false);
+      expect(rbPayload.errorCode).toBe('ROLLBACK_NO_CHECKPOINT');
+
+      const delErr = await client.callTool({
+        name: 'delegate_to_antigravity',
+        arguments: {
+          title: 'Protected path attack',
+          instructions: 'Attempt to lock .env for writing.',
+          lockedPaths: ['.env'],
+          acceptanceCriteria: ['Must be blocked'],
+          workspaceRoot: tmpRoot,
+        },
+      });
+      expect(delErr.isError).toBe(true);
+      const delPayload = JSON.parse(
+        ((delErr.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; errorCode: string };
+      expect(delPayload.ok).toBe(false);
+      expect(delPayload.errorCode).toBe('PROTECTED_PATH_BLOCKED');
+    } finally {
+      await client.close();
+    }
+  });
 });

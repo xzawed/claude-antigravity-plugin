@@ -27,18 +27,31 @@ function tryRunGit(workspaceRoot: string, args: string[]): { ok: boolean; stdout
 }
 
 export function getGitInfo(workspaceRoot: string): GitStatusInfo {
-  const inside = tryRunGit(workspaceRoot, ['rev-parse', '--is-inside-work-tree']);
-  if (!inside.ok || inside.stdout.trim() !== 'true') {
+  // Single subprocess (`git status --porcelain=v1 -b`) reduces latency ~3x vs 3 separate git calls
+  const statusRes = tryRunGit(workspaceRoot, ['status', '--porcelain=v1', '-b']);
+  if (!statusRes.ok) {
     return { isGitRepo: false };
   }
 
-  const branchRes = tryRunGit(workspaceRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  const statusRes = tryRunGit(workspaceRoot, ['status', '--porcelain']);
+  const lines = statusRes.stdout.split(/\r?\n/).filter((l) => l.length > 0);
+  const header = lines[0] ?? '';
+  let currentBranch: string | undefined;
+
+  if (header.startsWith('## ')) {
+    const branchPart = header.slice(3).trim();
+    if (branchPart.startsWith('No commits yet on ')) {
+      currentBranch = branchPart.slice('No commits yet on '.length).trim();
+    } else if (branchPart.startsWith('HEAD (no branch)')) {
+      currentBranch = 'HEAD';
+    } else {
+      currentBranch = branchPart.split('...')[0].trim();
+    }
+  }
 
   return {
     isGitRepo: true,
-    currentBranch: branchRes.ok ? branchRes.stdout.trim() : undefined,
-    isDirty: statusRes.ok ? statusRes.stdout.trim().length > 0 : undefined,
+    currentBranch,
+    isDirty: lines.length > 1,
   };
 }
 

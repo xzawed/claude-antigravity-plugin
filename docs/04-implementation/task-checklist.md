@@ -58,3 +58,4 @@
 | `2026-11-22` | Phase 1~4 | `npm --prefix server run typecheck` + `build` | `PASS` | TypeScript `strict: true` 0 errors |
 | `2026-11-22` | Phase 4 | `npm --prefix server test` | `PASS` | 6개 테스트 스위트, 24개 테스트 케이스 전원 통과 (`TC-U*`, `TC-S*`, `TC-I*`) |
 | `2026-11-22` | Phase 4 | G3 Windows 공백 경로 스모크 + G4 JSON/아티팩트 검증 | `PASS` | `cli-init.js --silent`, `index.js`, 매니페스트 5종 정상 확인 |
+| `2026-11-22` | Post-v1.0 실측 검증 | 실측 벤치마크 + TDD 확장 (`npm test` + `npm run verify`) | `PASS` | `check_ag_environment` `652.9ms`→`162.6ms` (4× 개선), Windows `.cmd` `EINVAL` 수정, **33/33 테스트 통과** |

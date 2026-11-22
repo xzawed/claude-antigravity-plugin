@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createCheckpoint, rollbackCheckpoint } from '../src/git-guard.js';
+import { createCheckpoint, getGitInfo, rollbackCheckpoint } from '../src/git-guard.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
 function git(cwd: string, args: string[]): string {
@@ -112,5 +112,52 @@ describe('git-guard (TC-U07 ~ TC-U09)', () => {
     expect(res.warning).toContain('not a Git repository');
 
     expect(() => createCheckpoint(tmpRoot, 'task-nogit-2', 'required')).toThrow(AgPluginError);
+  });
+
+  it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'extra.ts'), 'export const extra = 1;\n', 'utf8');
+    git(tmpRoot, ['add', 'extra.ts']);
+    git(tmpRoot, ['commit', '-m', 'Add extra.ts']);
+
+    // User stages edit to app.ts AND leaves unstaged edit to extra.ts
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2; // staged\n', 'utf8');
+    git(tmpRoot, ['add', 'app.ts']);
+    fs.writeFileSync(path.join(tmpRoot, 'extra.ts'), 'export const extra = 2; // unstaged\n', 'utf8');
+
+    const info = getGitInfo(tmpRoot);
+    expect(info.isGitRepo).toBe(true);
+    expect(info.isDirty).toBe(true);
+    expect(info.currentBranch).toBeTruthy();
+
+    const cp = createCheckpoint(tmpRoot, 'task-staged-1', 'best_effort');
+    expect(cp.isStashSnapshot).toBe(true);
+
+    // Delegated agent corrupts app.ts and deletes extra.ts
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+    fs.unlinkSync(path.join(tmpRoot, 'extra.ts'));
+
+    rollbackCheckpoint(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'task-staged-1',
+      title: 'Staged rollback test',
+      mode: 'api',
+      status: 'FAILED',
+      lockedPaths: ['app.ts', 'extra.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: cp.checkpointRef,
+      gitCheckpointIsStash: cp.isStashSnapshot,
+      gitUntrackedBaseline: cp.untrackedBaseline,
+      artifacts: [],
+    });
+
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe(
+      'export const version = 2; // staged\n',
+    );
+    expect(fs.readFileSync(path.join(tmpRoot, 'extra.ts'), 'utf8')).toBe(
+      'export const extra = 2; // unstaged\n',
+    );
+    expect(git(tmpRoot, ['diff', '--cached', '--name-only'])).toBe('app.ts');
   });
 });
