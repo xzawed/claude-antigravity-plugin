@@ -1,0 +1,116 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createCheckpoint, rollbackCheckpoint } from '../src/git-guard.js';
+import { AgPluginError, BridgeManifest } from '../src/types.js';
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function initRepo(dir: string): void {
+  git(dir, ['init']);
+  git(dir, ['config', 'user.email', 'test@example.com']);
+  git(dir, ['config', 'user.name', 'Test User']);
+  git(dir, ['config', 'core.autocrlf', 'false']);
+  fs.writeFileSync(path.join(dir, 'app.ts'), 'export const version = 1;\n', 'utf8');
+  git(dir, ['add', 'app.ts']);
+  git(dir, ['commit', '-m', 'Initial commit']);
+}
+
+describe('git-guard (TC-U07 ~ TC-U09)', () => {
+  let tmpRoot: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-gitguard-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('TC-U07: creates clean checkpoint and rolls back modified + newly created files', () => {
+    initRepo(tmpRoot);
+    const cp = createCheckpoint(tmpRoot, 'task-clean-1', 'best_effort');
+    expect(cp.checkpointRef).toBeTruthy();
+    expect(cp.isStashSnapshot).toBe(false);
+
+    // Simulate delegated edits
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'new-ui.tsx'), 'export const UI = () => null;\n', 'utf8');
+
+    const manifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'task-clean-1',
+      title: 'Clean rollback test',
+      mode: 'api',
+      status: 'VERIFIED',
+      lockedPaths: ['app.ts', 'new-ui.tsx'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: cp.checkpointRef,
+      gitCheckpointIsStash: cp.isStashSnapshot,
+      gitUntrackedBaseline: cp.untrackedBaseline,
+      artifacts: [],
+    };
+
+    const rb = rollbackCheckpoint(tmpRoot, manifest);
+    expect(rb.removedUntrackedFiles).toContain('new-ui.tsx');
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 1;\n');
+    expect(fs.existsSync(path.join(tmpRoot, 'new-ui.tsx'))).toBe(false);
+  });
+
+  it('TC-U08: preserves pre-existing dirty edits and pre-existing untracked files on rollback', () => {
+    initRepo(tmpRoot);
+    // User had uncommitted edit + untracked scratch note BEFORE delegation
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2; // user dirty edit\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'user-notes.txt'), 'keep me!\n', 'utf8');
+
+    const cp = createCheckpoint(tmpRoot, 'task-dirty-1', 'best_effort');
+    expect(cp.checkpointRef).toBeTruthy();
+    expect(cp.isStashSnapshot).toBe(true);
+    expect(cp.untrackedBaseline).toContain('user-notes.txt');
+
+    // Delegated agent overwrites app.ts and creates a new component
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 42; // agent edit\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'agent-created.tsx'), 'export default 1;\n', 'utf8');
+
+    const manifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'task-dirty-1',
+      title: 'Dirty rollback test',
+      mode: 'api',
+      status: 'FAILED',
+      lockedPaths: ['app.ts', 'agent-created.tsx'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: cp.checkpointRef,
+      gitCheckpointIsStash: cp.isStashSnapshot,
+      gitUntrackedBaseline: cp.untrackedBaseline,
+      artifacts: [],
+    };
+
+    const rb = rollbackCheckpoint(tmpRoot, manifest);
+    expect(rb.removedUntrackedFiles).toContain('agent-created.tsx');
+    expect(rb.removedUntrackedFiles).not.toContain('user-notes.txt');
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe(
+      'export const version = 2; // user dirty edit\n',
+    );
+    expect(fs.existsSync(path.join(tmpRoot, 'user-notes.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, 'agent-created.tsx'))).toBe(false);
+  });
+
+  it('TC-U09: handles non-git workspaces according to best_effort vs required policy', () => {
+    const res = createCheckpoint(tmpRoot, 'task-nogit-1', 'best_effort');
+    expect(res.checkpointRef).toBeUndefined();
+    expect(res.warning).toContain('not a Git repository');
+
+    expect(() => createCheckpoint(tmpRoot, 'task-nogit-2', 'required')).toThrow(AgPluginError);
+  });
+});

@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix server ci
+
+      - name: TypeScript typecheck (G1)
+        run: npm --prefix server run typecheck
+
+      - name: TypeScript build (G1)
+        run: npm --prefix server run build
+
+      - name: Run automated test suite (G2)
+        run: npm --prefix server test
+
+      - name: Cross-platform space-path cli-init smoke test & manifest validation (G3 & G4)
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const os = require("node:os");
+            const path = require("node:path");
+            const { execFileSync } = require("node:child_process");
+
+            // G4: Validate JSON manifests & built artifacts
+            for (const f of [
+              ".claude-plugin/plugin.json",
+              ".mcp.json",
+              "hooks/hooks.json",
+              "server/package.json",
+              "server/tsconfig.json"
+            ]) {
+              JSON.parse(fs.readFileSync(f, "utf8"));
+            }
+            if (!fs.existsSync("server/dist/index.js") || !fs.existsSync("server/dist/cli-init.js")) {
+              throw new Error("Missing built server artifacts in server/dist/");
+            }
+
+            // G3: cli-init --silent against a path containing spaces
+            const smokeDir = fs.mkdtempSync(path.join(os.tmpdir(), "ag plugin smoke "));
+            try {
+              execFileSync(process.execPath, ["server/dist/cli-init.js", "--silent", "--workspace", smokeDir], {
+                stdio: "inherit"
+              });
+              for (const rel of [
+                ".ag-bridge/config.json",
+                ".gitignore",
+                ".agent/workflows/claude-handoff.md"
+              ]) {
+                if (!fs.existsSync(path.join(smokeDir, rel))) {
+                  throw new Error("Missing expected smoke file: " + rel);
+                }
+              }
+              console.log("G3 & G4 PASS on", process.platform, "Node", process.version);
+            } finally {
+              fs.rmSync(smokeDir, { recursive: true, force: true });
+            }
+          '
+
+  docs-integrity:
+    name: Docs & AGENTS.md Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify AGENTS.md size budget and relative markdown links
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+
+            const root = process.cwd();
+            const agentsBytes = fs.statSync(path.join(root, "AGENTS.md")).size;
+            if (agentsBytes >= 24000) {
+              throw new Error(`AGENTS.md (${agentsBytes} bytes) exceeds 24,000-byte rule budget`);
+            }
+            console.log(`AGENTS.md size OK: ${agentsBytes} bytes`);
+
+            const mdFiles = [];
+            const walk = (dir) => {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(full);
+                else if (entry.name.endsWith(".md")) mdFiles.push(full);
+              }
+            };
+            walk(root);
+
+            const broken = [];
+            for (const file of mdFiles) {
+              const raw = fs.readFileSync(file, "utf8");
+              const stripped = raw.replace(/```[\s\S]*?```/g, "");
+              const regex = /\[[^\]]+\]\(([^)#\s]+)/g;
+              let m;
+              while ((m = regex.exec(stripped)) !== null) {
+                const href = m[1];
+                if (/^(https?|mailto|file):/.test(href)) continue;
+                const resolved = path.resolve(path.dirname(file), href);
+                if (!fs.existsSync(resolved)) {
+                  broken.push(`${path.relative(root, file)} -> ${href}`);
+                }
+              }
+            }
+            if (broken.length > 0) {
+              throw new Error("Broken relative markdown links:\n" + broken.join("\n"));
+            }
+            console.log(`Verified ${mdFiles.length} markdown files: 0 broken links`);
+          '
