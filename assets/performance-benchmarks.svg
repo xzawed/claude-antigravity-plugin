@@ -40,12 +40,12 @@
 
   <!-- Top KPI Cards (4 columns) -->
   <rect x="32" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="52" y="124" class="kpi-accent-g">4.0×</text>
+  <text x="52" y="124" class="kpi-accent-g">4.3×</text>
   <text x="52" y="148" class="kpi-label">check_ag_environment Speedup</text>
-  <text x="52" y="166" class="kpi-sub">652.9ms → 162.6ms avg</text>
+  <text x="52" y="166" class="kpi-sub">652.9ms → 149.9ms avg</text>
 
   <rect x="300" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="320" y="124" class="kpi-accent-b">33 / 33</text>
+  <text x="320" y="124" class="kpi-accent-b">35 / 35</text>
   <text x="320" y="148" class="kpi-label">Automated TDD Tests Passing</text>
   <text x="320" y="166" class="kpi-sub">6 suites · Unit + Security + E2E</text>
 
@@ -79,13 +79,13 @@
 
   <!-- Row 2: check_ag_environment AFTER -->
   <text x="52" y="320" class="bar-title">check_ag_environment (After)</text>
-  <rect x="290" y="303" width="163" height="24" rx="6" fill="url(#barGreen)"/>
-  <text x="462" y="320" class="bar-val">162.6 ms (PASS · 67% headroom)</text>
+  <rect x="290" y="303" width="150" height="24" rx="6" fill="url(#barGreen)"/>
+  <text x="450" y="320" class="bar-val">149.9 ms (PASS · 70% headroom)</text>
 
   <!-- Row 3: cli-init --silent -->
   <text x="52" y="362" class="bar-title">cli-init.js --silent (SessionStart)</text>
-  <rect x="290" y="345" width="98" height="24" rx="6" fill="url(#barBlue)"/>
-  <text x="398" y="362" class="bar-val">98.0 ms (PASS · 67% headroom)</text>
+  <rect x="290" y="345" width="90" height="24" rx="6" fill="url(#barBlue)"/>
+  <text x="390" y="362" class="bar-val">90.3 ms (PASS · 70% headroom)</text>
 
   <!-- X-axis labels -->
   <text x="286" y="396" class="kpi-sub">0ms</text>

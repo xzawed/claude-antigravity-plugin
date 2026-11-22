@@ -84,6 +84,38 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(foundPosix).toBe(posixBin);
   });
 
+  it('TC-U13: infers cliBinary when subscription.app_path explicitly overrides agy or antigravity', () => {
+    const customAgy = 'C:\\CustomTools\\agy.exe';
+    const agyRes = detectEnvironment(
+      {
+        ...DEFAULT_BRIDGE_CONFIG,
+        subscription: { ...DEFAULT_BRIDGE_CONFIG.subscription, app_path: customAgy },
+      },
+      undefined,
+      makeDeps({
+        platform: 'win32',
+        existsSync: (p) => p === customAgy,
+      }),
+    );
+    expect(agyRes.resolvedMode).toBe('subscription');
+    expect(agyRes.subscription.cliBinary).toBe('agy');
+    expect(agyRes.subscription.cliPath).toBe(customAgy);
+
+    const customLegacy = '/opt/bin/antigravity';
+    const legacyRes = detectEnvironment(
+      {
+        ...DEFAULT_BRIDGE_CONFIG,
+        subscription: { ...DEFAULT_BRIDGE_CONFIG.subscription, app_path: customLegacy },
+      },
+      undefined,
+      makeDeps({
+        platform: 'linux',
+        existsSync: (p) => p === customLegacy,
+      }),
+    );
+    expect(legacyRes.subscription.cliBinary).toBe('antigravity');
+  });
+
   it('TC-U02: falls back to api mode when subscription app/CLI is absent but GEMINI_API_KEY is set', () => {
     const deps = makeDeps({
       platform: 'darwin',

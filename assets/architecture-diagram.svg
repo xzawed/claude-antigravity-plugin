@@ -84,7 +84,7 @@
   <rect x="344" y="146" width="244" height="72" rx="8" fill="#0F172A" stroke="#334155"/>
   <text x="356" y="166" class="card-sub">3 Exposed MCP Tools</text>
   <text x="356" y="185" class="body">• delegate_to_antigravity</text>
-  <text x="356" y="201" class="body">• check_ag_environment (162ms)</text>
+  <text x="356" y="201" class="body">• check_ag_environment (150ms)</text>
   <text x="356" y="213" class="body">• rollback_ag_task</text>
 
   <rect x="344" y="230" width="244" height="74" rx="8" fill="#0F172A" stroke="#334155"/>
@@ -111,7 +111,7 @@
   <text x="692" y="150" class="body">• Official agy CLI: --print --mode accept-edits --sandbox</text>
   <text x="692" y="170" class="body">• 3-tier trigger: CLI → OS IPC → Clipboard + Desktop Notify</text>
   <text x="692" y="190" class="body">• Built-in Browser Subagent E2E visual QA &amp; screenshots</text>
-  <text x="692" y="210" class="body">• Hybrid fs.watch + 2s polling watcher + agy-cli.log</text>
+  <text x="692" y="210" class="body">• stream-json heartbeat + fs.watch + 2s polling + agy-cli.log</text>
 
   <!-- Column 3B: API Worker Engine -->
   <rect x="674" y="256" width="414" height="146" rx="12" fill="#211A10" stroke="#F59E0B" stroke-width="1.5"/>

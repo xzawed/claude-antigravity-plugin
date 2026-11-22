@@ -546,7 +546,10 @@ export class SubscriptionEngine implements ExecutionEngine {
       new Set([...(finalManifest.artifacts ?? []), ...diskArtifacts]),
     ).sort();
 
-    const gitChanged = listGitChangedFiles(ctx.workspaceRoot);
+    const baselineUntracked = new Set(ctx.manifest.gitUntrackedBaseline ?? []);
+    const gitChanged = listGitChangedFiles(ctx.workspaceRoot).filter(
+      (f) => !baselineUntracked.has(f) && !f.startsWith('.agent/') && !f.startsWith('.agents/'),
+    );
     const mergedChanged = Array.from(
       new Set([...(finalManifest.changedFiles ?? []), ...gitChanged]),
     ).sort();
