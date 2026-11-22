@@ -28,7 +28,7 @@ export interface SubscriptionEngineOptions {
 }
 
 function buildHandoffPrompt(taskId: string): string {
-  return `/claude-handoff Execute delegated task ${taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json & .ag-bridge/report.md when done.`;
+  return `/claude-handoff Execute delegated task ${taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json and .ag-bridge/report.md when done.`;
 }
 
 function tryCopyToClipboard(text: string, platform: NodeJS.Platform): boolean {
@@ -199,17 +199,28 @@ export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
   return ['run', '--workflow', 'claude-handoff'];
 }
 
+function quoteForWindowsCmd(arg: string): string {
+  // Neutralize cmd.exe metacharacters inside double-quoted argument
+  const escaped = arg.replace(/"/g, '\\"').replace(/%/g, '%%');
+  return `"${escaped}"`;
+}
+
 export function buildCliSpawnSpec(
   cliPath: string,
   args: string[],
   platform: NodeJS.Platform = process.platform,
-): { command: string; args: string[]; windowsHide: boolean } {
-  // Node.js 20.12+/24 on Windows throws EINVAL when spawning .cmd/.bat with shell: false
+): { command: string; args: string[]; windowsHide: boolean; windowsVerbatimArguments?: boolean } {
+  // Node.js 20.12+/24 on Windows throws EINVAL when spawning .cmd/.bat with shell: false.
+  // Wrapping the full command line in outer quotes for `cmd.exe /d /s /c` with
+  // windowsVerbatimArguments preserves paths containing spaces (e.g. "C:\Program Files\...")
+  // as well as multi-word arguments.
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(cliPath)) {
+    const innerCmd = [quoteForWindowsCmd(cliPath), ...args.map(quoteForWindowsCmd)].join(' ');
     return {
       command: 'cmd.exe',
-      args: ['/d', '/s', '/c', cliPath, ...args],
+      args: ['/d', '/s', '/c', `"${innerCmd}"`],
       windowsHide: true,
+      windowsVerbatimArguments: true,
     };
   }
   return {
@@ -267,6 +278,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
         detached: !useStreamHeartbeat,
         shell: false,
         windowsHide: spawnSpec.windowsHide,
+        windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
       });
 
       // Child inherited logFd; close parent descriptor immediately
