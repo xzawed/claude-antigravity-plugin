@@ -407,15 +407,14 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     });
     expect(legacyArgs).toEqual(['run', '--workflow', 'claude-handoff']);
 
-    // Windows .cmd/.bat spawn spec must wrap via cmd.exe /d /s /c to avoid Node 20+/24 EINVAL
+    // Windows .cmd/.bat spawn spec must wrap via cmd.exe /d /s /c with outer quotes + windowsVerbatimArguments
     const winCmdSpec = buildCliSpawnSpec('C:\\Program Files\\Antigravity\\bin\\antigravity.cmd', legacyArgs, 'win32');
     expect(winCmdSpec.command).toBe('cmd.exe');
-    expect(winCmdSpec.args.slice(0, 4)).toEqual([
-      '/d',
-      '/s',
-      '/c',
-      'C:\\Program Files\\Antigravity\\bin\\antigravity.cmd',
-    ]);
+    expect(winCmdSpec.windowsVerbatimArguments).toBe(true);
+    expect(winCmdSpec.args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+    expect(winCmdSpec.args[3]).toBe(
+      '""C:\\Program Files\\Antigravity\\bin\\antigravity.cmd" "run" "--workflow" "claude-handoff""',
+    );
 
     const winExeSpec = buildCliSpawnSpec('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe', agyArgs, 'win32');
     expect(winExeSpec.command).toBe('C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe');
