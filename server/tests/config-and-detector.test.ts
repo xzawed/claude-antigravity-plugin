@@ -65,20 +65,20 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
   });
 
   it('findBinaryInPath resolves mixed-case Windows Path and PATHEXT without spawning subprocesses', () => {
-    const winBin = path.join('C:\\CustomBin', 'agy.exe');
+    const winBin = path.win32.join('C:\\CustomBin', 'agy.exe');
     const foundWin = findBinaryInPath(
       'agy',
       'win32',
-      { Path: `C:\\Other${path.delimiter}C:\\CustomBin`, PATHEXT: '.EXE;.CMD' },
+      { Path: 'C:\\Other;C:\\CustomBin', PATHEXT: '.EXE;.CMD' },
       (p) => p === winBin,
     );
     expect(foundWin).toBe(winBin);
 
-    const posixBin = path.join('/usr/local/bin', 'agy');
+    const posixBin = path.posix.join('/usr/local/bin', 'agy');
     const foundPosix = findBinaryInPath(
       'agy',
       'linux',
-      { PATH: `/bin${path.delimiter}/usr/local/bin` },
+      { PATH: '/bin:/usr/local/bin' },
       (p) => p === posixBin,
     );
     expect(foundPosix).toBe(posixBin);

@@ -33,8 +33,9 @@ export function findBinaryInPath(
     return undefined;
   }
 
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const dirs = rawPath
-    .split(path.delimiter)
+    .split(pathApi.delimiter)
     .map((d) => d.trim().replace(/^"|"$/g, ''))
     .filter(Boolean);
 
@@ -50,8 +51,8 @@ export function findBinaryInPath(
     for (const ext of extensions) {
       const candidate =
         ext && !name.toLowerCase().endsWith(ext)
-          ? path.join(dir, `${name}${ext}`)
-          : path.join(dir, name);
+          ? pathApi.join(dir, `${name}${ext}`)
+          : pathApi.join(dir, name);
       try {
         if (existsSyncFn(candidate)) {
           return candidate;
