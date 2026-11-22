@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, type Content, type FunctionDeclaration } from '@google/genai';
-import { execFile } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -214,6 +214,26 @@ function createSanitizedEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+function killProcessTree(pid: number | undefined, isWin: boolean): void {
+  if (!pid) return;
+  try {
+    if (isWin) {
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+    } else {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
+    }
+  } catch {
+    // Process may have already exited
+  }
+}
+
 export async function defaultCommandRunner(
   command: string,
   cwd: string,
@@ -226,31 +246,59 @@ export async function defaultCommandRunner(
   const execArgs = isWin ? ['/d', '/s', '/c', bin, ...args] : args;
 
   return new Promise<CommandExecResult>((resolve) => {
-    execFile(
-      execBin,
-      execArgs,
-      {
-        cwd,
-        env,
-        timeout: timeoutSec * 1000,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        const timedOut = Boolean(error && (error as { killed?: boolean }).killed);
-        const exitCode = error
-          ? typeof (error as { code?: unknown }).code === 'number'
-            ? ((error as { code: number }).code)
-            : 1
-          : 0;
-        resolve({
-          exitCode,
-          stdout: truncateTail(String(stdout ?? ''), MAX_CMD_OUTPUT_BYTES),
-          stderr: truncateTail(String(stderr ?? ''), MAX_CMD_OUTPUT_BYTES),
-          timedOut,
-        });
-      },
-    );
+    const child = spawn(execBin, execArgs, {
+      cwd,
+      env,
+      shell: false,
+      detached: !isWin,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const MAX_CAPTURE = 1024 * 1024;
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+
+    const finish = (exitCode: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        exitCode,
+        stdout: truncateTail(stdout, MAX_CMD_OUTPUT_BYTES),
+        stderr: truncateTail(stderr, MAX_CMD_OUTPUT_BYTES),
+        timedOut,
+      });
+    };
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      if (stdout.length < MAX_CAPTURE) {
+        stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      }
+    });
+
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      if (stderr.length < MAX_CAPTURE) {
+        stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      }
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killProcessTree(child.pid, isWin);
+      finish(1);
+    }, Math.max(1, timeoutSec) * 1000);
+
+    child.once('error', (err) => {
+      stderr += err.message;
+      finish(1);
+    });
+
+    child.once('close', (code) => {
+      finish(typeof code === 'number' ? code : 1);
+    });
   });
 }
 
