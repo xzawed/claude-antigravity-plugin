@@ -13,6 +13,7 @@
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
 [![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **Language:** **English** · [한국어 (README.ko.md)](./README.ko.md)
@@ -53,66 +54,75 @@
   - **Subscription Mode (Recommended):** Local Antigravity CLI (`agy`) or Antigravity Desktop App signed in with your account
   - **API Fallback Mode:** A `GEMINI_API_KEY` from Google AI Studio
 
-### Step 1 — Clone & Build the Embedded MCP Server
+### Step 1 — Clone, Build & Verify (Copy & Paste)
+
+Run the block for your OS **as-is** (installs into `~/.claude/plugins/claude-antigravity-plugin`):
+
+**macOS / Linux:**
 
 ```bash
-git clone https://github.com/xzawed/claude-antigravity-plugin.git
-cd claude-antigravity-plugin/server
-npm install
-npm run build        # Compiles TypeScript into server/dist/
-npm run verify       # Runs live manifest, space-path cli-init & Stdio MCP healthcheck
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin" \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
 ```
 
-> **Important:** Claude Code launches `server/dist/index.js` and `server/dist/cli-init.js`. Always run `npm run build` inside `server/` after cloning or pulling updates.
+**Windows PowerShell:**
 
-### Step 2 — Load the Plugin into Claude Code
+```powershell
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
+```
 
-Choose **one** of the three official Claude Code installation methods below:
+> **Note:** Claude Code executes `server/dist/index.js` and `server/dist/cli-init.js`. Re-run `npm run build` after pulling updates.
+
+### Step 2 — Load the Plugin into Claude Code (Copy & Paste)
+
+Pick **one** of the three official Claude Code methods below — every command works verbatim with Step 1:
 
 #### Option A — Persistent Plugin Install via Claude Code Marketplace *(Recommended)*
 
-This repository includes `.claude-plugin/marketplace.json`, so you can install it persistently across sessions (User, Project, or Local scope) directly inside Claude Code:
+Open `claude` and paste these two commands inside your session:
 
 ```text
-# 1. Register your local cloned directory (or GitHub repo) as a marketplace inside Claude Code
-/plugin marketplace add /absolute/path/to/claude-antigravity-plugin
-# Or from GitHub (requires GitHub access if private):
-# /plugin marketplace add xzawed/claude-antigravity-plugin
-
-# 2. Install the plugin (Claude Code will prompt you for User / Project / Local scope)
+/plugin marketplace add ~/.claude/plugins/claude-antigravity-plugin
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-#### Option B — Instant Per-Session Loading with `--plugin-dir` *(Great for Testing & Development)*
+*(Or directly from GitHub without cloning first: `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`)*
 
-Load the plugin immediately from your local checkout without registering a marketplace:
+#### Option B — Instant Per-Session Launch with `--plugin-dir` *(Fastest for Local Use & Dev)*
+
+**macOS / Linux:**
 
 ```bash
-# Optional: validate plugin manifests first
-claude plugin validate /absolute/path/to/claude-antigravity-plugin
-
-# Launch Claude Code with the plugin loaded for this session (additive — keeps existing plugins)
-claude --plugin-dir /absolute/path/to/claude-antigravity-plugin
+claude plugin validate "$HOME/.claude/plugins/claude-antigravity-plugin"
+claude --plugin-dir "$HOME/.claude/plugins/claude-antigravity-plugin"
 ```
 
-On **Windows PowerShell**:
+**Windows PowerShell:**
 
 ```powershell
-claude --plugin-dir "F:\DEVELOPMENT\SOURCE\CLAUDE\claude-antigravity-plugin"
+claude plugin validate "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
+claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 ```
 
-> **Tip:** If you edit plugin files while Claude Code is running, run `/reload-plugins` inside the session to reload without restarting.
+> **Tip:** After local plugin edits, run `/reload-plugins` inside Claude Code to reload without restarting.
 
 #### Option C — Standalone MCP Server Only *(Without Slash Commands / Hooks)*
 
-If you only want the 3 MCP tools (`delegate_to_antigravity`, `check_ag_environment`, `rollback_ag_task`) without the `SessionStart` hook, skill, or slash commands:
+**macOS / Linux:**
 
 ```bash
-# macOS / Linux
-claude mcp add antigravity-delegate -- node "/absolute/path/to/claude-antigravity-plugin/server/dist/index.js"
+claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigravity-plugin/server/dist/index.js"
+```
 
-# Windows PowerShell
-claude mcp add antigravity-delegate -- node "F:\DEVELOPMENT\SOURCE\CLAUDE\claude-antigravity-plugin\server\dist\index.js"
+**Windows PowerShell:**
+
+```powershell
+claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
 ### Step 3 — Configure Your Execution Provider
@@ -326,6 +336,9 @@ claude-antigravity-plugin/
 │   ├── scripts/verify-plugin.mjs  # Live healthcheck & Stdio MCP smoke verifier
 │   └── tests/                     # 6 suites / 35 automated tests (unit, security, E2E)
 ├── AGENTS.md                      # Antigravity workspace rules & PR workflow invariants
+├── CONTRIBUTING.md                # Contributor workflow & engineering invariants
+├── SECURITY.md                    # Vulnerability reporting & security boundaries
+├── LICENSE                        # Apache License 2.0
 ├── README.md                      # English documentation (this file)
 ├── README.ko.md                   # Complete Korean documentation
 └── docs/                          # Antigravity standard documentation hub (00~06)
@@ -369,3 +382,11 @@ All engineering docs follow the [Antigravity Documentation Standard](./docs/00-s
 | **02. Architecture** | [System Architecture](./docs/02-architecture/system-architecture.md) · [Bridge Protocol](./docs/02-architecture/bridge-protocol.md) · [Security & Git Guard](./docs/02-architecture/security-and-git-guard.md) |
 | **03. Specifications** | [MCP Tools API](./docs/03-specs/mcp-tools-api.md) · [Execution Engines](./docs/03-specs/execution-engines.md) · [Prompts & Commands](./docs/03-specs/prompts-and-commands.md) |
 | **04–06. Delivery & QA** | [Implementation Plan](./docs/04-implementation/implementation-plan.md) · [Task Checklist](./docs/04-implementation/task-checklist.md) · [Test & QA Plan](./docs/05-verification/test-and-qa-plan.md) · [Empirical Verification (`VER-002`)](./docs/05-verification/verification-report.md) · [ADRs](./docs/06-adr/README.md) |
+
+---
+
+## Contributing, Security & License
+
+- **Contributing:** See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, PR-only workflow, and coding invariants.
+- **Security:** See [SECURITY.md](./SECURITY.md) for supported versions and private vulnerability reporting.
+- **License:** Licensed under the [Apache License 2.0](./LICENSE).

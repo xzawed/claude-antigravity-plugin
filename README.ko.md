@@ -13,6 +13,7 @@
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#듀얼-실행-모드)
 [![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#보안-및-안전장치)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어**
@@ -53,64 +54,75 @@
   - **구독 모드 (권장):** 로컬 Antigravity CLI(`agy`) 또는 Antigravity 데스크톱 앱 로그인 완료
   - **API 폴백 모드:** Google AI Studio에서 발급한 `GEMINI_API_KEY`
 
-### 1단계 — 저장소 클론 및 내장 MCP 서버 빌드
+### 1단계 — 클론 · 빌드 · 헬스체크 (복사해서 바로 실행)
+
+사용 중인 OS 블록을 **수정 없이 그대로 복사·붙여넣기** 하세요(`~/.claude/plugins/claude-antigravity-plugin` 경로에 자동 설치됩니다):
+
+**macOS / Linux:**
 
 ```bash
-git clone https://github.com/xzawed/claude-antigravity-plugin.git
-cd claude-antigravity-plugin/server
-npm install
-npm run build        # TypeScript 컴파일 -> server/dist/ 생성
-npm run verify       # 매니페스트 · 공백경로 cli-init · 라이브 Stdio MCP 헬스체크
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin" \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
+  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
 ```
 
-> **주의:** Claude Code는 빌드 산출물인 `server/dist/index.js`와 `server/dist/cli-init.js`를 실행합니다. 최초 클론 또는 업데이트 후 반드시 `server/` 폴더에서 `npm run build`를 실행해 주세요.
+**Windows PowerShell:**
 
-### 2단계 — Claude Code에 플러그인 설치 / 연결
+```powershell
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
+npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
+```
 
-사용 목적에 따라 아래 **3가지 공식 방법 중 하나**를 선택하세요.
+> **참고:** Claude Code는 `server/dist/index.js`와 `server/dist/cli-init.js`를 실행합니다. 최신 변경을 pull한 뒤에는 `npm run build`를 다시 실행하세요.
 
-#### 방법 A — Claude Code 마켓플레이스를 통한 영구 설치 *(권장)*
+### 2단계 — Claude Code에 플러그인 연결 (복사해서 바로 실행)
 
-본 저장소에는 `.claude-plugin/marketplace.json`이 포함되어 있어 Claude Code 내부에서 영구 설치(User / Project / Local 범위 선택 가능)할 수 있습니다.
+아래 **3가지 공식 방법 중 하나**를 선택해 그대로 복사·붙여넣기 하세요(1단계 설치 경로와 100% 일치합니다):
+
+#### 방법 A — Claude Code 마켓플레이스 영구 설치 *(권장)*
+
+`claude` 실행 후 세션 안에서 아래 두 줄을 그대로 입력합니다:
 
 ```text
-# 1. Claude Code 세션 안에서 로컬 클론 경로(또는 GitHub 저장소)를 마켓플레이스로 등록
-/plugin marketplace add /절대경로/claude-antigravity-plugin
-# 또는 GitHub 저장소 직접 등록 (Private 저장소는 GitHub 접근 권한 필요):
-# /plugin marketplace add xzawed/claude-antigravity-plugin
-
-# 2. 플러그인 설치 (User / Project / Local 설치 범위 선택 프롬프트가 표시됨)
+/plugin marketplace add ~/.claude/plugins/claude-antigravity-plugin
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-#### 방법 B — `--plugin-dir`로 로컬 폴더 즉시 로드 *(개발 · 테스트 · Private 로컬 사용에 가장 빠름)*
+*(로컬 클론 없이 GitHub에서 바로 등록할 경우: `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`)*
 
-마켓플레이스 등록 없이 로컬 폴더를 지정해 즉시 Claude Code 세션에 플러그인을 로드합니다.
+#### 방법 B — `--plugin-dir`로 즉시 실행 *(로컬 사용 · 개발 테스트에 가장 빠름)*
+
+**macOS / Linux:**
 
 ```bash
-# (선택) 플러그인 매니페스트 사전 검증
-claude plugin validate /절대경로/claude-antigravity-plugin
-
-# 현재 세션에 플러그인 로드 (기존 설치 플러그인에 추가 로드됨)
-claude --plugin-dir /절대경로/claude-antigravity-plugin
+claude plugin validate "$HOME/.claude/plugins/claude-antigravity-plugin"
+claude --plugin-dir "$HOME/.claude/plugins/claude-antigravity-plugin"
 ```
 
-**Windows PowerShell** 예시:
+**Windows PowerShell:**
 
 ```powershell
-claude --plugin-dir "F:\DEVELOPMENT\SOURCE\CLAUDE\claude-antigravity-plugin"
+claude plugin validate "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
+claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 ```
 
-> **팁:** 세션 실행 중 플러그인 코드를 수정했다면 Claude Code를 재시작할 필요 없이 세션 안에서 `/reload-plugins`를 입력하면 즉시 반영됩니다.
+> **팁:** 플러그인 파일을 수정했다면 Claude Code를 재시작하지 않고 세션 안에서 `/reload-plugins`만 입력하면 즉시 반영됩니다.
 
 #### 방법 C — MCP 서버만 단독 등록 *(훅 · 스킬 · 슬래시 커맨드 없이 Tool 3종만 필요할 때)*
 
-```bash
-# macOS / Linux
-claude mcp add antigravity-delegate -- node "/절대경로/claude-antigravity-plugin/server/dist/index.js"
+**macOS / Linux:**
 
-# Windows PowerShell
-claude mcp add antigravity-delegate -- node "F:\DEVELOPMENT\SOURCE\CLAUDE\claude-antigravity-plugin\server\dist\index.js"
+```bash
+claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigravity-plugin/server/dist/index.js"
+```
+
+**Windows PowerShell:**
+
+```powershell
+claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
 ### 3단계 — 실행 프로바이더 설정
@@ -324,6 +336,9 @@ claude-antigravity-plugin/
 │   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 Stdio MCP 스모크 검증 스크립트
 │   └── tests/                     # 6 스위트 / 35개 자동화 테스트 (단위·보안·E2E)
 ├── AGENTS.md                      # Antigravity 워크스페이스 규칙 및 PR 단위 협업 원칙
+├── CONTRIBUTING.md                # 기여 가이드 및 PR 워크플로우
+├── SECURITY.md                    # 보안 취약점 제보 및 보안 경계 정책
+├── LICENSE                        # Apache License 2.0
 ├── README.md                      # 영문 공식 문서
 ├── README.ko.md                   # 한글 공식 문서 (현재 파일)
 └── docs/                          # 안티그래비티 개발 표준 문서 허브 (00~06)
@@ -367,3 +382,11 @@ claude-antigravity-plugin/
 | **02. 아키텍처** | [시스템 아키텍처](./docs/02-architecture/system-architecture.md) · [브릿지 프로토콜](./docs/02-architecture/bridge-protocol.md) · [보안 & Git Guard](./docs/02-architecture/security-and-git-guard.md) |
 | **03. 상세 명세** | [MCP Tools API](./docs/03-specs/mcp-tools-api.md) · [듀얼 실행 엔진](./docs/03-specs/execution-engines.md) · [프롬프트 & 커맨드](./docs/03-specs/prompts-and-commands.md) |
 | **04–06. 구현 · 검증 · ADR** | [구현 마스터 플랜](./docs/04-implementation/implementation-plan.md) · [작업 체크리스트](./docs/04-implementation/task-checklist.md) · [테스트 & QA 계획](./docs/05-verification/test-and-qa-plan.md) · [실측 검증 리포트 (`VER-002`)](./docs/05-verification/verification-report.md) · [ADR 목록](./docs/06-adr/README.md) |
+
+---
+
+## 기여 · 보안 · 라이선스
+
+- **기여 가이드:** 로컬 개발 환경, PR 전용 워크플로우, 코딩 불변 규칙은 [CONTRIBUTING.md](./CONTRIBUTING.md)를 참고하세요.
+- **보안 정책:** 지원 버전 및 비공개 취약점 제보 절차는 [SECURITY.md](./SECURITY.md)를 참고하세요.
+- **라이선스:** 본 프로젝트는 [Apache License 2.0](./LICENSE) 하에 배포됩니다.
