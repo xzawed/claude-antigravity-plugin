@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build output (run `cd server && npm run build` to regenerate)
+server/dist/
+
+# Local bridge session artifacts
+.ag-bridge/
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db
