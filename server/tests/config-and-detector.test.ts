@@ -11,6 +11,9 @@ import {
 } from '../src/detector.js';
 import { AgPluginError, DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
+const FAKE_PREFIX = 'AIza';
+const fakeGoogleKey = (suffix: string): string => `${FAKE_PREFIX}${suffix}`;
+
 function makeDeps(overrides: Partial<DetectorDeps> = {}): DetectorDeps {
   return {
     platform: 'linux',
@@ -36,7 +39,7 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
   it('TC-U01: prioritizes subscription mode when both agy CLI and GEMINI_API_KEY are present', () => {
     const deps = makeDeps({
       platform: 'win32',
-      env: { GEMINI_API_KEY: 'AIzaSyDummySecretKey1234567890abcd' },
+      env: { GEMINI_API_KEY: fakeGoogleKey('SyDummySecretKey1234567890abcd') },
       findBinary: (name) => (name === 'agy' ? 'C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe' : undefined),
     });
 
@@ -119,7 +122,7 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
   it('TC-U02: falls back to api mode when subscription app/CLI is absent but GEMINI_API_KEY is set', () => {
     const deps = makeDeps({
       platform: 'darwin',
-      env: { GEMINI_API_KEY: 'AIzaSyFallbackKey1234567890abcdefg' },
+      env: { GEMINI_API_KEY: fakeGoogleKey('SyFallbackKey1234567890abcdefg') },
     });
 
     const res = detectEnvironment(DEFAULT_BRIDGE_CONFIG, undefined, deps);
@@ -146,11 +149,12 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
   });
 
   it('TC-S05: masks GEMINI_API_KEY and AIza patterns in outputs and never exposes keys in detection output', () => {
-    const dummyKey = 'AIzaSyDummySecretKey1234567890abcd';
-    const raw = `Error calling Gemini with key ${dummyKey} and backup AIzaSyAnotherSecretKey999999999999`;
+    const dummyKey = fakeGoogleKey('SyDummySecretKey1234567890abcd');
+    const backupKey = fakeGoogleKey('SyAnotherSecretKey999999999999');
+    const raw = `Error calling Gemini with key ${dummyKey} and backup ${backupKey}`;
     const masked = maskSecrets(raw, [], { GEMINI_API_KEY: dummyKey });
     expect(masked).not.toContain(dummyKey);
-    expect(masked).not.toContain('AIzaSyAnotherSecretKey');
+    expect(masked).not.toContain(backupKey);
     expect(masked).toContain('[REDACTED]');
 
     const det = detectEnvironment(
@@ -159,6 +163,24 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
       makeDeps({ env: { GEMINI_API_KEY: dummyKey } }),
     );
     expect(JSON.stringify(det)).not.toContain(dummyKey);
+  });
+
+  it('TC-S07: redacts OAuth access tokens, auth codes, sk-/ghp_ keys, and Bearer headers', () => {
+    const oauthToken = ['ya29.', 'a0AfH6SMDummyAccessTokenValue123456'].join('');
+    const authCode = ['4/0A', 'DummyOAuthAuthorizationCode123456789'].join('');
+    const skKey = ['sk-', 'ant-DummySecretKeyValue1234567890abcd'].join('');
+    const ghToken = ['ghp_', 'DummyGitHubPersonalAccessToken12345'].join('');
+    const bearer = ['Bearer ', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'].join('');
+
+    const masked = maskSecrets(
+      `oauth=${oauthToken} code=${authCode} sk=${skKey} gh=${ghToken} auth="${bearer}"`,
+    );
+    expect(masked).not.toContain(oauthToken);
+    expect(masked).not.toContain(authCode);
+    expect(masked).not.toContain(skKey);
+    expect(masked).not.toContain(ghToken);
+    expect(masked).not.toContain('eyJhbGciOiJIUzI1NiIs');
+    expect(masked).toContain('Bearer [REDACTED]');
   });
 
   it('applies config precedence: config.json > env > defaults', () => {
