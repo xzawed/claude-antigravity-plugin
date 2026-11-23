@@ -18,11 +18,15 @@ import {
   attachStreamJsonHeartbeat,
   buildCliInvocationArgs,
   buildCliSpawnSpec,
+  parseAgyAgentsOutput,
+  parseAgyModelsOutput,
   SubscriptionEngine,
 } from '../src/engines/subscription.js';
 import {
   handleCheckEnvironment,
   handleDelegateToAntigravity,
+  handleGetUsage,
+  handleListCapabilities,
 } from '../src/index.js';
 import { AgPluginError, DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
@@ -472,6 +476,246 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     handle.stop();
 
     expect(readManifest(tmpRoot)?.status).toBe('VERIFIED');
+  });
+
+  it('TC-U14: builds complete agy CLI flags including --dangerously-skip-permissions, model, effort, agent, add-dir, conversation, remote-agent, json-schema', () => {
+    const args = buildCliInvocationArgs({
+      workspaceRoot: tmpRoot,
+      pluginRoot,
+      manifest: {
+        schemaVersion: 1,
+        taskId: 'ag-full-flags-1',
+        title: 'Full agy flags test',
+        mode: 'subscription',
+        status: 'DISPATCHED',
+        lockedPaths: ['src/ui/'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        artifacts: [],
+      },
+      config: DEFAULT_BRIDGE_CONFIG,
+      instructions: 'Inspect and refactor UI components.',
+      acceptanceCriteria: ['Clean build'],
+      timeoutSecOverride: 180,
+      agyOptions: {
+        dangerouslySkipPermissions: true,
+        sandbox: false,
+        model: 'gemini-4-neon-high',
+        effort: 'xhigh',
+        agent: 'frontend-specialist',
+        addDirs: ['../shared-types', '../design-system'],
+        conversationId: 'conv-resume-99',
+        project: 'my-proj',
+        newProject: true,
+        remoteAgent: true,
+        jsonSchema: '{"type":"object"}',
+        disableSlashCommands: true,
+        settings: '{"theme":"dark"}',
+      },
+      detection: {
+        configuredMode: 'auto',
+        resolvedMode: 'subscription',
+        platform: 'win32',
+        subscription: {
+          detected: true,
+          cliBinary: 'agy',
+          cliPath: 'C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe',
+          triggerMethod: 'cli_or_ipc',
+        },
+        api: {
+          configured: false,
+          source: 'none',
+          envVarName: 'GEMINI_API_KEY',
+          model: 'gemini-2.5-pro',
+          maxTurns: 15,
+        },
+        recommendations: [],
+      },
+    });
+
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--mode');
+    expect(args).not.toContain('--sandbox');
+    expect(args).toContain('--model');
+    expect(args).toContain('gemini-4-neon-high');
+    expect(args).toContain('--effort');
+    expect(args).toContain('xhigh');
+    expect(args).toContain('--agent');
+    expect(args).toContain('frontend-specialist');
+    expect(args).toContain('--add-dir');
+    expect(args).toContain('../shared-types');
+    expect(args).toContain('../design-system');
+    expect(args).toContain('--conversation');
+    expect(args).toContain('conv-resume-99');
+    expect(args).toContain('--project');
+    expect(args).toContain('my-proj');
+    expect(args).toContain('--new-project');
+    expect(args).toContain('--remote-agent');
+    expect(args).toContain('--json-schema');
+    expect(args).toContain('--disable-slash-commands');
+    expect(args).toContain('--settings');
+    expect(args).toContain('180s');
+    expect(args).toContain('stream-json');
+  });
+
+  it('TC-U15: captures official agy init/step_update/result token usage and auto-finalizes manifest & report.md', () => {
+    const initialTime = '2026-11-23T00:00:00.000Z';
+    writeManifest(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-stream-usage-1',
+      title: 'Real agy NDJSON schema test',
+      mode: 'subscription',
+      status: 'DISPATCHED',
+      lockedPaths: [],
+      createdAt: initialTime,
+      updatedAt: initialTime,
+      artifacts: [],
+    });
+
+    const stream = new PassThrough();
+    const handle = attachStreamJsonHeartbeat(stream, {
+      workspaceRoot: tmpRoot,
+      taskId: 'ag-stream-usage-1',
+      minHeartbeatIntervalMs: 0,
+      autoFinalizeOnResult: true,
+    });
+
+    stream.write(
+      `${JSON.stringify({
+        event: 'init',
+        conversation_id: 'conv-live-777',
+        init: { model: 'gemini-4-neon-high', permission_mode: 'always-proceed' },
+      })}\n`,
+    );
+    stream.write(
+      `${JSON.stringify({
+        event: 'result',
+        result: {
+          conversation_id: 'conv-live-777',
+          status: 'SUCCESS',
+          response: 'All checks completed cleanly.',
+          duration_seconds: 4.25,
+          num_turns: 2,
+          usage: {
+            input_tokens: 11424,
+            output_tokens: 120,
+            thinking_tokens: 340,
+            cache_read_tokens: 5000,
+            total_tokens: 11884,
+          },
+        },
+      })}\n`,
+    );
+    stream.end();
+    handle.stop();
+
+    const finalManifest = readManifest(tmpRoot);
+    expect(finalManifest?.status).toBe('VERIFIED');
+    expect(finalManifest?.metrics?.conversationId).toBe('conv-live-777');
+    expect(finalManifest?.metrics?.model).toBe('gemini-4-neon-high');
+    expect(finalManifest?.metrics?.permissionMode).toBe('always-proceed');
+    expect(finalManifest?.metrics?.durationSeconds).toBe(4.25);
+    expect(finalManifest?.metrics?.numTurns).toBe(2);
+    expect(finalManifest?.metrics?.usage?.totalTokens).toBe(11884);
+    expect(finalManifest?.metrics?.usage?.thinkingTokens).toBe(340);
+
+    const reportText = fs.readFileSync(path.join(tmpRoot, '.ag-bridge', 'report.md'), 'utf8');
+    expect(reportText).toContain('All checks completed cleanly.');
+    expect(reportText).toContain('11,884');
+  });
+
+  it('TC-U16: aggregates API worker multi-turn token usage and parses agy models/agents output', async () => {
+    const models = parseAgyModelsOutput(
+      'Fetching available models...\ngemini-4-neon-high\tGemini 4 Neon (High)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n',
+    );
+    expect(models).toEqual([
+      { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+      { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
+    ]);
+    expect(parseAgyAgentsOutput('frontend-specialist\nqa-reviewer\n')).toEqual([
+      'frontend-specialist',
+      'qa-reviewer',
+    ]);
+
+    const cap = await handleListCapabilities(tmpRoot, {
+      detectorDeps: {
+        platform: 'win32',
+        env: {},
+        homedir: 'C:\\Users\\tester',
+        existsSync: () => false,
+        findBinary: (b) => (b === 'agy' ? 'C:\\bin\\agy.exe' : undefined),
+      },
+      queryCapabilitiesFn: () => ({
+        models,
+        agents: ['frontend-specialist'],
+        warnings: [],
+      }),
+    });
+    expect(cap.models.length).toBe(2);
+    expect(cap.agents).toEqual(['frontend-specialist']);
+
+    // Verify API worker accumulates usageMetadata across turns and handleGetUsage returns it
+    let turn = 0;
+    const apiEngine = new ApiWorkerEngine({
+      retryBaseDelayMs: 1,
+      adapterFactory: () => ({
+        generateTurn: async () => {
+          turn += 1;
+          if (turn === 1) {
+            return {
+              functionCalls: [{ name: 'list_dir', args: { path: '.' } }],
+              usage: { inputTokens: 1000, outputTokens: 50, thinkingTokens: 100, cacheReadTokens: 0, totalTokens: 1150 },
+            };
+          }
+          return {
+            text: 'Summary complete.',
+            usage: { inputTokens: 1200, outputTokens: 80, thinkingTokens: 20, cacheReadTokens: 500, totalTokens: 1300 },
+          };
+        },
+      }),
+    });
+
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = 'AIzaSyUsageTestApiKey1234567890abcdef';
+    try {
+      const del = await handleDelegateToAntigravity(
+        {
+          title: 'API token usage test',
+          instructions: 'Inspect workspace and summarize.',
+          lockedPaths: ['src/ui/'],
+          model: 'gemini-2.5-flash',
+          modeOverride: 'api',
+          workspaceRoot: tmpRoot,
+        },
+        {
+          pluginRoot,
+          apiWorkerEngine: apiEngine,
+          detectorDeps: {
+            platform: 'linux',
+            env: { GEMINI_API_KEY: 'AIzaSyUsageTestApiKey1234567890abcdef' },
+            homedir: '/home/tester',
+            existsSync: () => false,
+            findBinary: () => undefined,
+          },
+        },
+      );
+      expect(del.ok).toBe(true);
+      expect(del.metrics?.model).toBe('gemini-2.5-flash');
+      expect(del.metrics?.numTurns).toBe(2);
+      expect(del.metrics?.usage?.inputTokens).toBe(2200);
+      expect(del.metrics?.usage?.outputTokens).toBe(130);
+      expect(del.metrics?.usage?.thinkingTokens).toBe(120);
+      expect(del.metrics?.usage?.cacheReadTokens).toBe(500);
+      expect(del.metrics?.usage?.totalTokens).toBe(2450);
+
+      const summary = await handleGetUsage(tmpRoot);
+      expect(summary.totalTasks).toBe(1);
+      expect(summary.totals.totalTokens).toBe(2450);
+      expect(summary.byMode.api.tasks).toBe(1);
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+    }
   });
 
   it('API worker recovers from transient 429 retry, nudges build verification, slices read_file, and blocks .env reads', async () => {

@@ -3,23 +3,25 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-003` |
-| **버전** | `1.0.0` |
+| **버전** | `1.1.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [사용자/에이전트 플로우](../01-planning/user-flows.md), [MCP API 명세](./mcp-tools-api.md), [PRD](../01-planning/PRD.md) |
 
 ---
 
 ## 1. 프롬프트 자산 목록
 
-플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 5개이다.
+플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 7개이다.
 
 | 파일 경로 | 실행 주체 | 역할 |
 | :--- | :--- | :--- |
-| `skills/ag-delegate/SKILL.md` | Claude Code | 자율 위임 여부 판단, 입력 구조화, 결과 검수 및 롤백 의사결정 |
-| `commands/ag-delegate.md` | Claude Code | `/ag-delegate` 명시적 수동 위임 커맨드 |
-| `commands/ag-config.md` | Claude Code | `/ag-config` 실행 모드·모델·타임아웃 설정 커맨드 |
-| `commands/ag-status.md` | Claude Code | `/ag-status` 연결 상태 및 환경 진단 표 출력 커맨드 |
+| `skills/ag-delegate/SKILL.md` | Claude Code | 자율 위임 여부 판단, 전체 `agy` CLI 옵션 매핑, 토큰 사용량 보고, 결과 검수 및 롤백 의사결정 |
+| `commands/ag-delegate.md` | Claude Code | `/ag-delegate` 명시적 위임 커맨드 (전체 `agy` 플래그 및 `--dangerously-skip-permissions` 지원) |
+| `commands/ag-config.md` | Claude Code | `/ag-config` 실행 모드·모델·추론 강도·권한(`skip-permissions`)·샌드박스·타임아웃 설정 커맨드 |
+| `commands/ag-status.md` | Claude Code | `/ag-status` 연결 상태, `agy` 권한/모델 설정, 최근 토큰 사용량 및 환경 진단 표 출력 커맨드 |
+| `commands/ag-models.md` | Claude Code | `/ag-models` 실시간 `agy models`/`agy agents` 목록 및 지원 권한/플래그 조회 커맨드 |
+| `commands/ag-usage.md` | Claude Code | `/ag-usage` 워크스페이스 누적 및 최근 작업별 토큰 사용량(`input`/`output`/`thinking`/`cacheRead`/`total`) 리포트 커맨드 |
 | `templates/claude-handoff.md` | Antigravity (로컬 구독) | 대상 워크스페이스 `.agent/workflows/claude-handoff.md`로 배포되는 실행 지침서 |
 
 ---
@@ -32,70 +34,77 @@
 name: ag-delegate
 description: >-
   Delegate frontend UI implementation, multi-file component scaffolding, styling,
-  and real-browser E2E visual verification tasks from Claude Code to Antigravity
-  via the embedded antigravity-delegate MCP server.
+  real-browser E2E visual verification, and any Antigravity CLI (`agy`) workflow
+  (custom models, effort, agents, conversation resume, `--dangerously-skip-permissions`,
+  and token usage tracking) from Claude Code to Antigravity via the embedded
+  antigravity-delegate MCP server.
 ---
 ```
 
 ### 2.2 필수 지시 섹션
 1. **위임 적합 조건 (When to Delegate):**
    - React / Next.js / Vue / Svelte / Tailwind 등 프론트엔드 UI 컴포넌트 및 스타일링 작업
-   - 로컬 개발 서버(`verifyUrl`)에서 실제 브라우저 렌더링·레이아웃·콘솔 에러·사용자 인터랙션(클릭/입력)을 검증해야 하는 작업
-   - 백엔드 API 스펙 또는 TypeScript 타입이 확정된 상태에서 다수의 프론트엔드 페이지·상태 모듈을 생성/리팩토링하는 작업
+   - 로컬 개발 서버(`verifyUrl`)에서 실제 브라우저 렌더링·레이아웃·콘솔 에러·사용자 인터랙션을 검증해야 하는 작업
+   - 사용자가 명시적으로 Antigravity(`agy`) 모델·에이전트·대화 이어가기·브라우저 검증 또는 비대화형 실행을 요청한 모든 작업
 2. **위임 제외 조건 (When NOT to Delegate):**
-   - 단순 1~2줄 오타 수정 또는 백엔드 DB 마이그레이션·보안 핵심 로직
-   - API 스펙 자체가 미확정이어서 아키텍처 논의가 먼저 필요한 작업
-3. **사전 점검 절차:**
-   - 위임 전 `check_ag_environment`를 호출해 `resolvedMode`를 확인한다.
-   - `unavailable`이면 사용자에게 Antigravity 설치/로그인 또는 `GEMINI_API_KEY` 설정을 안내하고 위임을 중단한다.
-4. **모드별 완료 조건 분기 규칙:**
-   - `resolvedMode === 'subscription'`인 경우:
-     - 로컬 개발 서버 URL이 존재하면 반드시 `verifyUrl`을 전달한다.
-     - `acceptanceCriteria`에 "내장 브라우저로 렌더링 및 콘솔/네트워크 에러 0건 확인, 스크린샷을 `.ag-bridge/artifacts/`에 저장"을 포함한다.
-   - `resolvedMode === 'api'`인 경우:
-     - `acceptanceCriteria`에 "`npx tsc --noEmit` 및 `npm run build`(또는 프로젝트 빌드 스크립트) 통과"를 필수로 포함한다.
+   - 단순 1~2줄 오타 수정 또는 백엔드 DB 마이그레이션·보안 핵심 로직(사용자가 명시적으로 Antigravity 실행을 요청한 경우 제외)
+3. **사전 점검 및 기능 조회:**
+   - 위임 전 `check_ag_environment`로 `resolvedMode` 및 `agyConfig`를 확인한다.
+   - 모델/에이전트 선택이 필요할 때 `list_ag_capabilities`로 실시간 목록을 확인한다.
+4. **권한 정책 (`--dangerously-skip-permissions`):**
+   - 사용자가 명시적으로 `--dangerously-skip-permissions` / `always-proceed`를 요청하거나 `.ag-bridge/config.json`에 설정된 경우에만 `dangerouslySkipPermissions: true`를 전달한다.
+   - 임의로 `dangerouslySkipPermissions: true`를 활성화하지 않으며, 활성 시 Git Guard 체크포인트가 생성되었음을 안내한다.
 5. **최소 권한 `lockedPaths` 원칙:**
-   - 작업에 필요한 프론트엔드 디렉터리/파일만 좁게 지정한다(예: `["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`).
-   - `.git/`, `.env*`, 백엔드 핵심 디렉터리는 절대 포함하지 않는다.
-6. **결과 검수 및 롤백 기준:**
-   - 반환된 `reportMarkdown`, `changedFiles`, `artifacts`를 검토하고 필요 시 `git diff`로 핵심 변경을 확인한다.
-   - 치명적 회귀·요구사항 미충족·빌드 실패가 해소되지 않으면 사용자 동의를 얻거나 명시적 지시에 따라 `rollback_ag_task`를 호출한다.
+   - 코드 수정 작업 시 필요한 디렉터리/파일만 좁게 지정한다(`.git/`, `.env*`, `.ag-bridge/config.json` 절대 금지).
+   - Subscription 모드에서 순수 질의·분석·자유 `agy` 실행일 때만 `lockedPaths` 생략을 허용한다. API 모드에서는 `lockedPaths` 필수.
+6. **결과 검수, 토큰 사용량 보고 및 롤백 기준:**
+   - 반환된 `reportMarkdown`, `changedFiles`, `artifacts`, `metrics`(`model`, `conversationId`, `permissionMode`, `durationSeconds`, `usage.inputTokens`/`outputTokens`/`thinkingTokens`/`cacheReadTokens`/`totalTokens`)를 사용자에게 간결하게 보고한다.
+   - 회귀 또는 실패 시 사용자 확인 하에 `rollback_ag_task`를 호출한다.
 
 ---
 
-## 3. 슬래시 커맨드 3종 설계 명세
+## 3. 슬래시 커맨드 5종 설계 명세
 
 ### 3.1 `commands/ag-delegate.md` (`/ag-delegate`)
-- **사용법:** `/ag-delegate <작업 설명> [--paths <p1,p2>] [--url <http://localhost:3000/...>] [--mode <auto|subscription|api>]`
+- **사용법:**
+  ```text
+  /ag-delegate <작업 설명> [--paths <p1,p2>] [--url <http://localhost:3000/...>] [--mode <auto|subscription|api>] [--model <id>] [--effort <low|medium|high|xhigh|max>] [--agent <name>] [--agy-mode <accept-edits|auto|plan>] [--sandbox|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <schema>] [--disable-slash-commands] [--settings <path|json>] [--timeout <sec>]
+  ```
 - **실행 흐름:**
-  1. `$ARGUMENTS`에서 작업 목표, 선택적 `--paths`, `--url`, `--mode`를 파싱한다.
-  2. `--paths`가 생략된 경우 프로젝트 구조를 빠르게 확인해 최소 권한 `lockedPaths`를 추론하고 명시한다.
-  3. `check_ag_environment` 확인 후 모드에 맞는 `acceptanceCriteria`를 구성해 `delegate_to_antigravity`를 호출한다.
-  4. 반환된 리포트, 변경 파일, 아티팩트 경로를 요약 보고한다.
+  1. `$ARGUMENTS`에서 작업 설명과 모든 선택 플래그를 파싱한다.
+  2. `check_ag_environment` 확인 후 API 모드 또는 코드 수정 작업 시 최소 권한 `lockedPaths`를 구성해 `delegate_to_antigravity`를 호출한다.
+  3. 반환된 리포트, 변경 파일, 아티팩트, **토큰 사용량 및 `conversationId`**를 요약 보고한다.
 
 ### 3.2 `commands/ag-config.md` (`/ag-config`)
 - **사용법:**
   - `/ag-config` (현재 `.ag-bridge/config.json` 조회)
   - `/ag-config mode <auto|subscription|api>`
-  - `/ag-config model <gemini-model-name>`
+  - `/ag-config agy-mode <accept-edits|auto|plan>`
+  - `/ag-config agy-model <model-id|clear>`
+  - `/ag-config effort <low|medium|high|xhigh|max|clear>`
+  - `/ag-config agent <agent-name|clear>`
+  - `/ag-config sandbox <on|off>`
+  - `/ag-config skip-permissions <on|off>` (`subscription.agy_dangerously_skip_permissions` 설정 + 보안 주의 안내)
+  - `/ag-config stream-heartbeat <on|off>`
+  - `/ag-config model <gemini-model-name>` (API 모드 모델)
   - `/ag-config timeout <seconds>`
   - `/ag-config max-turns <count>`
+  - `/ag-config git-guard <best_effort|required>`
 - **실행 흐름:**
-  1. `.ag-bridge/config.json`을 읽어 유효성 검증 후 요청된 키만 업데이트한다(파일이 없으면 기본 템플릿 생성).
-  2. 변경 전/후 설정 값을 표로 출력하고 `check_ag_environment`를 호출해 변경된 해석 모드를 즉시 검증한다.
-  3. API 키 평문 저장 요청 시 보안 경고와 함께 환경변수(`GEMINI_API_KEY`) 사용을 권장한다.
+  1. `.ag-bridge/config.json`을 읽어 유효성 검증 후 요청된 키만 원자적으로 업데이트한다.
+  2. 변경 전/후 표를 출력하고 `check_ag_environment`로 즉시 검증한다.
 
 ### 3.3 `commands/ag-status.md` (`/ag-status`)
 - **사용법:** `/ag-status`
-- **실행 흐름:**
-  1. `check_ag_environment({})` 호출.
-  2. 아래 표준 마크다운 표 형식으로 출력:
-     - Execution Mode (설정값 / 실제 해석값)
-     - Subscription App/CLI 감지 상태 및 경로
-     - API Key 상태 (`Configured (env)` / `Not set`) 및 모델명
-     - Bridge 상태 (`IDLE` / `RUNNING` / 마지막 작업 ID 및 시각)
-     - Git Guard 상태 (저장소 여부, 브랜치, Dirty 여부)
-  3. `recommendations`가 존재하면 하단에 실행 가능한 조치 명령어를 안내한다.
+- **실행 흐름:** `check_ag_environment({})`를 호출해 Execution Mode, Subscription App/CLI, **`agy` CLI Defaults**(`mode`, `sandbox`, `dangerouslySkipPermissions`, `model`, `effort`, `agent`), Gemini API Key, Bridge 상태(최근 `conversationId` 및 토큰 사용량 포함), Git Guard 상태를 표로 출력한다.
+
+### 3.4 `commands/ag-models.md` (`/ag-models`)
+- **사용법:** `/ag-models`
+- **실행 흐름:** `list_ag_capabilities({})`를 호출해 실시간 감지된 `agy models` 목록, `agy agents`, 지원 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도(`effort`), 지원 CLI 플래그, 현재 기본값을 정리해 출력한다.
+
+### 3.5 `commands/ag-usage.md` (`/ag-usage`)
+- **사용법:** `/ag-usage [limit]`
+- **실행 흐름:** `get_ag_usage({ limit })`를 호출해 누적 토큰 사용량(`input`, `output`, `thinking`, `cacheRead`, `total`), 모드별(`subscription` vs `api`) 집계, 최근 작업별 토큰/시간/`conversationId` 표를 출력한다.
 
 ---
 

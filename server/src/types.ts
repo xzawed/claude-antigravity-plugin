@@ -37,6 +37,42 @@ export class AgPluginError extends Error {
 }
 
 export type AgyExecutionMode = 'accept-edits' | 'auto' | 'plan';
+export type AgyEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+}
+
+export interface ExecutionMetrics {
+  conversationId?: string;
+  model?: string;
+  durationSeconds?: number;
+  numTurns?: number;
+  permissionMode?: string;
+  usage?: TokenUsage;
+}
+
+export interface AgyCliOptions {
+  model?: string;
+  effort?: AgyEffortLevel;
+  agent?: string;
+  agyMode?: AgyExecutionMode;
+  sandbox?: boolean;
+  dangerouslySkipPermissions?: boolean;
+  addDirs?: string[];
+  continueConversation?: boolean;
+  conversationId?: string;
+  project?: string;
+  newProject?: boolean;
+  remoteAgent?: boolean;
+  jsonSchema?: string;
+  disableSlashCommands?: boolean;
+  settings?: string;
+}
 
 export interface SubscriptionConfig {
   app_path: string;
@@ -45,7 +81,15 @@ export interface SubscriptionConfig {
   poll_interval_ms: number;
   agy_mode: AgyExecutionMode;
   agy_sandbox: boolean;
+  agy_dangerously_skip_permissions: boolean;
   agy_stream_heartbeat: boolean;
+  agy_model?: string;
+  agy_effort?: AgyEffortLevel;
+  agy_agent?: string;
+  agy_project?: string;
+  agy_remote_agent?: boolean;
+  agy_disable_slash_commands?: boolean;
+  agy_settings?: string;
 }
 
 export interface ApiConfig {
@@ -73,6 +117,7 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
     poll_interval_ms: 2000,
     agy_mode: 'accept-edits',
     agy_sandbox: true,
+    agy_dangerously_skip_permissions: false,
     agy_stream_heartbeat: true,
   },
   api: {
@@ -98,6 +143,7 @@ export interface BridgeManifest {
   gitUntrackedBaseline?: string[];
   artifacts: string[];
   changedFiles?: string[];
+  metrics?: ExecutionMetrics;
   errorCode?: AgErrorCode;
   error?: string;
 }
@@ -135,22 +181,34 @@ export interface GitStatusInfo {
 
 export interface CheckEnvironmentOutput extends EnvironmentDetectionResult {
   git: GitStatusInfo;
+  agyConfig: {
+    mode: AgyExecutionMode;
+    sandbox: boolean;
+    dangerouslySkipPermissions: boolean;
+    streamHeartbeat: boolean;
+    model?: string;
+    effort?: AgyEffortLevel;
+    agent?: string;
+  };
   bridge: {
     initialized: boolean;
     gitignoreProtected: boolean;
     currentStatus: TaskStatus;
     lastTaskId?: string;
     lastUpdatedAt?: string;
+    lastConversationId?: string;
+    lastUsage?: TokenUsage;
   };
 }
 
-export interface DelegateToolInput {
+export interface DelegateToolInput extends AgyCliOptions {
   title: string;
   instructions: string;
-  lockedPaths: string[];
+  lockedPaths?: string[];
   verifyUrl?: string;
-  acceptanceCriteria: string[];
+  acceptanceCriteria?: string[];
   modeOverride?: ExecutionMode;
+  timeoutSec?: number;
   workspaceRoot?: string;
 }
 
@@ -163,6 +221,7 @@ export interface DelegateToolOutput {
   changedFiles: string[];
   artifacts: string[];
   reportMarkdown: string;
+  metrics?: ExecutionMetrics;
   warnings: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
@@ -181,4 +240,55 @@ export interface RollbackToolOutput {
   removedUntrackedFiles: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
+}
+
+export interface AgyModelInfo {
+  id: string;
+  label: string;
+}
+
+export interface ListCapabilitiesOutput {
+  subscriptionDetected: boolean;
+  cliBinary?: string;
+  cliPath?: string;
+  models: AgyModelInfo[];
+  agents: string[];
+  supportedPermissionModes: string[];
+  supportedEffortLevels: AgyEffortLevel[];
+  supportedFlags: string[];
+  currentDefaults: {
+    agyMode: AgyExecutionMode;
+    sandbox: boolean;
+    dangerouslySkipPermissions: boolean;
+    streamHeartbeat: boolean;
+    model?: string;
+    effort?: AgyEffortLevel;
+    agent?: string;
+  };
+  warnings: string[];
+}
+
+export interface TaskUsageRecord {
+  taskId: string;
+  title: string;
+  mode: ResolvedExecutionMode;
+  status: TaskStatus;
+  model?: string;
+  conversationId?: string;
+  durationSeconds?: number;
+  numTurns?: number;
+  usage: TokenUsage;
+  updatedAt: string;
+}
+
+export interface UsageSummaryOutput {
+  totalTasks: number;
+  tasksWithUsage: number;
+  totals: TokenUsage;
+  totalDurationSeconds: number;
+  byMode: {
+    subscription: { tasks: number; usage: TokenUsage };
+    api: { tasks: number; usage: TokenUsage };
+  };
+  recentTasks: TaskUsageRecord[];
 }

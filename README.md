@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
-[![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **Language:** **English** · [한국어 (README.ko.md)](./README.ko.md)
 
@@ -28,7 +28,7 @@
 
 | ⚡ Diagnostics Speed | 🛡️ Automated Verification | 🌍 Cross-Platform CI | 🔒 Dependency Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** avg | **`35 / 35`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
+| **`149.9 ms`** avg | **`39 / 39`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
 | `check_ag_environment` (`4.3×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -37,8 +37,8 @@
 
 `claude-antigravity-plugin` (Claude Code plugin & MCP server: **`antigravity-delegate`**) connects **Claude Code** (main orchestrator, backend & architecture lead) with **Antigravity** (frontend UI builder, multi-file refactoring & real-browser visual QA specialist) through an embedded **Stdio MCP server** and a transparent `.ag-bridge/` file protocol.
 
-- **Zero Manual Copy-Paste:** Claude dispatches structured specs, TypeScript types, `lockedPaths`, `verifyUrl`, and acceptance criteria directly to Antigravity and receives a verified report plus screenshots.
-- **Zero Extra Billing for Subscribers:** Automatically detects your local Antigravity CLI (`agy`, `antigravity`, `ag`) or desktop app first, falling back to `GEMINI_API_KEY` only when no local subscription provider is installed.
+- **Zero Manual Copy-Paste & Full `agy` CLI Parity:** Claude dispatches any task — frontend UI, multi-file refactors, browser QA, custom models/effort/agents, conversation resume (`--continue` / `--conversation`), or `--dangerously-skip-permissions` (`always-proceed`) — and receives a verified report, screenshots, and real-time token usage metrics.
+- **Zero Extra Billing for Subscribers & Full Token Visibility:** Automatically detects your local Antigravity CLI (`agy`, `antigravity`, `ag`) or desktop app first, falling back to `GEMINI_API_KEY` only when no local subscription provider is installed. Both engines track `input`, `output`, `thinking`, `cacheRead`, and `total` tokens via `get_ag_usage` (`/ag-usage`).
 - **Zero Risk to Uncommitted Work:** Automatically snapshots dirty trees (staged, unstaged, and pre-existing untracked files) via Git Guard before every delegation so you can roll back cleanly at any time.
 
 ---
@@ -168,11 +168,20 @@ Claude calls `check_ag_environment({})` and prints a live diagnostic summary:
 | :--- | :--- | :--- |
 | **Execution Mode** | `auto` → **`subscription`** | Active provider resolution |
 | **Subscription App/CLI** | `Detected` | `agy` (`C:\Users\...\agy\bin\agy.exe`), `cli_or_ipc` |
+| **`agy` CLI Defaults** | `mode: accept-edits` | `sandbox: on`, `skipPermissions: off`, `model: default`, `effort: default` |
 | **Gemini API Key** | `Not set` / `Configured (env)` | Env `GEMINI_API_KEY`, model `gemini-2.5-pro`, max turns `15` |
-| **Bridge (`.ag-bridge/`)** | `IDLE` | Initialized: `yes`, `.gitignore`: `protected`, Last Task: `none` |
+| **Bridge (`.ag-bridge/`)** | `IDLE` | Initialized: `yes`, `.gitignore`: `protected`, Last Task / Conversation / Tokens |
 | **Git Guard** | `Ready` | Branch `main`, Working tree `clean` |
 
-### 2. Configure Mode, Model, or Guardrails (`/ag-config`)
+### 2. Discover Live Models & Capabilities (`/ag-models`)
+
+Query your local `agy` installation for live available models (`agy models`), custom agents (`agy agents`), supported permission modes, and CLI flags:
+
+```text
+/ag-models
+```
+
+### 3. Configure Mode, Permissions (`--dangerously-skip-permissions`), Model, or Guardrails (`/ag-config`)
 
 Settings are stored per workspace in `.ag-bridge/config.json`:
 
@@ -181,38 +190,63 @@ Settings are stored per workspace in `.ag-bridge/config.json`:
 /ag-config mode auto                      # Subscription first, API fallback (default)
 /ag-config mode subscription              # Force local Antigravity subscription mode
 /ag-config mode api                       # Force headless Gemini API mode
+/ag-config agy-mode accept-edits          # Subscription permission mode (accept-edits | auto | plan)
+/ag-config skip-permissions on            # Enable --dangerously-skip-permissions (always-proceed) by default
+/ag-config skip-permissions off           # Disable --dangerously-skip-permissions (default)
+/ag-config agy-model gemini-4-neon-high   # Default model for agy Subscription mode (or `clear`)
+/ag-config effort high                    # Default effort level (low | medium | high | xhigh | max | clear)
+/ag-config agent my-frontend-agent        # Default custom agy agent (or `clear`)
+/ag-config sandbox off                    # Toggle agy --sandbox / --no-sandbox (on | off)
 /ag-config model gemini-2.5-flash         # Change Gemini model for API mode
 /ag-config timeout 600                    # Set Subscription timeout in seconds (30–1800)
 /ag-config max-turns 20                   # Set API worker turn budget (1–50)
 /ag-config git-guard required             # Require a Git repo before delegating (best_effort | required)
 ```
 
-### 3. Autonomous Delegation (Just Prompt Claude Naturally)
+> **Environment variable override:** You can also enable `--dangerously-skip-permissions` per shell session via `AG_DANGEROUSLY_SKIP_PERMISSIONS=1` (`true`/`yes`). Git Guard still snapshots your repository before execution so you can roll back with `rollback_ag_task`.
 
-Because `skills/ag-delegate/SKILL.md` is loaded automatically, Claude Code recognizes frontend UI, multi-file scaffolding, and real-browser E2E tasks on its own. For example:
+### 4. Autonomous Delegation (Just Prompt Claude Naturally)
+
+Because `skills/ag-delegate/SKILL.md` is loaded automatically, Claude Code recognizes frontend UI, multi-file scaffolding, real-browser E2E tasks, and explicit Antigravity CLI requests on its own. For example:
 
 > *"We finalized `/api/checkout` in `src/server/checkout.ts`. Please build the responsive Checkout page and CartDrawer under `src/components/checkout/` and `src/pages/CheckoutPage.tsx`, then verify the rendered UI and form submission on `http://localhost:3000/checkout` with zero console errors."*
 
 **What happens behind the scenes:**
 1. Claude calls `check_ag_environment` to verify the active engine (`subscription` or `api`).
-2. Claude calls `delegate_to_antigravity` with least-privilege `lockedPaths` (`["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`), full API types, `verifyUrl`, and mode-appropriate `acceptanceCriteria`.
-3. The MCP server creates a lossless Git Guard checkpoint, writes `.ag-bridge/dispatch.md` & `manifest.json`, and runs Antigravity (`agy --print --mode accept-edits --sandbox --output-format stream-json`) or the Gemini API worker.
-4. While `agy` works, real-time NDJSON heartbeats refresh `manifest.json` and save redacted logs to `.ag-bridge/artifacts/<taskId>/agy-cli.log`.
-5. On completion (`VERIFIED`), Claude receives `.ag-bridge/report.md`, `changedFiles`, and screenshot paths, reviews `git diff`, and summarizes the verified results for you.
+2. Claude calls `delegate_to_antigravity` with least-privilege `lockedPaths` (`["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`), full API types, `verifyUrl`, optional `agy` flags (`model`, `effort`, `dangerouslySkipPermissions`, etc.), and mode-appropriate `acceptanceCriteria`.
+3. The MCP server creates a lossless Git Guard checkpoint, writes `.ag-bridge/dispatch.md` & `manifest.json`, and runs Antigravity (`agy --print ... --output-format stream-json`) or the Gemini API worker.
+4. While `agy` works, real-time NDJSON events refresh `manifest.json` heartbeats, capture `conversationId`, `permissionMode`, and token `usage`, and save redacted logs to `.ag-bridge/artifacts/<taskId>/agy-cli.log`.
+5. On completion (`VERIFIED`), Claude receives `.ag-bridge/report.md`, `changedFiles`, `artifacts`, and `metrics` (tokens, duration, conversation ID), reviews `git diff`, and summarizes the verified results for you.
 
-### 4. Explicit Manual Delegation (`/ag-delegate`)
+### 5. Explicit Manual Delegation (`/ag-delegate`)
 
-Use `/ag-delegate` whenever you want to delegate a specific task explicitly:
+Use `/ag-delegate` with any Antigravity CLI flag:
 
 ```text
 # Subscription mode with real-browser visual QA on a local dev server
 /ag-delegate Build the analytics KPI cards and filterable data table --paths src/components/analytics/,src/pages/Analytics.tsx --url http://localhost:3000/analytics
 
+# Full-autonomy delegation with --dangerously-skip-permissions, custom model & high effort
+/ag-delegate Refactor dashboard charts and run full build verification --paths src/components/charts/ --model gemini-4-neon-high --effort high --dangerously-skip-permissions
+
+# Resume the previous Antigravity conversation or a specific conversation ID
+/ag-delegate Add dark-mode support to the cards you just created --continue
+/ag-delegate Fix the remaining responsive breakpoint on mobile --conversation 89a5b562-2468-420f-a6c1-8a191e634164
+
 # Force headless Gemini API mode for a pure code/typecheck refactor
 /ag-delegate Migrate FormField and SelectInput components to Tailwind v4 tokens --paths src/components/forms/ --mode api
 ```
 
-### 5. Review & One-Click Rollback (`rollback_ag_task`)
+### 6. Inspect Token Usage & Execution Metrics (`/ag-usage`)
+
+View cumulative and per-task token usage (`input`, `output`, `thinking`, `cacheRead`, `total`), execution duration, `conversationId`, and Subscription vs. API breakdowns across the workspace:
+
+```text
+/ag-usage        # Recent 20 tasks + workspace totals
+/ag-usage 50     # Up to 50 recent tasks
+```
+
+### 7. Review & One-Click Rollback (`rollback_ag_task`)
 
 After delegation finishes, inspect Claude's summary, `.ag-bridge/report.md`, and any screenshots in `.ag-bridge/artifacts/<taskId>/`. If the output isn't what you wanted, simply tell Claude:
 
@@ -246,15 +280,19 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 
 | MCP Tool | Input Parameters | Description |
 | :--- | :--- | :--- |
-| **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths`, `acceptanceCriteria`, `verifyUrl?`, `modeOverride?`, `workspaceRoot?` | Creates a Git checkpoint, writes `.ag-bridge/dispatch.md`, executes Subscription or API engine, and returns `reportMarkdown`, `changedFiles`, and `artifacts`. |
-| **`check_ag_environment`** | `workspaceRoot?` | Diagnoses resolved mode, detected Antigravity CLI/app paths (resilient to stripped MCP host `PATH`), redacted API key status, Git state, and bridge status. |
+| **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths?`, `acceptanceCriteria?`, `verifyUrl?`, `modeOverride?`, `timeoutSec?`, `model?`, `effort?`, `agent?`, `agyMode?`, `sandbox?`, `dangerouslySkipPermissions?`, `addDirs?`, `continueConversation?`, `conversationId?`, `project?`, `newProject?`, `remoteAgent?`, `jsonSchema?`, `disableSlashCommands?`, `settings?`, `workspaceRoot?` | Creates a Git checkpoint, writes `.ag-bridge/dispatch.md`, executes Subscription (`agy` full CLI parity) or API engine, and returns `reportMarkdown`, `changedFiles`, `artifacts`, and token `metrics`. |
+| **`check_ag_environment`** | `workspaceRoot?` | Diagnoses resolved mode, detected Antigravity CLI/app paths, active `agyConfig` defaults, redacted API key status, Git state, and bridge/last usage state. |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | Restores tracked, staged, unstaged, and deleted files to `gitCheckpointRef` (supports both current and archived `taskId`s) while preserving pre-existing untracked files. |
+| **`list_ag_capabilities`** | `workspaceRoot?` | Queries live `agy models` and `agy agents` in parallel and reports supported permission modes (`--dangerously-skip-permissions` included), effort levels, CLI flags, and workspace defaults. |
+| **`get_ag_usage`** | `workspaceRoot?`, `limit?` | Aggregates cumulative and per-task token usage (`input`, `output`, `thinking`, `cacheRead`, `total`), duration, and Subscription vs. API stats across current + `history/*.json` tasks. |
 
 | Slash Command | Syntax |
 | :--- | :--- |
-| **`/ag-delegate`** | `/ag-delegate <instructions> [--paths p1,p2] [--url http://localhost:3000] [--mode auto\|subscription\|api]` |
-| **`/ag-config`** | `/ag-config [mode\|model\|timeout\|max-turns\|git-guard <value>]` |
+| **`/ag-delegate`** | `/ag-delegate <instructions> [--paths p1,p2] [--url ...] [--mode auto\|subscription\|api] [--model <id>] [--effort <lvl>] [--agent <name>] [--agy-mode accept-edits\|auto\|plan] [--sandbox\|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <json>] [--disable-slash-commands] [--settings <val>] [--timeout <sec>]` |
+| **`/ag-config`** | `/ag-config [mode\|agy-mode\|agy-model\|effort\|agent\|sandbox\|skip-permissions\|stream-heartbeat\|model\|timeout\|max-turns\|git-guard <value>]` |
 | **`/ag-status`** | `/ag-status` |
+| **`/ag-models`** | `/ag-models` |
+| **`/ag-usage`** | `/ag-usage [limit]` |
 
 ---
 
@@ -270,7 +308,7 @@ Every performance target (`NFR-005`) and cross-platform edge case is empirically
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`149.9 ms` avg** (`4.3×` faster) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`90.3 ms` avg** (`3.3×` headroom) | ✅ **PASS** |
-| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`35 / 35` tests (6 suites)** | ✅ **PASS** |
+| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`39 / 39` tests (6 suites)** | ✅ **PASS** |
 | Windows `.cmd` CLI Spawn (Node 20.12+/24) | No `EINVAL` crash | `spawn EINVAL` | `buildCliSpawnSpec` safe wrapper | ✅ **PASS** |
 
 ---
@@ -317,13 +355,13 @@ claude-antigravity-plugin/
 ├── .github/workflows/ci.yml       # Cross-platform CI (Ubuntu/Windows/macOS x Node 20/22)
 ├── hooks/hooks.json               # SessionStart auto-initialization hook
 ├── skills/ag-delegate/SKILL.md    # Autonomous delegation & review skill
-├── commands/                      # /ag-delegate, /ag-config, /ag-status
+├── commands/                      # /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
 ├── templates/claude-handoff.md    # Antigravity handoff workflow template
 ├── server/                        # TypeScript MCP server, dual engines, verifier & tests
 │   ├── src/
-│   │   ├── index.ts               # MCP Stdio server entrypoint (3 tools)
+│   │   ├── index.ts               # MCP Stdio server entrypoint (5 tools)
 │   │   ├── cli-init.ts            # SessionStart initializer CLI
-│   │   ├── types.ts               # State machine, config & error code types
+│   │   ├── types.ts               # State machine, config, metrics & error code types
 │   │   ├── config.ts              # Config precedence, Zod validation & secret masking
 │   │   ├── path-guard.ts          # lockedPaths canonicalization & traversal guard
 │   │   ├── bridge-fs.ts           # Atomic .ag-bridge/ I/O, locking & history archive
@@ -331,10 +369,10 @@ claude-antigravity-plugin/
 │   │   ├── detector.ts            # Pure-JS cross-platform agy/antigravity & API detector
 │   │   └── engines/
 │   │       ├── base.ts            # ExecutionEngine strategy interface
-│   │       ├── subscription.ts    # Local Antigravity CLI/IPC + stream-json heartbeat watcher
-│   │       └── api-worker.ts      # @google/genai 4-tool autonomous loop engine
+│   │       ├── subscription.ts    # Full agy CLI parity, stream-json usage & capability query
+│   │       └── api-worker.ts      # @google/genai 4-tool autonomous loop + usageMetadata
 │   ├── scripts/verify-plugin.mjs  # Live healthcheck & Stdio MCP smoke verifier
-│   └── tests/                     # 6 suites / 35 automated tests (unit, security, E2E)
+│   └── tests/                     # 6 suites / 39 automated tests (unit, security, E2E)
 ├── AGENTS.md                      # Antigravity workspace rules & PR workflow invariants
 ├── CONTRIBUTING.md                # Contributor workflow & engineering invariants
 ├── SECURITY.md                    # Vulnerability reporting & security boundaries
@@ -357,6 +395,7 @@ claude-antigravity-plugin/
     "poll_interval_ms": 2000,
     "agy_mode": "accept-edits",
     "agy_sandbox": true,
+    "agy_dangerously_skip_permissions": false,
     "agy_stream_heartbeat": true
   },
   "api": {

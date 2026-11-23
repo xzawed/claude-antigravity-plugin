@@ -1,8 +1,10 @@
 import {
   AgErrorCode,
+  AgyCliOptions,
   BridgeConfig,
   BridgeManifest,
   EnvironmentDetectionResult,
+  ExecutionMetrics,
   ResolvedExecutionMode,
 } from '../types.js';
 
@@ -14,6 +16,8 @@ export interface ExecutionContext {
   instructions: string;
   acceptanceCriteria: string[];
   detection: EnvironmentDetectionResult;
+  agyOptions?: AgyCliOptions;
+  timeoutSecOverride?: number;
 }
 
 export interface ExecutionResult {
@@ -21,6 +25,7 @@ export interface ExecutionResult {
   reportMarkdown: string;
   changedFiles: string[];
   artifacts: string[];
+  metrics?: ExecutionMetrics;
   warnings: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;

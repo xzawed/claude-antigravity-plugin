@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeManifest } from '../src/bridge-fs.js';
+import { archiveManifest, writeManifest } from '../src/bridge-fs.js';
 import { createCheckpoint } from '../src/git-guard.js';
 
 describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
@@ -20,7 +20,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('TC-I01: exposes all 3 MCP tools over clean stdio JSON-RPC and executes check_ag_environment', async () => {
+  it('TC-I01: exposes all 5 MCP tools over clean stdio JSON-RPC and executes check_ag_environment', async () => {
     if (!fs.existsSync(distIndex)) {
       throw new Error(`Built server not found at ${distIndex}. Run "npm run build" before tests.`);
     }
@@ -41,6 +41,8 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       expect(toolNames).toEqual([
         'check_ag_environment',
         'delegate_to_antigravity',
+        'get_ag_usage',
+        'list_ag_capabilities',
         'rollback_ag_task',
       ]);
 
@@ -168,4 +170,108 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       await client.close();
     }
   });
+
+  it('TC-I08: aggregates current + archived token usage via get_ag_usage and exposes --dangerously-skip-permissions in list_ag_capabilities', async () => {
+    archiveManifest(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-usage-sub-1',
+      title: 'Archived Subscription Task',
+      mode: 'subscription',
+      status: 'VERIFIED',
+      lockedPaths: ['src/'],
+      createdAt: '2026-11-23T01:00:00.000Z',
+      updatedAt: '2026-11-23T01:01:00.000Z',
+      artifacts: [],
+      metrics: {
+        model: 'gemini-4-neon-high',
+        conversationId: 'conv-abc-123',
+        durationSeconds: 12.5,
+        numTurns: 3,
+        permissionMode: 'always-proceed',
+        usage: {
+          inputTokens: 10000,
+          outputTokens: 500,
+          thinkingTokens: 200,
+          cacheReadTokens: 4000,
+          totalTokens: 10700,
+        },
+      },
+    });
+    writeManifest(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-usage-api-2',
+      title: 'Current API Task',
+      mode: 'api',
+      status: 'VERIFIED',
+      lockedPaths: ['src/'],
+      createdAt: '2026-11-23T02:00:00.000Z',
+      updatedAt: '2026-11-23T02:01:00.000Z',
+      artifacts: [],
+      metrics: {
+        model: 'gemini-2.5-pro',
+        durationSeconds: 4.5,
+        numTurns: 2,
+        usage: {
+          inputTokens: 2000,
+          outputTokens: 300,
+          thinkingTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 2300,
+        },
+      },
+    });
+
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [distIndex],
+      cwd: tmpRoot,
+      stderr: 'pipe',
+    });
+    const client = new Client({ name: 'test-mcp-client-usage', version: '1.1.0' });
+    await client.connect(transport);
+    try {
+      const usageCall = await client.callTool({
+        name: 'get_ag_usage',
+        arguments: { workspaceRoot: tmpRoot },
+      });
+      const usage = JSON.parse(
+        ((usageCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as {
+        totalTasks: number;
+        tasksWithUsage: number;
+        totalDurationSeconds: number;
+        totals: { inputTokens: number; outputTokens: number; totalTokens: number };
+        byMode: { subscription: { tasks: number }; api: { tasks: number } };
+      };
+
+      expect(usage.totalTasks).toBe(2);
+      expect(usage.tasksWithUsage).toBe(2);
+      expect(usage.totalDurationSeconds).toBe(17);
+      expect(usage.totals.inputTokens).toBe(12000);
+      expect(usage.totals.outputTokens).toBe(800);
+      expect(usage.totals.totalTokens).toBe(13000);
+      expect(usage.byMode.subscription.tasks).toBe(1);
+      expect(usage.byMode.api.tasks).toBe(1);
+
+      const capCall = await client.callTool({
+        name: 'list_ag_capabilities',
+        arguments: { workspaceRoot: tmpRoot },
+      });
+      const cap = JSON.parse(
+        ((capCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as {
+        supportedFlags: string[];
+        supportedPermissionModes: string[];
+      };
+      expect(cap.supportedFlags).toContain('--dangerously-skip-permissions');
+      expect(cap.supportedFlags).toContain('--model');
+      expect(cap.supportedFlags).toContain('--effort');
+      expect(cap.supportedFlags).toContain('--conversation');
+      expect(cap.supportedPermissionModes.some((m) => m.includes('--dangerously-skip-permissions'))).toBe(
+        true,
+      );
+    } finally {
+      await client.close();
+    }
+  }, 20_000);
 });
