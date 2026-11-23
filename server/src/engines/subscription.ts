@@ -27,6 +27,7 @@ export interface StreamCaptureState {
   resultReceived: boolean;
   resultStatus?: string;
   resultResponse?: string;
+  structuredOutput?: unknown;
   errorMessage?: string;
 }
 
@@ -35,6 +36,7 @@ export interface TriggerOutcome {
   warning?: string;
   streamState?: StreamCaptureState;
   stopStream?: () => void;
+  killProcess?: () => void;
 }
 
 export type TriggerFn = (ctx: ExecutionContext) => Promise<TriggerOutcome>;
@@ -43,14 +45,34 @@ export interface SubscriptionEngineOptions {
   triggerFn?: TriggerFn;
 }
 
+const NATIVE_AGY_SLASH_RE =
+  /^\/(boost|browser|swarm|goal|teamwork|grill-me|plan|btw|compact|codesearch|learn|schedule)\b/i;
+
 export function buildHandoffPrompt(ctx: ExecutionContext): string {
   const disableSlash =
     ctx.agyOptions?.disableSlashCommands ?? ctx.config.subscription.agy_disable_slash_commands;
+  const trimmedInstructions = ctx.instructions.trim();
 
-  // If the user explicitly disabled slash commands or is resuming an existing conversation,
-  // send the direct instructions while referencing .ag-bridge/dispatch.md for full context.
-  if (disableSlash || ctx.agyOptions?.continueConversation || ctx.agyOptions?.conversationId) {
-    return `${ctx.instructions}\n\n(Delegated task ID: ${ctx.manifest.taskId}. Bridge context is also saved in .ag-bridge/dispatch.md.)`;
+  // Preserve native Antigravity CLI power slash commands (/boost, /browser, /swarm, /goal, etc.)
+  // or explicit rawPrompt verbatim so Antigravity expands them directly.
+  if (
+    ctx.agyOptions?.rawPrompt ||
+    (!disableSlash && NATIVE_AGY_SLASH_RE.test(trimmedInstructions))
+  ) {
+    return trimmedInstructions;
+  }
+
+  // If the user disabled slash commands, is resuming an existing conversation,
+  // requested structured JSON output, or is running read-only plan mode (e.g. /ag-review),
+  // send direct instructions while referencing .ag-bridge/dispatch.md for context.
+  if (
+    disableSlash ||
+    ctx.agyOptions?.continueConversation ||
+    ctx.agyOptions?.conversationId ||
+    ctx.agyOptions?.jsonSchema ||
+    ctx.agyOptions?.agyMode === 'plan'
+  ) {
+    return `${trimmedInstructions}\n\n(Delegated task ID: ${ctx.manifest.taskId}. Bridge context is also saved in .ag-bridge/dispatch.md.)`;
   }
 
   return `/claude-handoff Execute delegated task ${ctx.manifest.taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json and .ag-bridge/report.md when done.`;
@@ -222,6 +244,9 @@ export function attachStreamJsonHeartbeat(
     if (usage) state.metrics.usage = usage;
     state.resultStatus = status;
     state.resultResponse = response;
+    if (resultObj.structured_output !== undefined) {
+      state.structuredOutput = resultObj.structured_output;
+    }
     if (typeof resultObj.error === 'string') {
       state.errorMessage = resultObj.error;
     }
@@ -594,7 +619,12 @@ export async function queryAgyCapabilities(
 
 async function tryCliTrigger(
   ctx: ExecutionContext,
-): Promise<{ ok: boolean; streamState?: StreamCaptureState; stopStream?: () => void }> {
+): Promise<{
+  ok: boolean;
+  streamState?: StreamCaptureState;
+  stopStream?: () => void;
+  killProcess?: () => void;
+}> {
   const { cliBinary, cliPath } = ctx.detection.subscription;
   if (!cliPath) {
     return { ok: false };
@@ -648,6 +678,45 @@ async function tryCliTrigger(
       // Child inherited logFd; close parent descriptor immediately
       closeLogFd();
 
+      const killProcess = (): void => {
+        if (!child.pid) {
+          try {
+            child.kill();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        try {
+          if (ctx.detection.platform === 'win32') {
+            execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+              stdio: 'ignore',
+              timeout: 5000,
+            });
+          } else {
+            try {
+              process.kill(-child.pid, 'SIGTERM');
+            } catch {
+              child.kill('SIGTERM');
+            }
+          }
+        } catch {
+          try {
+            child.kill();
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      if (ctx.abortSignal) {
+        if (ctx.abortSignal.aborted) {
+          killProcess();
+        } else {
+          ctx.abortSignal.addEventListener('abort', killProcess, { once: true });
+        }
+      }
+
       let heartbeatHandle: { stop: () => void; state: StreamCaptureState } | null = null;
       if (useStreamHeartbeat && child.stdout) {
         heartbeatHandle = attachStreamJsonHeartbeat(child.stdout, {
@@ -688,6 +757,7 @@ async function tryCliTrigger(
             ok: code === 0,
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
+            killProcess,
           });
         }
       });
@@ -707,6 +777,7 @@ async function tryCliTrigger(
             ok: true,
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
+            killProcess,
           });
         }
       }, 400).unref();
@@ -762,6 +833,7 @@ export async function defaultSubscriptionTrigger(ctx: ExecutionContext): Promise
         methodUsed: 'cli',
         streamState: cliRes.streamState,
         stopStream: cliRes.stopStream,
+        killProcess: cliRes.killProcess,
       };
     }
     if (method === 'cli_only') {
@@ -804,7 +876,8 @@ function waitForManifestCompletion(
   taskId: string,
   timeoutSec: number,
   pollIntervalMs: number,
-): Promise<{ timedOut: boolean; manifest: BridgeManifest | null }> {
+  abortSignal?: AbortSignal,
+): Promise<{ timedOut: boolean; cancelled: boolean; manifest: BridgeManifest | null }> {
   return new Promise((resolve) => {
     let finished = false;
     let watcher: fs.FSWatcher | null = null;
@@ -812,6 +885,9 @@ function waitForManifestCompletion(
     let timeoutTimer: NodeJS.Timeout | null = null;
 
     const cleanup = (): void => {
+      if (abortSignal) {
+        abortSignal.removeEventListener('abort', onAbort);
+      }
       if (watcher) {
         try {
           watcher.close();
@@ -830,19 +906,33 @@ function waitForManifestCompletion(
       }
     };
 
-    const done = (result: { timedOut: boolean; manifest: BridgeManifest | null }): void => {
+    const done = (result: {
+      timedOut: boolean;
+      cancelled: boolean;
+      manifest: BridgeManifest | null;
+    }): void => {
       if (finished) return;
       finished = true;
       cleanup();
       resolve(result);
     };
 
+    const onAbort = (): void => {
+      done({ timedOut: false, cancelled: true, manifest: readManifest(workspaceRoot) });
+    };
+
+    if (abortSignal?.aborted) {
+      onAbort();
+      return;
+    }
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+
     const checkOnce = (): void => {
       try {
         const current = readManifest(workspaceRoot);
         if (current && current.taskId === taskId) {
           if (current.status === 'VERIFIED' || current.status === 'FAILED') {
-            done({ timedOut: false, manifest: current });
+            done({ timedOut: false, cancelled: false, manifest: current });
           }
         }
       } catch {
@@ -866,7 +956,7 @@ function waitForManifestCompletion(
 
     pollTimer = setInterval(checkOnce, Math.max(100, pollIntervalMs));
     timeoutTimer = setTimeout(() => {
-      done({ timedOut: true, manifest: readManifest(workspaceRoot) });
+      done({ timedOut: true, cancelled: false, manifest: readManifest(workspaceRoot) });
     }, Math.max(1, timeoutSec) * 1000);
 
     // Immediate check in case status already changed before watch attached
@@ -916,11 +1006,44 @@ export class SubscriptionEngine implements ExecutionEngine {
         ctx.manifest.taskId,
         timeoutSec,
         ctx.config.subscription.poll_interval_ms,
+        ctx.abortSignal,
       );
 
       const capturedMetrics = triggerOutcome.streamState?.metrics;
 
+      if (waitResult.cancelled) {
+        triggerOutcome.killProcess?.();
+        const cancelledManifest: BridgeManifest = {
+          ...(waitResult.manifest ?? ctx.manifest),
+          status: 'FAILED',
+          metrics: {
+            ...(waitResult.manifest?.metrics ?? {}),
+            ...(capturedMetrics ?? {}),
+          },
+          updatedAt: new Date().toISOString(),
+          errorCode: 'TASK_CANCELLED',
+          error: 'Background subscription task was cancelled by user request.',
+        };
+        writeManifest(ctx.workspaceRoot, cancelledManifest);
+
+        const cancelReport =
+          readReportMarkdown(ctx.workspaceRoot) ??
+          `# Antigravity Task Report (Cancelled)\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** CANCELLED\n\n${formatTokenUsageMarkdown(cancelledManifest.metrics)}`;
+
+        return {
+          status: 'FAILED',
+          reportMarkdown: cancelReport,
+          changedFiles: listGitChangedFiles(ctx.workspaceRoot),
+          artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+          metrics: cancelledManifest.metrics,
+          warnings,
+          errorCode: 'TASK_CANCELLED',
+          errorMessage: cancelledManifest.error,
+        };
+      }
+
       if (waitResult.timedOut) {
+        triggerOutcome.killProcess?.();
         const failedManifest: BridgeManifest = {
           ...(waitResult.manifest ?? ctx.manifest),
           status: 'FAILED',
@@ -983,6 +1106,7 @@ export class SubscriptionEngine implements ExecutionEngine {
       return {
         status: finalManifest.status === 'VERIFIED' ? 'VERIFIED' : 'FAILED',
         reportMarkdown,
+        structuredOutput: triggerOutcome.streamState?.structuredOutput,
         changedFiles: mergedChanged,
         artifacts: mergedArtifacts,
         metrics: mergedMetrics,

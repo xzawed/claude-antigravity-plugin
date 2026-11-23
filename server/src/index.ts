@@ -6,6 +6,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { AuthDependencies, disposePendingAuthSessions, handleAgAuth } from './auth.js';
 import {
+  disposeActiveJobs,
+  handleCancelAgJob,
+  handleGetAgJob,
+  handleStartAgTask,
+  JobDependencies,
+} from './jobs.js';
+import {
   acquireBridgeLock,
   ensureBridgeDirs,
   ensureGitignoreEntry,
@@ -57,6 +64,7 @@ export interface ServerDependencies {
     | Awaited<ReturnType<typeof queryAgyCapabilities>>
     | ReturnType<typeof queryAgyCapabilities>;
   authDeps?: AuthDependencies;
+  jobDeps?: JobDependencies;
 }
 
 function getDefaultPluginRoot(): string {
@@ -277,6 +285,7 @@ function extractAgyOptions(input: DelegateToolInput): AgyCliOptions {
     jsonSchema: input.jsonSchema,
     disableSlashCommands: input.disableSlashCommands,
     settings: input.settings,
+    rawPrompt: input.rawPrompt,
   };
 }
 
@@ -379,6 +388,7 @@ export async function handleDelegateToAntigravity(
     changedFiles: execRes.changedFiles,
     artifacts: execRes.artifacts,
     reportMarkdown: maskSecrets(execRes.reportMarkdown),
+    structuredOutput: execRes.structuredOutput,
     metrics: execRes.metrics,
     warnings: [...warnings, ...execRes.warnings],
     errorCode: execRes.errorCode,
@@ -435,37 +445,40 @@ export async function handleRollbackAgTask(
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {
   const server = new McpServer({
     name: 'antigravity-delegate',
-    version: '1.2.0',
+    version: '1.3.0',
   });
+
+  const sharedDelegateSchema = {
+    title: z.string().min(3).max(120),
+    instructions: z.string().min(5),
+    lockedPaths: z.array(z.string().min(1)).optional(),
+    verifyUrl: z.string().url().optional(),
+    acceptanceCriteria: z.array(z.string().min(1)).optional(),
+    modeOverride: z.enum(['auto', 'subscription', 'api']).optional(),
+    timeoutSec: z.number().int().min(5).max(3600).optional(),
+    model: z.string().min(1).optional(),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+    agent: z.string().min(1).optional(),
+    agyMode: z.enum(['accept-edits', 'auto', 'plan']).optional(),
+    sandbox: z.boolean().optional(),
+    dangerouslySkipPermissions: z.boolean().optional(),
+    addDirs: z.array(z.string().min(1)).optional(),
+    continueConversation: z.boolean().optional(),
+    conversationId: z.string().min(1).optional(),
+    project: z.string().min(1).optional(),
+    newProject: z.boolean().optional(),
+    remoteAgent: z.boolean().optional(),
+    jsonSchema: z.string().min(1).optional(),
+    disableSlashCommands: z.boolean().optional(),
+    settings: z.string().min(1).optional(),
+    rawPrompt: z.boolean().optional(),
+    workspaceRoot: z.string().min(1).optional(),
+  };
 
   server.tool(
     'delegate_to_antigravity',
-    'Create a Git safety checkpoint, dispatch any task to Antigravity (full `agy` CLI feature set including models, effort, agents, conversation resume, sandbox, and `--dangerously-skip-permissions`, or Gemini API fallback), and return the verification report, artifacts, and token usage metrics.',
-    {
-      title: z.string().min(3).max(120),
-      instructions: z.string().min(5),
-      lockedPaths: z.array(z.string().min(1)).optional(),
-      verifyUrl: z.string().url().optional(),
-      acceptanceCriteria: z.array(z.string().min(1)).optional(),
-      modeOverride: z.enum(['auto', 'subscription', 'api']).optional(),
-      timeoutSec: z.number().int().min(5).max(3600).optional(),
-      model: z.string().min(1).optional(),
-      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
-      agent: z.string().min(1).optional(),
-      agyMode: z.enum(['accept-edits', 'auto', 'plan']).optional(),
-      sandbox: z.boolean().optional(),
-      dangerouslySkipPermissions: z.boolean().optional(),
-      addDirs: z.array(z.string().min(1)).optional(),
-      continueConversation: z.boolean().optional(),
-      conversationId: z.string().min(1).optional(),
-      project: z.string().min(1).optional(),
-      newProject: z.boolean().optional(),
-      remoteAgent: z.boolean().optional(),
-      jsonSchema: z.string().min(1).optional(),
-      disableSlashCommands: z.boolean().optional(),
-      settings: z.string().min(1).optional(),
-      workspaceRoot: z.string().min(1).optional(),
-    },
+    'Create a Git safety checkpoint, dispatch any task to Antigravity (full `agy` CLI feature set including native `/boost`, `/browser`, `/swarm`, `/goal`, models, effort, agents, conversation resume, `--json-schema`, sandbox, and `--dangerously-skip-permissions`, or Gemini API fallback), and wait for the verification report, structured output, artifacts, and token usage metrics.',
+    sharedDelegateSchema,
     async (args) => {
       try {
         const result = await handleDelegateToAntigravity(args, deps);
@@ -604,6 +617,80 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     },
   );
 
+  server.tool(
+    'start_ag_task',
+    'Non-blocking background delegation: creates a Git safety checkpoint, launches Antigravity (`agy` CLI or Gemini API) asynchronously in the background, and immediately returns a `jobId` so Claude Code can continue other work in parallel. Poll or collect results with `get_ag_job`, or stop with `cancel_ag_job`.',
+    sharedDelegateSchema,
+    async (args) => {
+      try {
+        const result = await handleStartAgTask(args, {
+          pluginRoot: deps.pluginRoot,
+          detectorDeps: deps.detectorDeps,
+          subscriptionEngine: deps.subscriptionEngine,
+          apiWorkerEngine: deps.apiWorkerEngine,
+          ...deps.jobDeps,
+        });
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] start_ag_task error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
+  server.tool(
+    'get_ag_job',
+    'Inspect a specific background Antigravity job by `jobId` (including live progress, token usage, masked log tail, reportMarkdown, structuredOutput, changedFiles, and artifacts) or list active and recent background jobs when `jobId` is omitted.',
+    {
+      jobId: z.string().min(1).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+      includeLogTail: z.boolean().optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+    },
+    async (args) => {
+      try {
+        const result = await handleGetAgJob(args, deps.jobDeps);
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] get_ag_job error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
+  server.tool(
+    'cancel_ag_job',
+    'Gracefully cancel a running background Antigravity job (terminating its child process tree and marking `.ag-bridge/manifest.json` as FAILED/TASK_CANCELLED). Preserves the pre-delegation Git checkpoint for optional `rollback_ag_task`.',
+    {
+      jobId: z.string().min(1).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+    },
+    async (args) => {
+      try {
+        const result = await handleCancelAgJob(args, deps.jobDeps);
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] cancel_ag_job error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
   return server;
 }
 
@@ -612,7 +699,10 @@ const isDirectExecution =
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isDirectExecution) {
-  process.once('exit', disposePendingAuthSessions);
+  process.once('exit', () => {
+    disposePendingAuthSessions();
+    disposeActiveJobs();
+  });
   const server = createAntigravityMcpServer();
   const transport = new StdioServerTransport();
   server.connect(transport).catch((err) => {

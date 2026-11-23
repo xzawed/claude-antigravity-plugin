@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.2.0` |
+| **버전** | `1.3.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -13,7 +13,7 @@
 ## 1. MCP 서버 기본 규격 (`server/src/index.ts`)
 
 - **서버 이름:** `antigravity-delegate`
-- **버전:** `1.2.0`
+- **버전:** `1.3.0`
 - **트랜스포트:** `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`)
 - **로깅 규칙:** 모든 내부 진단 로그는 `console.error(...)` (`stderr`)로만 출력. `stdout`은 MCP JSON-RPC 프레임 전용.
 - **작업 디렉터리 해석:** 도구 입력에 `workspaceRoot`가 생략되면 `process.cwd()`를 사용한다.
@@ -35,7 +35,7 @@
 
 ---
 
-## 2. 노출 MCP Tools 명세 (6종)
+## 2. 노출 MCP Tools 명세 (9종)
 
 ### 2.1 Tool 1: `delegate_to_antigravity`
 Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 뒤 감지된 엔진(`subscription` 또는 `api`)으로 Antigravity에 작업을 위임하고 완료 보고서 및 토큰 사용량/실행 메트릭을 반환한다. `agy` CLI가 제공하는 모든 주요 플래그(모델, 추론 강도, 에이전트, 대화 이어가기, `--dangerously-skip-permissions`, 추가 디렉터리, 프로젝트/원격 에이전트, JSON 스키마 등)를 1:1 지원한다.
@@ -65,6 +65,7 @@ Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 
 | `jsonSchema` | `string` | N | 구조화된 JSON 출력 스키마 (`agy --json-schema <schema>`) |
 | `disableSlashCommands` | `boolean` | N | 슬래시 커맨드 비활성화 (`agy --disable-slash-commands`) |
 | `settings` | `string` | N | 추가 설정 파일 경로 또는 JSON (`agy --settings <val>`) |
+| `rawPrompt` | `boolean` | N | `true`일 때 `instructions`를 `/claude-handoff` 래핑 없이 `agy --print`에 원문 그대로 전달 (`/boost`, `/browser`, `/swarm`, `/goal` 등 네이티브 커맨드는 자동 감지) |
 | `workspaceRoot` | `string` | N | 대상 프로젝트 루트 경로 (기본값: `process.cwd()`) |
 
 #### Output Payload (JSON text content)
@@ -95,6 +96,7 @@ export interface DelegateToolOutput {
   changedFiles: string[];
   artifacts: string[];         // .ag-bridge/artifacts/<taskId>/...
   reportMarkdown: string;      // .ag-bridge/report.md 원문
+  structuredOutput?: unknown;  // --json-schema 지정 시 result.structured_output 파싱 객체
   metrics?: ExecutionMetrics;  // 토큰 사용량, 대화 ID, 소요 시간, 권한 모드
   warnings: string[];          // 예: non-git 경고, skip-permissions 경고, IPC 폴백 안내 등
   errorCode?: AgErrorCode;
@@ -303,6 +305,18 @@ export interface AgAuthToolOutput {
   errorMessage?: string;
 }
 ```
+
+---
+
+### 2.7 Tool 7: `start_ag_task` (비동기 백그라운드 위임)
+`delegate_to_antigravity`와 동일한 전체 입력 스키마를 받되, Git 체크포인트 생성 및 엔진 기동 직후 즉시 `{ ok: true, jobId, taskId, mode, status: 'RUNNING', gitCheckpointRef }`를 반환하여 Claude Code가 다른 작업을 병렬 수행할 수 있게 한다.
+
+### 2.8 Tool 8: `get_ag_job` (백그라운드 작업 조회·수집)
+- `jobId` 지정 시: 해당 작업의 실시간/완료 상태(`RUNNING | VERIFIED | FAILED | CANCELLED`), 경과 시간, `model`, `conversationId`, `metrics`, `changedFiles`, `artifacts`, `reportMarkdown`, `structuredOutput`, 마스킹된 `logTail` 반환(디스크 아카이브 폴백 지원).
+- `jobId` 생략 시: 활성 및 최근 작업 요약 목록(`jobs[]`, `activeCount`) 반환.
+
+### 2.9 Tool 9: `cancel_ag_job` (백그라운드 작업 중단)
+실행 중인 백그라운드 작업(`jobId` 또는 최신 활성 작업)에 `AbortSignal`을 전달해 자식 프로세스 트리를 종료하고 `.ag-bridge/manifest.json`을 `FAILED(TASK_CANCELLED)`로 갱신하며, 선택적 롤백용 `gitCheckpointRef`를 반환한다.
 
 ---
 

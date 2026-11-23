@@ -78,11 +78,14 @@ async function main() {
       JSON.stringify(names) ===
         JSON.stringify([
           'ag_auth',
+          'cancel_ag_job',
           'check_ag_environment',
           'delegate_to_antigravity',
+          'get_ag_job',
           'get_ag_usage',
           'list_ag_capabilities',
           'rollback_ag_task',
+          'start_ag_task',
         ]),
       `Unexpected MCP tool list: ${names.join(', ')}`,
     );
@@ -106,6 +109,13 @@ async function main() {
     });
     const authParsed = JSON.parse(authRes.content?.[0]?.text ?? '{}');
     assert(authParsed.status === 'LOGOUT_INSTRUCTIONS', 'ag_auth logout check failed');
+
+    const jobsRes = await client.callTool({
+      name: 'get_ag_job',
+      arguments: { workspaceRoot: pluginRoot },
+    });
+    const jobsParsed = JSON.parse(jobsRes.content?.[0]?.text ?? '{}');
+    assert(jobsParsed.ok === true && typeof jobsParsed.activeCount === 'number', 'get_ag_job check failed');
 
     console.log('  OK: MCP Stdio tools:', names.join(', '));
     console.log(

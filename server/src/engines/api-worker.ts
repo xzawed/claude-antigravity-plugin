@@ -12,6 +12,7 @@ import { listGitChangedFiles } from '../git-guard.js';
 import { assertReadablePath, assertWritablePath } from '../path-guard.js';
 import { AgPluginError, BridgeManifest, ExecutionMetrics, TokenUsage } from '../types.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
+import { formatTokenUsageMarkdown } from './subscription.js';
 
 const MAX_READ_BYTES = 64 * 1024;
 const MAX_CMD_OUTPUT_BYTES = 16 * 1024;
@@ -642,6 +643,31 @@ export class ApiWorkerEngine implements ExecutionEngine {
 
     try {
       for (let turn = 1; turn <= maxTurns; turn++) {
+        if (ctx.abortSignal?.aborted) {
+          const metrics = buildMetrics();
+          const cancelledManifest: BridgeManifest = {
+            ...ctx.manifest,
+            status: 'FAILED',
+            changedFiles: Array.from(writtenFiles).sort(),
+            metrics,
+            updatedAt: new Date().toISOString(),
+            errorCode: 'TASK_CANCELLED',
+            error: 'Background API worker task was cancelled by user request.',
+          };
+          writeManifest(ctx.workspaceRoot, cancelledManifest);
+          const cancelReport = `# Antigravity Task Report (Cancelled)\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** CANCELLED\n- **Turns Completed:** ${turnsExecuted}\n\n${formatTokenUsageMarkdown(metrics)}`;
+          writeReportMarkdown(ctx.workspaceRoot, cancelReport);
+          return {
+            status: 'FAILED',
+            reportMarkdown: cancelReport,
+            changedFiles: Array.from(writtenFiles).sort(),
+            artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+            metrics,
+            warnings,
+            errorCode: 'TASK_CANCELLED',
+            errorMessage: 'Task was cancelled by user request.',
+          };
+        }
         const turnResp = await callModelWithRetry();
         turnsExecuted = turn;
         addTurnUsage(turnResp.usage);

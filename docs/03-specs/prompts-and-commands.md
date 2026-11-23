@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-003` |
-| **버전** | `1.2.0` |
+| **버전** | `1.3.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [사용자/에이전트 플로우](../01-planning/user-flows.md), [MCP API 명세](./mcp-tools-api.md), [PRD](../01-planning/PRD.md) |
@@ -12,13 +12,23 @@
 
 ## 1. 프롬프트 자산 목록
 
-플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 8개이다.
+플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 18개이다 (`SKILL.md` 1종 + 슬래시 커맨드 16종 + 핸드오프 템플릿 1종).
 
 | 파일 경로 | 실행 주체 | 역할 |
 | :--- | :--- | :--- |
-| `skills/ag-delegate/SKILL.md` | Claude Code | 자율 위임 여부 판단, 전체 `agy` CLI 옵션 매핑, 토큰 사용량 보고, 결과 검수 및 롤백 의사결정 |
+| `skills/ag-delegate/SKILL.md` | Claude Code | 자율 위임 여부 판단, 9종 MCP Tool 조율, 전체 `agy` CLI 옵션 매핑, 토큰 사용량 보고, 결과 검수 및 롤백 의사결정 |
 | `commands/ag-login.md` | Claude Code | `/ag-login` Google OAuth 로그인(브라우저/수동 링크+코드), 인증 상태 확인, 안전 로그아웃 안내 |
-| `commands/ag-delegate.md` | Claude Code | `/ag-delegate` 명시적 위임 커맨드 (전체 `agy` 플래그 및 `--dangerously-skip-permissions` 지원) |
+| `commands/ag-delegate.md` | Claude Code | `/ag-delegate` 동기 명시적 위임 커맨드 (전체 `agy` 플래그 및 `--dangerously-skip-permissions` 지원) |
+| `commands/ag-start.md` | Claude Code | `/ag-start` 비동기 백그라운드 위임 (`start_ag_task`) |
+| `commands/ag-jobs.md` | Claude Code | `/ag-jobs` 백그라운드 작업 진행률·로그·리포트 수집 (`get_ag_job`) |
+| `commands/ag-cancel.md` | Claude Code | `/ag-cancel` 실행 중인 백그라운드 작업 중단 (`cancel_ag_job`) |
+| `commands/ag-browser.md` | Claude Code | `/ag-browser` Antigravity 내장 `/browser` 실제 브라우저 E2E/시각적 QA 전용 커맨드 |
+| `commands/ag-boost.md` | Claude Code | `/ag-boost` Antigravity 내장 `/boost` 다중 관점 심층 추론 프리셋 |
+| `commands/ag-swarm.md` | Claude Code | `/ag-swarm` Antigravity 내장 `/swarm` 다중 워커 병렬 팀 프리셋 |
+| `commands/ag-goal.md` | Claude Code | `/ag-goal` Antigravity 내장 `/goal` 목표 검증 달성 자율 루프 프리셋 |
+| `commands/ag-review.md` | Claude Code | `/ag-review` 이종 모델 읽기 전용(`--mode plan` + `--json-schema`) 교차 코드/보안 리뷰 |
+| `commands/ag-resume.md` | Claude Code | `/ag-resume` `taskId`/`conversationId` 기반 이전 Antigravity 대화 이어가기 |
+| `commands/ag-rollback.md` | Claude Code | `/ag-rollback` 원클릭 무손실 Git Guard 체크포인트 롤백 |
 | `commands/ag-config.md` | Claude Code | `/ag-config` 실행 모드·모델·추론 강도·권한(`skip-permissions`)·샌드박스·타임아웃 설정 커맨드 |
 | `commands/ag-status.md` | Claude Code | `/ag-status` 연결 상태, `agy` 권한/모델 설정, 최근 토큰 사용량 및 환경 진단 표 출력 커맨드 |
 | `commands/ag-models.md` | Claude Code | `/ag-models` 실시간 `agy models`/`agy agents` 목록 및 지원 권한/플래그 조회 커맨드 |
