@@ -22,6 +22,10 @@ export type AgErrorCode =
   | 'MAX_TURNS_EXCEEDED'
   | 'GEMINI_API_ERROR'
   | 'INVALID_CONFIG'
+  | 'AGY_CLI_NOT_FOUND'
+  | 'AUTH_LOGIN_FAILED'
+  | 'AUTH_SESSION_NOT_FOUND'
+  | 'AUTH_TIMEOUT'
   | 'INTERNAL_ERROR';
 
 export class AgPluginError extends Error {
@@ -291,4 +295,45 @@ export interface UsageSummaryOutput {
     api: { tasks: number; usage: TokenUsage };
   };
   recentTasks: TaskUsageRecord[];
+}
+
+export type AgAuthAction = 'status' | 'login' | 'complete' | 'cancel' | 'logout';
+export type AgLoginFlow = 'auto' | 'browser' | 'manual';
+export type AgAuthMethod = 'google-oauth' | 'gemini-api-key' | 'adc' | 'none' | 'unknown';
+export type AgAuthStatus =
+  | 'AUTHENTICATED'
+  | 'UNAUTHENTICATED'
+  | 'AWAITING_CODE'
+  | 'CANCELLED'
+  | 'CLI_NOT_INSTALLED'
+  | 'LOGOUT_INSTRUCTIONS'
+  | 'FAILED';
+
+export interface AgAuthToolInput {
+  action?: AgAuthAction;
+  flow?: AgLoginFlow;
+  force?: boolean;
+  code?: string;
+  sessionId?: string;
+  timeoutSec?: number;
+  workspaceRoot?: string;
+}
+
+export interface AgAuthToolOutput {
+  ok: boolean;
+  action: AgAuthAction;
+  status: AgAuthStatus;
+  authenticated: boolean;
+  authMethod: AgAuthMethod;
+  cliDetected: boolean;
+  cliBinary?: string;
+  cliPath?: string;
+  modelCount?: number;
+  sessionId?: string;
+  authUrl?: string;
+  message: string;
+  nextSteps: string[];
+  warnings: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
 }

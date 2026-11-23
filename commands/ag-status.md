@@ -20,4 +20,4 @@ Present the tool response in a concise Markdown table:
 | **Last Task Usage** | `<totalTokens or N/A>` | Input / Output / Thinking / Cache Read tokens (run `/ag-usage` for full history) |
 | **Git Guard** | `Ready` / `Not a Git repo` | Branch `<currentBranch>`, Working tree `<clean/dirty>` |
 
-Never print raw API keys or secrets. If `recommendations` is non-empty, list them below the table as actionable next steps.
+Never print raw API keys or secrets. If `recommendations` is non-empty, list them below the table as actionable next steps (and remind the user they can run `/ag-login` or `/ag-login status` to sign in or verify live Antigravity OAuth credentials).

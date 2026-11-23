@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.1.0` |
+| **버전** | `1.2.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -13,7 +13,7 @@
 ## 1. MCP 서버 기본 규격 (`server/src/index.ts`)
 
 - **서버 이름:** `antigravity-delegate`
-- **버전:** `1.1.0`
+- **버전:** `1.2.0`
 - **트랜스포트:** `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`)
 - **로깅 규칙:** 모든 내부 진단 로그는 `console.error(...)` (`stderr`)로만 출력. `stdout`은 MCP JSON-RPC 프레임 전용.
 - **작업 디렉터리 해석:** 도구 입력에 `workspaceRoot`가 생략되면 `process.cwd()`를 사용한다.
@@ -35,7 +35,7 @@
 
 ---
 
-## 2. 노출 MCP Tools 명세 (5종)
+## 2. 노출 MCP Tools 명세 (6종)
 
 ### 2.1 Tool 1: `delegate_to_antigravity`
 Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 뒤 감지된 엔진(`subscription` 또는 `api`)으로 Antigravity에 작업을 위임하고 완료 보고서 및 토큰 사용량/실행 메트릭을 반환한다. `agy` CLI가 제공하는 모든 주요 플래그(모델, 추론 강도, 에이전트, 대화 이어가기, `--dangerously-skip-permissions`, 추가 디렉터리, 프로젝트/원격 에이전트, JSON 스키마 등)를 1:1 지원한다.
@@ -261,6 +261,51 @@ export interface UsageSummaryOutput {
 
 ---
 
+### 2.6 Tool 6: `ag_auth`
+Claude Code에서 직접 Antigravity CLI(`agy acp --login`)의 Google OAuth 로그인을 수행하거나, 실시간 인증 상태를 점검하고, SSH/헤드리스 환경용 링크+인가 코드 붙여넣기 로그인을 완료/취소하며, 안전한 로그아웃 절차를 안내한다.
+
+#### Input Schema
+| 필드 | 타입 | 필수 | 설명 |
+| :--- | :--- | :---: | :--- |
+| `action` | `'status' \| 'login' \| 'complete' \| 'cancel' \| 'logout'` | N | 수행 동작 (기본값 `'login'`) |
+| `flow` | `'auto' \| 'browser' \| 'manual'` | N | 로그인 방식 (`auto`: 로컬은 브라우저 OAuth, SSH/헤드리스는 링크+코드 모드 자동 선택) |
+| `force` | `boolean` | N | 이미 로그인되어 있어도 강제 재인증 / 계정 전환 수행 |
+| `code` | `string` | N | `action='complete'` 시 사용자가 브라우저에서 복사한 인가 코드 또는 콜백 URL (로그에 절대 미기록) |
+| `sessionId` | `string` | N | `action='complete'` 또는 `'cancel'` 대상 대기 세션 ID (생략 시 가장 최근 활성 세션) |
+| `timeoutSec` | `number` | N | 브라우저 OAuth 대기 제한 시간(초, `15`~`600`, 기본값 `180`) |
+| `workspaceRoot` | `string` | N | 대상 프로젝트 루트 경로 (기본값: `process.cwd()`) |
+
+#### Output Payload
+```typescript
+export interface AgAuthToolOutput {
+  ok: boolean;
+  action: 'status' | 'login' | 'complete' | 'cancel' | 'logout';
+  status:
+    | 'AUTHENTICATED'
+    | 'UNAUTHENTICATED'
+    | 'AWAITING_CODE'
+    | 'CANCELLED'
+    | 'CLI_NOT_INSTALLED'
+    | 'LOGOUT_INSTRUCTIONS'
+    | 'FAILED';
+  authenticated: boolean;
+  authMethod: 'google-oauth' | 'gemini-api-key' | 'adc' | 'none' | 'unknown';
+  cliDetected: boolean;
+  cliBinary?: string;
+  cliPath?: string;
+  modelCount?: number;
+  sessionId?: string;
+  authUrl?: string;
+  message: string;
+  nextSteps: string[];
+  warnings: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+```
+
+---
+
 ## 3. 표준 에러 코드 카탈로그 (`AgErrorCode`)
 
 모든 에러 응답은 MCP `isError: true` 또는 구조화된 `{ ok: false, errorCode, errorMessage }`를 일관되게 반환한다.
@@ -281,6 +326,10 @@ export interface UsageSummaryOutput {
 | `MAX_TURNS_EXCEEDED` | `api-worker.ts` | `api.max_turns` 내에 완료 불가 | 범위 축소 재위임 또는 `max_turns` 상향 |
 | `GEMINI_API_ERROR` | `api-worker.ts` | Gemini API 호출 실패 (401/403/429/5xx) | 키·모델명·네트워크 점검 후 재시도 |
 | `INVALID_CONFIG` | `config.ts` | `.ag-bridge/config.json` JSON 파싱 또는 스키마 오류 | `/ag-config`로 유효한 설정 복구 |
+| `AGY_CLI_NOT_FOUND` | `auth.ts` | 로컬에 `agy` CLI 미설치 | Antigravity CLI 설치 또는 `GEMINI_API_KEY` API 모드 사용 |
+| `AUTH_LOGIN_FAILED` | `auth.ts` | `agy acp --login` 실행 또는 인가 코드 교환 실패 | `/ag-login --manual` 재시도 또는 터미널에서 `agy acp --login` 확인 |
+| `AUTH_SESSION_NOT_FOUND` | `auth.ts` | 대기 중인 수동 OAuth 세션이 없거나 만료(5분) | `/ag-login --manual`로 새 세션 시작 |
+| `AUTH_TIMEOUT` | `auth.ts` | 브라우저 OAuth 또는 코드 교환 타임아웃 초과 | `/ag-login --manual` 사용 권장 |
 
 ---
 

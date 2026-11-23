@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { AuthDependencies, disposePendingAuthSessions, handleAgAuth } from './auth.js';
 import {
   acquireBridgeLock,
   ensureBridgeDirs,
@@ -55,6 +56,7 @@ export interface ServerDependencies {
   ) =>
     | Awaited<ReturnType<typeof queryAgyCapabilities>>
     | ReturnType<typeof queryAgyCapabilities>;
+  authDeps?: AuthDependencies;
 }
 
 function getDefaultPluginRoot(): string {
@@ -433,7 +435,7 @@ export async function handleRollbackAgTask(
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {
   const server = new McpServer({
     name: 'antigravity-delegate',
-    version: '1.1.0',
+    version: '1.2.0',
   });
 
   server.tool(
@@ -570,6 +572,38 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     },
   );
 
+  server.tool(
+    'ag_auth',
+    'Authenticate Antigravity CLI (`agy acp --login`) with Google OAuth directly from Claude Code (local browser or headless/manual link+code flow), check live login status, complete or cancel a pending code-paste login, or view safe logout steps.',
+    {
+      action: z.enum(['status', 'login', 'complete', 'cancel', 'logout']).optional(),
+      flow: z.enum(['auto', 'browser', 'manual']).optional(),
+      force: z.boolean().optional(),
+      code: z.string().min(1).optional(),
+      sessionId: z.string().min(1).optional(),
+      timeoutSec: z.number().int().min(15).max(600).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+    },
+    async (args) => {
+      try {
+        const result = await handleAgAuth(args, {
+          detectorDeps: deps.detectorDeps,
+          queryCapabilitiesFn: deps.queryCapabilitiesFn,
+          ...deps.authDeps,
+        });
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] ag_auth error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
   return server;
 }
 
@@ -578,6 +612,7 @@ const isDirectExecution =
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isDirectExecution) {
+  process.once('exit', disposePendingAuthSessions);
   const server = createAntigravityMcpServer();
   const transport = new StdioServerTransport();
   server.connect(transport).catch((err) => {

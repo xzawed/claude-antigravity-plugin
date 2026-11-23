@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#듀얼-실행-모드)
-[![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-44%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#보안-및-안전장치)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어**
 
@@ -28,7 +28,7 @@
 
 | ⚡ 환경 진단 속도 | 🛡️ 자동화 검증 | 🌍 크로스플랫폼 CI | 🔒 의존성 보안 |
 | :---: | :---: | :---: | :---: |
-| 평균 **`149.9 ms`** | **`39 / 39`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
+| 평균 **`149.9 ms`** | **`44 / 44`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
 | `check_ag_environment` (`4.3×` 고속화) | 단위 · 보안 · 라이브 Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -111,7 +111,7 @@ claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 
 > **팁:** 플러그인 파일을 수정했다면 Claude Code를 재시작하지 않고 세션 안에서 `/reload-plugins`만 입력하면 즉시 반영됩니다.
 
-#### 방법 C — MCP 서버만 단독 등록 *(훅 · 스킬 · 슬래시 커맨드 없이 MCP Tool 5종만 필요할 때)*
+#### 방법 C — MCP 서버만 단독 등록 *(훅 · 스킬 · 슬래시 커맨드 없이 MCP Tool 6종만 필요할 때)*
 
 **macOS / Linux:**
 
@@ -125,9 +125,15 @@ claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigr
 claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
-### 3단계 — 실행 프로바이더 설정
+### 3단계 — Claude Code 안에서 바로 Antigravity 로그인 (`/ag-login`)
 
-- **구독 모드 (Antigravity 앱/CLI 설치 시):** 별도 설정이 필요 없습니다. MCP 호스트가 `PATH`를 축소한 환경에서도 OS 표준 설치 경로에서 `agy` / `antigravity`를 자동 감지합니다.
+- **구독 모드 (권장):** 플러그인 설치 후 Claude Code 세션 안에서 **`/ag-login`**만 입력하면 됩니다. 현재 로그인 상태를 먼저 확인하고, 미인증 시 Google OAuth(`agy acp --login`)를 브라우저로 자동 실행해 OS 키링에 안전하게 저장합니다(SSH·원격 환경에서는 링크+인가 코드 붙여넣기 모드로 자동 전환):
+  ```text
+  /ag-login                    # 로컬 브라우저 원클릭 Google OAuth 로그인 (SSH 시 링크+코드 자동 전환)
+  /ag-login --manual           # 채팅에 클릭 가능한 Google OAuth 링크 출력 → /ag-login complete <코드>
+  /ag-login status             # 실시간 로그인 상태 및 사용 가능 모델 수 점검
+  /ag-login --force            # 계정 전환 또는 재인증 강제 실행
+  ```
 - **API 폴백 모드 (비구독자 · 원격 SSH · 헤드리스 환경):** Claude Code 실행 전 `GEMINI_API_KEY` 환경변수를 설정하세요.
 
 ```bash
@@ -280,6 +286,7 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 
 | MCP Tool | 입력 파라미터 | 역할 |
 | :--- | :--- | :--- |
+| **`ag_auth`** | `action?` (`status\|login\|complete\|cancel\|logout`), `flow?` (`auto\|browser\|manual`), `force?`, `code?`, `sessionId?`, `timeoutSec?`, `workspaceRoot?` | `agy acp --login`으로 Google OAuth 로그인 수행(로컬 브라우저 / 수동 링크+코드), `agy models` 기반 실시간 인증 상태 확인, 대기 세션 완료·취소 및 안전 로그아웃 안내 |
 | **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths?`, `acceptanceCriteria?`, `verifyUrl?`, `modeOverride?`, `timeoutSec?`, `model?`, `effort?`, `agent?`, `agyMode?`, `sandbox?`, `dangerouslySkipPermissions?`, `addDirs?`, `continueConversation?`, `conversationId?`, `project?`, `newProject?`, `remoteAgent?`, `jsonSchema?`, `disableSlashCommands?`, `settings?`, `workspaceRoot?` | Git 체크포인트 생성 → `.ag-bridge/dispatch.md` 기록 → 구독(`agy` 전체 CLI 패리티)/API 엔진 실행 → `reportMarkdown` · `changedFiles` · `artifacts` · 토큰 `metrics` 반환 |
 | **`check_ag_environment`** | `workspaceRoot?` | 해석된 실행 모드, 감지된 Antigravity CLI/앱 경로, 활성 `agyConfig` 기본값, 마스킹된 API 키 상태, Git/Bridge 및 최근 토큰 사용량 진단 |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | `gitCheckpointRef`로 추적·staged·unstaged·삭제 파일 원복 (현재 작업 및 `history/` 아카이브 작업 모두 지원, 기존 untracked 보존) |
@@ -288,6 +295,7 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 
 | 슬래시 커맨드 | 문법 |
 | :--- | :--- |
+| **`/ag-login`** | `/ag-login [status \| --manual \| --force \| complete <코드-또는-URL> \| cancel \| logout]` |
 | **`/ag-delegate`** | `/ag-delegate <작업 설명> [--paths p1,p2] [--url ...] [--mode auto\|subscription\|api] [--model <id>] [--effort <lvl>] [--agent <name>] [--agy-mode accept-edits\|auto\|plan] [--sandbox\|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <json>] [--disable-slash-commands] [--settings <val>] [--timeout <sec>]` |
 | **`/ag-config`** | `/ag-config [mode\|agy-mode\|agy-model\|effort\|agent\|sandbox\|skip-permissions\|stream-heartbeat\|model\|timeout\|max-turns\|git-guard <값>]` |
 | **`/ag-status`** | `/ag-status` |
@@ -308,7 +316,7 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (라이브 Stdio MCP) | `< 500 ms` | 평균 `652.9 ms` | 평균 **`149.9 ms`** (`4.3×` 고속화) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` 훅) | `< 300 ms` | 평균 `99.1 ms` | 평균 **`90.3 ms`** (`3.3×` 여유) | ✅ **PASS** |
-| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`39 / 39` 테스트 (6 스위트)** | ✅ **PASS** |
+| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`44 / 44` 테스트 (7 스위트)** | ✅ **PASS** |
 | Windows `.cmd` CLI 스폰 (Node 20.12+/24) | `EINVAL` 크래시 없음 | `spawn EINVAL` | `buildCliSpawnSpec` 안전 래핑 | ✅ **PASS** |
 
 ---
@@ -355,11 +363,12 @@ claude-antigravity-plugin/
 ├── .github/workflows/ci.yml       # 크로스플랫폼 CI (Ubuntu/Windows/macOS × Node 20/22)
 ├── hooks/hooks.json               # SessionStart 자동 초기화 훅
 ├── skills/ag-delegate/SKILL.md    # 자율 위임 판단 및 검수 스킬
-├── commands/                      # /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
+├── commands/                      # /ag-login, /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
 ├── templates/claude-handoff.md    # Antigravity 핸드오프 워크플로우 템플릿
 ├── server/                        # TypeScript MCP 서버, 듀얼 엔진, 검증 스크립트 및 테스트
 │   ├── src/
-│   │   ├── index.ts               # MCP Stdio 서버 엔트리포인트 (5 Tools)
+│   │   ├── index.ts               # MCP Stdio 서버 엔트리포인트 (6 Tools)
+│   │   ├── auth.ts                # Google OAuth 로그인 (agy acp --login) · 수동 코드 플로우 · 인증 진단
 │   │   ├── cli-init.ts            # SessionStart 초기화 CLI
 │   │   ├── types.ts               # 상태 머신 · 설정 · 메트릭 · 에러 코드 타입
 │   │   ├── config.ts              # 설정 우선순위 · Zod 검증 · 비밀 마스킹
@@ -372,7 +381,7 @@ claude-antigravity-plugin/
 │   │       ├── subscription.ts    # agy CLI 전체 패리티 · stream-json 토큰 수집 · 기능 조회
 │   │       └── api-worker.ts      # @google/genai 4-Tool 자율 루프 + usageMetadata 집계
 │   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 Stdio MCP 스모크 검증 스크립트
-│   └── tests/                     # 6 스위트 / 39개 자동화 테스트 (단위·보안·E2E)
+│   └── tests/                     # 7 스위트 / 44개 자동화 테스트 (단위·인증·보안·E2E)
 ├── AGENTS.md                      # Antigravity 워크스페이스 규칙 및 PR 단위 협업 원칙
 ├── CONTRIBUTING.md                # 기여 가이드 및 PR 워크플로우
 ├── SECURITY.md                    # 보안 취약점 제보 및 보안 경계 정책
