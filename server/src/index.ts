@@ -286,6 +286,13 @@ export async function handleDelegateToAntigravity(
   const pluginRoot = deps.pluginRoot ?? getDefaultPluginRoot();
   const warnings: string[] = [];
 
+  // Fail-closed security check FIRST: validate lockedPaths whenever provided,
+  // regardless of provider availability.
+  let normalizedLockedPaths: string[] = [];
+  if (input.lockedPaths && input.lockedPaths.length > 0) {
+    normalizedLockedPaths = validateLockedPathsConfig(workspaceRoot, input.lockedPaths);
+  }
+
   const config = loadConfig(workspaceRoot, deps.detectorDeps?.env ?? process.env);
 
   const detection = detectEnvironment(
@@ -295,11 +302,7 @@ export async function handleDelegateToAntigravity(
   );
   const resolvedMode = assertResolvedMode(detection);
 
-  // Validate lockedPaths strictly whenever provided; in API mode or when non-empty, enforce path-guard
-  let normalizedLockedPaths: string[] = [];
-  if (input.lockedPaths && input.lockedPaths.length > 0) {
-    normalizedLockedPaths = validateLockedPathsConfig(workspaceRoot, input.lockedPaths);
-  } else if (resolvedMode === 'api') {
+  if (normalizedLockedPaths.length === 0 && resolvedMode === 'api') {
     // API worker stays fail-closed on file writes when lockedPaths is omitted
     warnings.push(
       'No lockedPaths provided in API mode: read-only analysis is allowed, while write_file remains fail-closed.',
