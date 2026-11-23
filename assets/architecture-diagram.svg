@@ -60,10 +60,10 @@
   <text x="60" y="201" class="body">&amp; mode-aware QA rules</text>
 
   <rect x="48" y="226" width="208" height="76" rx="8" fill="#0F172A" stroke="#334155"/>
-  <text x="60" y="246" class="card-sub">Slash Commands</text>
-  <text x="60" y="265" class="body">• /ag-delegate (manual)</text>
-  <text x="60" y="281" class="body">• /ag-config  (mode / model)</text>
-  <text x="60" y="295" class="body">• /ag-status  (diagnostics)</text>
+  <text x="60" y="246" class="card-sub">21 Slash Commands</text>
+  <text x="60" y="265" class="body">• /ag-login · /ag-delegate</text>
+  <text x="60" y="281" class="body">• /ag-start · /ag-session</text>
+  <text x="60" y="295" class="body">• /ag-browser · /ag-boost · ...</text>
 
   <rect x="48" y="316" width="208" height="68" rx="8" fill="#0F172A" stroke="#334155"/>
   <text x="60" y="336" class="card-sub">hooks/hooks.json</text>
@@ -82,10 +82,10 @@
   <text x="346" y="116" class="card-title">2. Embedded MCP Server</text>
 
   <rect x="344" y="146" width="244" height="72" rx="8" fill="#0F172A" stroke="#334155"/>
-  <text x="356" y="166" class="card-sub">3 Exposed MCP Tools</text>
-  <text x="356" y="185" class="body">• delegate_to_antigravity</text>
-  <text x="356" y="201" class="body">• check_ag_environment (150ms)</text>
-  <text x="356" y="213" class="body">• rollback_ag_task</text>
+  <text x="356" y="166" class="card-sub">12 Exposed MCP Tools (v1.4.0)</text>
+  <text x="356" y="185" class="body">• ag_auth · delegate · start/get/cancel</text>
+  <text x="356" y="201" class="body">• ag_session · artifacts · cli_admin</text>
+  <text x="356" y="213" class="body">• check_env · models · usage · rollback</text>
 
   <rect x="344" y="230" width="244" height="74" rx="8" fill="#0F172A" stroke="#334155"/>
   <text x="356" y="250" class="card-sub">Safety &amp; Isolation Layer</text>
@@ -108,10 +108,10 @@
   <text x="703" y="121" class="badge">MODE A · PRIMARY</text>
   <text x="818" y="122" class="card-title">Subscription Engine (Local)</text>
 
-  <text x="692" y="150" class="body">• Official agy CLI: --print --mode accept-edits --sandbox</text>
-  <text x="692" y="170" class="body">• 3-tier trigger: CLI → OS IPC → Clipboard + Desktop Notify</text>
-  <text x="692" y="190" class="body">• Built-in Browser Subagent E2E visual QA &amp; screenshots</text>
-  <text x="692" y="210" class="body">• stream-json heartbeat + fs.watch + 2s polling + agy-cli.log</text>
+  <text x="692" y="150" class="body">• Full agy CLI: --model --effort --dangerously-skip-permissions</text>
+  <text x="692" y="170" class="body">• Native /browser · /boost · /swarm · /goal + --json-schema</text>
+  <text x="692" y="190" class="body">• Persistent stream-json sessions (high prompt-cache hits)</text>
+  <text x="692" y="210" class="body">• Non-blocking background jobs + real-time token metrics</text>
 
   <!-- Column 3B: API Worker Engine -->
   <rect x="674" y="256" width="414" height="146" rx="12" fill="#211A10" stroke="#F59E0B" stroke-width="1.5"/>

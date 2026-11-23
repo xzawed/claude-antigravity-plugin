@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 430" width="1120" height="430" role="img" aria-label="Visual Map of All 21 Slash Commands in claude-antigravity-plugin v1.4.0">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1120"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="c1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981"/><stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="c2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="c3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8B5CF6"/><stop offset="100%" stop-color="#EC4899"/>
+    </linearGradient>
+    <linearGradient id="c4" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B"/><stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+    <linearGradient id="c5" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#64748B"/><stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+  </defs>
+
+  <style>
+    .title { font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #F8FAFC; }
+    .subtitle { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #94A3B8; }
+    .hdr { font: 700 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #0B1120; }
+    .cmd { font: 700 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #38BDF8; }
+    .desc { font: 400 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #CBD5E1; }
+  </style>
+
+  <rect width="1120" height="430" rx="16" fill="url(#bg)" stroke="#1E293B" stroke-width="1.5"/>
+
+  <text x="32" y="40" class="title">All 21 Slash Commands at a Glance (v1.4.0)</text>
+  <text x="32" y="62" class="subtitle">Grouped by everyday goal — pick a card, copy the command, and run it right inside Claude Code</text>
+
+  <!-- Row 1: 3 cards -->
+  <!-- Card 1: Setup & Login -->
+  <rect x="32" y="84" width="336" height="154" rx="12" fill="#131C31" stroke="#10B981" stroke-width="1.5"/>
+  <rect x="32" y="84" width="336" height="34" rx="12" fill="url(#c1)"/>
+  <rect x="32" y="106" width="336" height="12" fill="url(#c1)"/>
+  <text x="48" y="106" class="hdr">1. Login, Health &amp; Settings (4)</text>
+  <text x="48" y="142" class="cmd">/ag-login</text><text x="152" y="142" class="desc">Google OAuth sign-in / status</text>
+  <text x="48" y="168" class="cmd">/ag-status</text><text x="152" y="168" class="desc">Live connection &amp; engine check</text>
+  <text x="48" y="194" class="cmd">/ag-models</text><text x="152" y="194" class="desc">List live models &amp; agents</text>
+  <text x="48" y="220" class="cmd">/ag-config</text><text x="152" y="220" class="desc">Mode, model, skip-permissions</text>
+
+  <!-- Card 2: Parallel & Sessions -->
+  <rect x="392" y="84" width="336" height="154" rx="12" fill="#131C31" stroke="#3B82F6" stroke-width="1.5"/>
+  <rect x="392" y="84" width="336" height="34" rx="12" fill="url(#c2)"/>
+  <rect x="392" y="106" width="336" height="12" fill="url(#c2)"/>
+  <text x="408" y="106" class="hdr">2. Delegate, Parallel &amp; Sessions (6)</text>
+  <text x="408" y="142" class="cmd">/ag-delegate</text><text x="518" y="142" class="desc">Sync task with full agy flags</text>
+  <text x="408" y="164" class="cmd">/ag-start</text><text x="518" y="164" class="desc">Run in background (non-blocking)</text>
+  <text x="408" y="186" class="cmd">/ag-jobs</text><text x="518" y="186" class="desc">Check live progress &amp; collect</text>
+  <text x="408" y="208" class="cmd">/ag-cancel</text><text x="518" y="208" class="desc">Stop a running background job</text>
+  <text x="408" y="228" class="cmd">/ag-session · /ag-resume</text><text x="598" y="228" class="desc">Warm multi-turn</text>
+
+  <!-- Card 3: Antigravity Superpowers -->
+  <rect x="752" y="84" width="336" height="154" rx="12" fill="#131C31" stroke="#8B5CF6" stroke-width="1.5"/>
+  <rect x="752" y="84" width="336" height="34" rx="12" fill="url(#c3)"/>
+  <rect x="752" y="106" width="336" height="12" fill="url(#c3)"/>
+  <text x="768" y="106" class="hdr">3. Antigravity Superpowers (5)</text>
+  <text x="768" y="142" class="cmd">/ag-browser</text><text x="874" y="142" class="desc">Real-browser QA &amp; screenshots</text>
+  <text x="768" y="164" class="cmd">/ag-boost</text><text x="874" y="164" class="desc">Deep multi-perspective reasoning</text>
+  <text x="768" y="186" class="cmd">/ag-swarm</text><text x="874" y="186" class="desc">Parallel worker + verifier team</text>
+  <text x="768" y="208" class="cmd">/ag-goal</text><text x="874" y="208" class="desc">Autonomous loop until verified</text>
+  <text x="768" y="228" class="cmd">/ag-review</text><text x="874" y="228" class="desc">Cross-model read-only audit</text>
+
+  <!-- Row 2: 2 wider cards -->
+  <!-- Card 4: Safety, Cost & Results -->
+  <rect x="32" y="256" width="516" height="148" rx="12" fill="#131C31" stroke="#F59E0B" stroke-width="1.5"/>
+  <rect x="32" y="256" width="516" height="34" rx="12" fill="url(#c4)"/>
+  <rect x="32" y="278" width="516" height="12" fill="url(#c4)"/>
+  <text x="48" y="278" class="hdr">4. Safety Undo, Token Costs &amp; Artifacts (3)</text>
+  <text x="48" y="316" class="cmd">/ag-rollback</text><text x="172" y="316" class="desc">1-click lossless undo to pre-delegation Git checkpoint</text>
+  <text x="48" y="346" class="cmd">/ag-usage</text><text x="172" y="346" class="desc">Total &amp; per-task token counts (input / output / cache)</text>
+  <text x="48" y="376" class="cmd">/ag-artifacts</text><text x="172" y="376" class="desc">Browse saved screenshots, report.md, and masked logs</text>
+
+  <!-- Card 5: Platform Admin & Updates -->
+  <rect x="572" y="256" width="516" height="148" rx="12" fill="#131C31" stroke="#64748B" stroke-width="1.5"/>
+  <rect x="572" y="256" width="516" height="34" rx="12" fill="url(#c5)"/>
+  <rect x="572" y="278" width="516" height="12" fill="url(#c5)"/>
+  <text x="588" y="278" class="hdr">5. Platform Management &amp; Updates (3)</text>
+  <text x="588" y="316" class="cmd">/ag-mcp</text><text x="712" y="316" class="desc">List, add, toggle, or sync .mcp.json servers into agy</text>
+  <text x="588" y="346" class="cmd">/ag-remote</text><text x="712" y="346" class="desc">Check status, start, or stop agy remote-control daemon</text>
+  <text x="588" y="376" class="cmd">/ag-update</text><text x="712" y="376" class="desc">View Antigravity CLI changelog or upgrade agy binary</text>
+</svg>
