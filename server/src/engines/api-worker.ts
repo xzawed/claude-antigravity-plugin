@@ -10,7 +10,7 @@ import {
 import { maskSecrets, resolveApiKey } from '../config.js';
 import { listGitChangedFiles } from '../git-guard.js';
 import { assertReadablePath, assertWritablePath } from '../path-guard.js';
-import { AgPluginError, BridgeManifest } from '../types.js';
+import { AgPluginError, BridgeManifest, ExecutionMetrics, TokenUsage } from '../types.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
 
 const MAX_READ_BYTES = 64 * 1024;
@@ -25,6 +25,7 @@ export interface ModelFunctionCall {
 export interface ModelTurnResponse {
   text?: string;
   functionCalls?: ModelFunctionCall[];
+  usage?: Partial<TokenUsage>;
 }
 
 export interface GeminiAdapter {
@@ -322,9 +323,21 @@ function createDefaultGeminiAdapter(apiKey: string): GeminiAdapter {
           args: (fc.args ?? {}) as Record<string, unknown>,
         }));
 
+      const meta = (response as { usageMetadata?: Record<string, unknown> }).usageMetadata;
+      const usage: Partial<TokenUsage> | undefined = meta
+        ? {
+            inputTokens: Number(meta.promptTokenCount ?? 0) || 0,
+            outputTokens: Number(meta.candidatesTokenCount ?? 0) || 0,
+            thinkingTokens: Number(meta.thoughtsTokenCount ?? 0) || 0,
+            cacheReadTokens: Number(meta.cachedContentTokenCount ?? 0) || 0,
+            totalTokens: Number(meta.totalTokenCount ?? 0) || 0,
+          }
+        : undefined;
+
       return {
         text: response.text,
         functionCalls,
+        usage,
       };
     },
   };
@@ -459,6 +472,7 @@ function formatFinalReport(params: {
   changedFiles: string[];
   blockedWrites: number;
   commandsRun: Array<{ command: string; exitCode: number }>;
+  metrics?: ExecutionMetrics;
   errorMessage?: string;
 }): string {
   const filesList =
@@ -472,6 +486,23 @@ function formatFinalReport(params: {
           .map((c) => `- \`${c.command}\` → ${c.exitCode === 0 ? 'PASS' : `FAIL (exit ${c.exitCode})`}`)
           .join('\n')
       : '- No verification commands executed';
+
+  const usageLines: string[] = [];
+  if (params.metrics) {
+    usageLines.push('', '## Execution Metrics & Token Usage');
+    if (params.metrics.numTurns !== undefined) {
+      usageLines.push(`- **Turns:** ${params.metrics.numTurns}`);
+    }
+    if (params.metrics.durationSeconds !== undefined) {
+      usageLines.push(`- **Duration:** ${params.metrics.durationSeconds.toFixed(2)}s`);
+    }
+    if (params.metrics.usage) {
+      const u = params.metrics.usage;
+      usageLines.push(
+        `- **Tokens:** total \`${u.totalTokens.toLocaleString()}\` (input: \`${u.inputTokens.toLocaleString()}\`, output: \`${u.outputTokens.toLocaleString()}\`, thinking: \`${u.thinkingTokens.toLocaleString()}\`, cache read: \`${u.cacheReadTokens.toLocaleString()}\`)`,
+      );
+    }
+  }
 
   return [
     '# Antigravity Task Report',
@@ -494,6 +525,7 @@ function formatFinalReport(params: {
     params.blockedWrites > 0
       ? `- **Security Guard:** Blocked ${params.blockedWrites} out-of-scope write attempt(s)`
       : '',
+    ...usageLines,
     '',
     '## Artifacts',
     '- (none — headless API mode)',
@@ -532,9 +564,37 @@ export class ApiWorkerEngine implements ExecutionEngine {
 
     const adapter = this.adapterFactory(apiKey);
     const maxTurns = ctx.config.api.max_turns;
-    const model = ctx.config.api.model;
+    const model = ctx.agyOptions?.model ?? ctx.config.api.model;
     const systemInstruction = buildSystemInstruction(ctx);
     const hasPackageJson = fs.existsSync(path.join(ctx.workspaceRoot, 'package.json'));
+    const startedAtMs = Date.now();
+    const accumulatedUsage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      thinkingTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+    };
+    let hasUsageData = false;
+    let turnsExecuted = 0;
+
+    const buildMetrics = (): ExecutionMetrics => ({
+      model,
+      durationSeconds: Math.round(((Date.now() - startedAtMs) / 1000) * 100) / 100,
+      numTurns: turnsExecuted,
+      ...(hasUsageData ? { usage: { ...accumulatedUsage } } : {}),
+    });
+
+    const addTurnUsage = (u?: Partial<TokenUsage>): void => {
+      if (!u) return;
+      hasUsageData = true;
+      accumulatedUsage.inputTokens += u.inputTokens ?? 0;
+      accumulatedUsage.outputTokens += u.outputTokens ?? 0;
+      accumulatedUsage.thinkingTokens += u.thinkingTokens ?? 0;
+      accumulatedUsage.cacheReadTokens += u.cacheReadTokens ?? 0;
+      accumulatedUsage.totalTokens +=
+        u.totalTokens ?? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.thinkingTokens ?? 0);
+    };
 
     // Transition manifest -> RUNNING
     const runningManifest: BridgeManifest = {
@@ -583,6 +643,8 @@ export class ApiWorkerEngine implements ExecutionEngine {
     try {
       for (let turn = 1; turn <= maxTurns; turn++) {
         const turnResp = await callModelWithRetry();
+        turnsExecuted = turn;
+        addTurnUsage(turnResp.usage);
         if (turnResp.text) {
           lastModelText = turnResp.text;
         }
@@ -612,6 +674,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
           }
 
           // Completed cleanly
+          const metrics = buildMetrics();
           const changedFiles = Array.from(
             new Set([...writtenFiles, ...listGitChangedFiles(ctx.workspaceRoot)]),
           ).sort();
@@ -624,6 +687,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
               changedFiles,
               blockedWrites,
               commandsRun,
+              metrics,
             }),
             [apiKey],
           );
@@ -634,6 +698,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
             status: 'VERIFIED',
             changedFiles,
             artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+            metrics,
             updatedAt: new Date().toISOString(),
           };
           writeManifest(ctx.workspaceRoot, verifiedManifest);
@@ -643,6 +708,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
             reportMarkdown: report,
             changedFiles,
             artifacts: verifiedManifest.artifacts,
+            metrics,
             warnings,
           };
         }
@@ -756,6 +822,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
       }
 
       // Max turns exceeded
+      const metrics = buildMetrics();
       const changedFiles = Array.from(
         new Set([...writtenFiles, ...listGitChangedFiles(ctx.workspaceRoot)]),
       ).sort();
@@ -769,6 +836,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
           changedFiles,
           blockedWrites,
           commandsRun,
+          metrics,
           errorMessage: errMsg,
         }),
         [apiKey],
@@ -779,6 +847,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
         ...runningManifest,
         status: 'FAILED',
         changedFiles,
+        metrics,
         updatedAt: new Date().toISOString(),
         errorCode: 'MAX_TURNS_EXCEEDED',
         error: errMsg,
@@ -790,11 +859,13 @@ export class ApiWorkerEngine implements ExecutionEngine {
         reportMarkdown: report,
         changedFiles,
         artifacts: [],
+        metrics,
         warnings,
         errorCode: 'MAX_TURNS_EXCEEDED',
         errorMessage: errMsg,
       };
     } catch (err) {
+      const metrics = buildMetrics();
       const code = err instanceof AgPluginError ? err.code : 'GEMINI_API_ERROR';
       const safeMsg = maskSecrets(err instanceof Error ? err.message : String(err), [apiKey]);
       const changedFiles = Array.from(
@@ -808,6 +879,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
         changedFiles,
         blockedWrites,
         commandsRun,
+        metrics,
         errorMessage: safeMsg,
       });
       writeReportMarkdown(ctx.workspaceRoot, report);
@@ -816,6 +888,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
         ...runningManifest,
         status: 'FAILED',
         changedFiles,
+        metrics,
         updatedAt: new Date().toISOString(),
         errorCode: code,
         error: safeMsg,
@@ -827,6 +900,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
         reportMarkdown: report,
         changedFiles,
         artifacts: [],
+        metrics,
         warnings,
         errorCode: code,
         errorMessage: safeMsg,

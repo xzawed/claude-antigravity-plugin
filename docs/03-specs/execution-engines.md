@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-002` |
-| **버전** | `1.0.0` |
+| **버전** | `1.1.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [시스템 아키텍처](../02-architecture/system-architecture.md), [MCP API 명세](./mcp-tools-api.md), [ADR-002](../06-adr/ADR-002-dual-execution-engine.md), [ADR-003](../06-adr/ADR-003-antigravity-cli-and-paths.md) |
 
 ---
@@ -17,11 +17,14 @@
 ```typescript
 export interface ExecutionContext {
   workspaceRoot: string;
+  pluginRoot: string;
   manifest: BridgeManifest;
   config: BridgeConfig;
   instructions: string;
   acceptanceCriteria: string[];
   detection: EnvironmentDetectionResult;
+  agyOptions?: AgyCliOptions;
+  timeoutSecOverride?: number;
 }
 
 export interface ExecutionResult {
@@ -29,6 +32,7 @@ export interface ExecutionResult {
   reportMarkdown: string;
   changedFiles: string[];
   artifacts: string[];
+  metrics?: ExecutionMetrics;
   warnings: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
@@ -46,17 +50,20 @@ export interface ExecutionEngine {
 
 ### 2.1 감지 우선순위 (`execution_mode === 'auto'`)
 1. **Subscription Provider 감지 (`detectSubscriptionApp`):**
-   - **사용자 지정 경로 최우선:** `config.subscription.app_path !== 'auto'`이면 해당 경로 존재 여부(`fs.existsSync`) 확인.
-   - **CLI 바이너리 탐색 순서:** `agy` → `antigravity` → `ag` (macOS/Linux는 `which`, Windows는 `where` 사용, 타임아웃 2초).
+   - **사용자 지정 경로 최우선:** `config.subscription.app_path !== 'auto'`이면 해당 경로 존재 여부(`fs.existsSync`) 확인 및 바이너리 타입(`agy` / `antigravity` / `ag`) 자동 추론.
+   - **CLI 바이너리 탐색 순서:** `agy` → `antigravity` → `ag` (순수 JS `PATH` 탐색 + MCP 호스트가 `PATH`를 축소한 경우 OS 표준 설치 경로 폴백).
    - **데스크톱 앱 기본 경로 탐색:**
      - macOS: `/Applications/Antigravity.app`, `~/Applications/Antigravity.app`
-     - Windows: `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`, `%ProgramFiles%\Antigravity\Antigravity.exe`
-     - Linux: `/usr/bin/antigravity`, `~/.local/bin/antigravity`, `/opt/Antigravity/antigravity`
+     - Windows: `%LOCALAPPDATA%\agy\bin\agy.exe`, `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`, `%ProgramFiles%\Antigravity\Antigravity.exe`
+     - Linux: `/usr/bin/agy`, `~/.local/bin/agy`, `/usr/bin/antigravity`, `~/.local/bin/antigravity`, `/opt/Antigravity/antigravity`
    - 하나 이상 감지되면 `subscription.detected = true` 반환.
 2. **API Fallback 감지 (`detectApiKey`):**
    - `process.env[config.api.api_key_env]` (기본 `GEMINI_API_KEY`)가 비어있지 않으면 `{ configured: true, source: 'env' }`.
    - 없으면 `config.api.apiKey` 존재 시 `{ configured: true, source: 'config' }` (사용 시 보안 경고 추가).
-3. **모드 결정 로직:**
+3. **환경변수 오버라이드 (`config.ts`):**
+   - `AG_DEFAULT_MODE` (`auto` | `subscription` | `api`)
+   - `AG_DANGEROUSLY_SKIP_PERMISSIONS` (`1` | `true` | `yes` | `0` | `false` | `no`)
+4. **모드 결정 로직:**
    - `auto`: `subscription.detected` → `'subscription'`, else `api.configured` → `'api'`, else `'unavailable'` (`NO_ANTIGRAVITY_PROVIDER`).
    - `subscription`: 미감지 시 즉시 `SUBSCRIPTION_UNAVAILABLE`.
    - `api`: 키 미설정 시 즉시 `API_KEY_MISSING`.
@@ -71,23 +78,29 @@ export interface ExecutionEngine {
    - 필요 시 `.agents/workflows/claude-handoff.md` 호환성 여부도 확인한다([ADR-003](../06-adr/ADR-003-antigravity-cli-and-paths.md) 참조).
 2. **디스패치 기록 완료 검증:**
    - `.ag-bridge/dispatch.md`와 `.ag-bridge/manifest.json`(`DISPATCHED`)이 디스크에 완전히 플러시되었는지 확인.
-3. **로컬 Antigravity 트리거 (3단계 폴백 체인):**
-   - **1차 (CLI 트리거 — 권장):** 감지된 CLI(`agy` 또는 `antigravity`)를 비동기 실행하여 대상 워크스페이스에서 `/claude-handoff` 지시를 전달한다.
-     - `agy` 공식 비대화형 인자: `agy --print "<handoff prompt>" --mode <agy_mode> --print-timeout <timeout_sec>s [--sandbox] [--output-format stream-json]` (기본 `agy_mode: "accept-edits"`, `agy_sandbox: true`, `agy_stream_heartbeat: true`)
-     - `agy_stream_heartbeat` 활성 시 `stdout` NDJSON 스트림을 파싱(`attachStreamJsonHeartbeat`)해 진행 이벤트마다 `manifest.json`을 `RUNNING` + 최신 `updatedAt` 하트비트로 자동 갱신(장기 실행 작업의 오탐 Stale Lock 방지, `VERIFIED`/`FAILED` 종료 상태는 절대 덮어쓰지 않음).
-     - 레거시 `antigravity` / `ag`: `run --workflow claude-handoff`
-     - 실행 로그는 민감 키 마스킹 후 `.ag-bridge/artifacts/<taskId>/agy-cli.log`에 기록하여 디버깅 가시성을 확보한다.
-     - CLI가 인자 오류로 즉시 비정상 종료(exit code != 0)하면 2차로 자동 폴백한다.
-   - **2차 (OS IPC / 창 포커스 폴백):**
-     - `trigger_method`가 `cli_or_ipc`일 때 OS별 스크립트로 Antigravity 앱 활성화 및 프롬프트 주입 시도.
-   - **3차 (클립보드 + 데스크톱 알림 폴백):**
-     - `/claude-handoff` 실행 프롬프트를 시스템 클립보드에 복사하고 OS 알림을 발송하며 `warnings`에 안내 문구를 기록한다(감시 루프는 계속 대기하여 사용자가 붙여넣기 실행 시 자동 회수).
+3. **로컬 Antigravity 트리거 (3단계 폴백 체인 & 전체 `agy` CLI 패리티):**
+   - **1차 (CLI 트리거 — 권장):** `buildCliInvocationArgs(ctx)`가 `agy` 공식 비대화형 인자를 조립한다:
+     - 기본 인자: `--print <prompt> --print-timeout <timeoutSec>s`
+     - 권한 제어:
+       - `dangerouslySkipPermissions` (`agyOptions.dangerouslySkipPermissions ?? config.subscription.agy_dangerously_skip_permissions`)가 `true`이면 `--dangerously-skip-permissions`를 전달하고, 명시적 `agyOptions.agyMode`가 없는 한 기본 `--mode` 플래그를 생략하여 `agy`의 `permission_mode: "always-proceed"` 동작을 보존한다. 실행 시 안전 경고 문구를 `warnings`에 자동 추가한다.
+       - `false`이면 `--mode <agyMode>` (기본 `accept-edits`, 또는 `auto` | `plan`)를 전달한다.
+     - 샌드박스: `sandbox === true` → `--sandbox`, `sandbox === false` → `--no-sandbox`
+     - 선택적 패리티 플래그: `--model`, `--effort`, `--agent`, 반복 `--add-dir`, `--conversation` / `--continue`, `--project`, `--new-project`, `--remote-agent`, `--json-schema`, `--disable-slash-commands`, `--settings`
+     - 스트림 모니터링: `agy_stream_heartbeat === true`이면 `--output-format stream-json` 추가.
+   - **실시간 NDJSON 파싱, 토큰 사용량 수집 및 자동 완료 (`attachStreamJsonHeartbeat`):**
+     - `event === "init"`: `conversation_id`, `init.model`, `init.permission_mode` 수집.
+     - `event === "step_update"`: 진행 이벤트마다 `manifest.json`을 `RUNNING` + 최신 `updatedAt` 하트비트로 갱신(Stale Lock 방지)하고 중간 `usage` 캡처.
+     - `event === "result"`: 최종 `result.usage` (`input_tokens`, `output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens`), `duration_seconds`, `num_turns`, `conversation_id`, `status`, `response`를 추출한다.
+     - `autoFinalizeOnResult === true`이고 `/claude-handoff`가 아직 `manifest.json`을 `VERIFIED`/`FAILED`로 종료하지 않은 경우(예: 일반 질의·분석 또는 `--disable-slash-commands` 호출), `result` 이벤트 수신 시 `.ag-bridge/report.md`(응답 본문 + `Execution Metrics & Token Usage` 표)와 `manifest.json`(`VERIFIED`/`FAILED` + `metrics`)을 원자적으로 자동 확정한다. 이미 종료된 `manifest.json`에도 `metrics`가 누락되어 있으면 자동 병합한다.
+   - **Windows `.cmd`/`.bat` 안전 스폰 (`buildCliSpawnSpec`):** Node 20.12+/24 `EINVAL` 방지를 위해 `.cmd`/`.bat`는 `cmd.exe /d /s /c` + `windowsVerbatimArguments: true`로 안전 래핑한다.
+   - **실시간 기능 조회 (`queryAgyCapabilities`):** `agy models`와 `agy agents`를 `Promise.all`로 병렬 비동기 실행하여 사용 가능한 모델·에이전트 목록을 파싱한다.
+   - **2차 (OS IPC / 창 포커스 폴백)** 및 **3차 (클립보드 + 데스크톱 알림 폴백):** CLI 미감지 또는 즉시 오류 종료 시 기존 폴백 체인 유지.
 4. **하이브리드 완료 감시 (`watchForCompletion`):**
-   - `fs.watch(.ag-bridge/)` 이벤트 리스너 + `poll_interval_ms`(기본 `2000ms`) 주기 폴링을 병행한다(OS별 `fs.watch` 이벤트 누락 보완).
-   - `manifest.json`의 `taskId === ctx.manifest.taskId`이고 `status`가 `'VERIFIED'` 또는 `'FAILED'`가 되면 즉시 종료한다.
-   - `timeout_sec`(기본 `300s`) 초과 시 감시를 중단하고 `manifest.json`을 `FAILED(TASK_TIMEOUT)`으로 갱신한다.
+   - `fs.watch(.ag-bridge/)` 이벤트 리스너 + `poll_interval_ms`(기본 `2000ms`) 주기 폴링 병행.
+   - `manifest.json`의 `taskId === ctx.manifest.taskId`이고 `status`가 `'VERIFIED'` 또는 `'FAILED'`가 되면 즉시 종료.
+   - `timeoutSecOverride ?? config.subscription.timeout_sec`(기본 `300s`) 초과 시 `FAILED(TASK_TIMEOUT)` 갱신.
 5. **결과 수집:**
-   - `.ag-bridge/report.md` 읽기(누락 시 기본 요약 생성), `.ag-bridge/artifacts/<taskId>/` 내 파일 스캔, `git status --porcelain`으로 실제 변경 파일 목록 수집 후 `ExecutionResult` 반환.
+   - `.ag-bridge/report.md` 읽기, `.ag-bridge/artifacts/<taskId>/` 스캔, `git status --porcelain` 변경 파일 수집, 캡처된 `metrics`와 함께 `ExecutionResult` 반환.
 
 ---
 
@@ -96,13 +109,10 @@ export interface ExecutionEngine {
 `claude-grok-build-plugin`과 동일한 경량 자율 Tool-calling 에이전트 루프를 `@google/genai` SDK로 구현한다.
 
 ### 4.1 초기화 및 시스템 프롬프트
-- 모델: `config.api.model` (기본 `gemini-2.5-pro`)
+- 모델: `ctx.agyOptions?.model ?? config.api.model` (기본 `gemini-2.5-pro`)
 - 시작 즉시 `manifest.json`을 `RUNNING`으로 갱신한다.
-- 시스템 프롬프트에 다음 핵심 지침을 주입한다:
-  - 역할: Claude Code로부터 UI/프론트엔드 구현 작업을 위임받은 자율 엔지니어링 워커.
-  - `lockedPaths` 목록과 수정 금지 규칙 명시.
-  - 작업 절차: 1) 기존 파일 및 타입/패키지 구조 파악(`list_dir`, `read_file`) → 2) 코드 구현(`write_file`) → 3) 타입체크/빌드 검증(`run_command`) → 4) 최종 마크다운 리포트 반환.
-  - 브라우저 시각적 검증은 API 모드에서 불가하므로, 빌드·타입체크·린트 통과를 필수 완료 기준으로 강제한다.
+- 매 턴 응답의 `response.usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, `thoughtsTokenCount`, `cachedContentTokenCount`, `totalTokenCount`)를 누적 집계하고, 종료 시 `durationSeconds`, `numTurns`, `model`, `usage`를 `manifest.json.metrics`와 `report.md`의 `## Execution Metrics & Token Usage` 섹션에 기록한다.
+- 시스템 프롬프트에 `lockedPaths` 규칙, 작업 절차(`list_dir`/`read_file` → `write_file` → `run_command` → 최종 리포트), 빌드·타입체크 필수 검증을 주입한다.
 
 ### 4.2 Function Calling Tools (4종)
 
@@ -111,7 +121,7 @@ export interface ExecutionEngine {
 | `read_file` | `{ path: string, startLine?: number, endLine?: number }` | 워크스페이스 내부 파일 읽기(`.env*`/비밀 파일 차단, 최대 `64 KB` 절단) |
 | `write_file` | `{ path: string, content: string }` | `path-guard.ts`로 `lockedPaths` 검증 후 부모 디렉터리 자동 생성 및 파일 쓰기. 위반 시 예외를 던지지 않고 `{ error: "PATH_OUTSIDE_LOCKED_SCOPE", ... }`를 Tool 결과로 반환해 모델이 스스로 수정하도록 유도 |
 | `list_dir` | `{ path?: string, maxDepth?: number }` | 워크스페이스 내 디렉터리 트리 조회 (`node_modules`, `.git`, `.ag-bridge` 자동 제외, 최대 200항목) |
-| `run_command` | `{ command: string }` | 허용된 빌드/타입체크/린트/테스트 명령만 실행, 타임아웃 `60s`, 출력 `16 KB` 절단, 민감 환경변수 제거 |
+| `run_command` | `{ command: string }` | 허용된 빌드/타입체크/린트/테스트 명령만 실행, 타임아웃 `60s`(프로세스 트리 종료 `killProcessTree`), 출력 `16 KB` 절단, 민감 환경변수 제거 |
 
 ### 4.3 에이전트 루프 제어 및 장애 복구
 ```mermaid
@@ -119,16 +129,17 @@ flowchart TD
     S["Start: manifest = RUNNING, turn = 1"] --> CALL["Gemini generateContent(history, tools)"]
     CALL --> ERR{"API 오류 (429/5xx)?"}
     ERR -- Yes (<=3회) --> RETRY["Exponential Backoff (1s, 2s, 4s) 재시도"] --> CALL
-    ERR -- 치명적 오류 --> FAIL["manifest = FAILED(GEMINI_API_ERROR)"]
-    ERR -- No --> FC{"Function Call 포함?"}
+    ERR -- 치명적 오류 --> FAIL["manifest = FAILED(GEMINI_API_ERROR) + metrics"]
+    ERR -- No --> ACC["usageMetadata 누적 (input/output/thinking/cache/total)"]
+    ACC --> FC{"Function Call 포함?"}
     FC -- Yes --> EXEC["Tool 실행 (path-guard / cmd-guard 적용)"]
     EXEC --> INC["turn += 1, updatedAt 갱신"]
     INC --> WARN{"turn == max_turns - 2?"}
     WARN -- Yes --> INJ["마무리 경고 메시지 주입 (검증 후 종료 유도)"] --> MAX
     WARN -- No --> MAX{"turn > max_turns?"}
-    MAX -- Yes --> EXCEED["부분 결과 report.md 생성, FAILED(MAX_TURNS_EXCEEDED)"]
+    MAX -- Yes --> EXCEED["부분 결과 report.md 생성, FAILED(MAX_TURNS_EXCEEDED) + metrics"]
     MAX -- No --> CALL
-    FC -- No (최종 텍스트 응답) --> VER["report.md 작성 + 변경 파일 수집 + manifest = VERIFIED"]
+    FC -- No (최종 텍스트 응답) --> VER["report.md 작성 + 변경 파일 수집 + manifest = VERIFIED + metrics"]
 ```
 
 ### 4.4 빌드 검증 강제 체크

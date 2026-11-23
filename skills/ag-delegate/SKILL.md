@@ -1,53 +1,49 @@
 ---
 name: ag-delegate
 description: >-
-  Delegate frontend UI implementation, multi-file component scaffolding, styling,
-  and real-browser E2E visual verification tasks from Claude Code to Antigravity
-  via the embedded antigravity-delegate MCP server.
+  Delegate frontend UI implementation, multi-file refactoring, real-browser E2E
+  visual verification, or any Antigravity CLI (`agy`) workflow (custom models,
+  effort levels, agents, conversation resume, `--dangerously-skip-permissions`,
+  and token usage tracking) from Claude Code to Antigravity via the embedded
+  antigravity-delegate MCP server.
 ---
 
 # Antigravity Delegation Skill (`ag-delegate`)
 
-Use the `antigravity-delegate` MCP server to safely offload UI-heavy implementation, multi-file frontend scaffolding, and browser-based E2E visual verification to Antigravity while keeping Claude Code focused on orchestration, backend logic, and final quality review.
+Use the `antigravity-delegate` MCP server to offload UI-heavy implementation, multi-file refactoring, browser E2E visual verification, and full Antigravity CLI (`agy`) capabilities while keeping Claude Code focused on orchestration, architecture, and final review.
 
-## 1. When to Delegate
+## 1. Available MCP Tools (5)
 
-Consider calling `delegate_to_antigravity` when the user's request matches one or more of the following:
+1. `delegate_to_antigravity` — Dispatch any task to Antigravity (`agy` CLI or Gemini API) with full CLI flag support (`model`, `effort`, `agent`, `agyMode`, `sandbox`, `dangerouslySkipPermissions`, `addDirs`, `continueConversation`, `conversationId`, `project`, `remoteAgent`, `jsonSchema`, `disableSlashCommands`, `settings`, `timeoutSec`) and receive `reportMarkdown`, `changedFiles`, `artifacts`, and `metrics` (token usage + `conversationId`).
+2. `check_ag_environment` — Inspect detected mode, local `agy`/app path, active `agyConfig` (permissions/sandbox/model/effort), API key status (redacted), Git Guard state, and latest task usage.
+3. `list_ag_capabilities` — Dynamically discover all available `agy models`, `agy agents`, permission modes, effort levels, and supported CLI flags.
+4. `get_ag_usage` — Inspect cumulative and per-task token usage (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`) and duration across current and archived delegations.
+5. `rollback_ag_task` — Losslessly restore the workspace to its exact pre-delegation Git checkpoint (`gitCheckpointRef`).
+
+## 2. When to Delegate
+
+Delegate via `delegate_to_antigravity` when the user's request involves:
 1. **Frontend UI & Styling:** Building or refactoring React, Next.js, Vue, Svelte, CSS/Tailwind components, responsive layouts, dashboards, or interactive forms.
-2. **Real Browser Visual / E2E Verification:** Tasks requiring a local dev server (`verifyUrl`) to inspect rendered DOM, layout, console/network errors, and interactive user flows (clicks, form submission, state transitions).
-3. **Parallel Multi-File Frontend Generation:** Implementing multiple pages, hooks, or UI state modules once backend API contracts and TypeScript types are already finalized.
+2. **Real Browser Visual / E2E Verification:** Tasks requiring a local dev server (`verifyUrl`) to inspect rendered DOM, layout, console/network errors, and interactive user flows.
+3. **Parallel Multi-File Generation or Model-Specific Work:** Leveraging specific Antigravity models (`list_ag_capabilities` → e.g. `gemini-4-neon-high`, `claude-opus-5-5-high`, `gemini-3.8-flash-high`), reasoning effort (`--effort`), custom agents (`--agent`), or resuming a prior Antigravity session (`conversationId` / `continueConversation`).
+4. **Explicit User Delegation:** Any task the user explicitly asks to run through Antigravity (`/ag-delegate` or natural-language request).
 
-## 2. When NOT to Delegate
+## 3. Mandatory Pre-Flight Check & Permission Policy
 
-Keep the work directly inside Claude Code when:
-- The change is a trivial 1–2 line fix or typo correction.
-- The task involves core backend security, database migrations, authentication secrets, or infrastructure configs.
-- API contracts or architectural requirements are still ambiguous and need discussion with the user first.
+1. Call `check_ag_environment({})` before delegating. If `resolvedMode === "unavailable"`, report `recommendations` and stop.
+2. **Permissions (`--dangerously-skip-permissions`):**
+   - Default config uses safe `agy_mode: "accept-edits"` + `agy_sandbox: true` (`agy_dangerously_skip_permissions: false`).
+   - When the user explicitly requests unrestricted/unattended execution (`--dangerously-skip-permissions` or configured `agy_dangerously_skip_permissions: true`), pass `dangerouslySkipPermissions: true` (and `sandbox: false` only if requested). Git Guard still snapshots the workspace automatically before execution so `rollback_ag_task` remains available.
+3. **Least-Privilege `lockedPaths`:**
+   - Pass minimal relative file/directory scopes whenever Antigravity edits code. Never include `.git/`, `.env*`, `.ag-bridge/config.json`, or `node_modules/`.
+   - For read-only research, Q&A, or `agyMode: "plan"` tasks, `lockedPaths` may be omitted.
+4. **Mode-Specific `acceptanceCriteria`:**
+   - `subscription` with `verifyUrl`: require Browser Subagent rendering, 0 console/network errors, and screenshots in `.ag-bridge/artifacts/`.
+   - `api`: require `npx tsc --noEmit` and project build success.
 
-## 3. Mandatory Pre-Flight Check
-
-Before calling `delegate_to_antigravity`:
-1. Call `check_ag_environment({})` to inspect `resolvedMode` (`subscription` | `api` | `unavailable`), active bridge status, and Git Guard readiness.
-2. If `resolvedMode === "unavailable"`, **do not** attempt delegation. Report the `recommendations` from `check_ag_environment` so the user can either install/sign in to Antigravity (Subscription Mode) or set `GEMINI_API_KEY` (API Fallback Mode).
-3. If `bridge.currentStatus` is `DISPATCHED` or `RUNNING`, inform the user of the active task instead of overwriting it.
-
-## 4. Constructing a Safe Delegation Payload
-
-- **Least-Privilege `lockedPaths`:** Pass only the minimal relative files or directories that Antigravity needs to create or modify (for example `["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`). Never include `.git/`, `.env*`, `.ag-bridge/config.json`, or unrelated backend folders.
-- **Complete Context in `instructions`:** Include exact API endpoints, TypeScript interfaces, design tokens/conventions, and relevant file paths to read (read access covers the workspace; write access is restricted to `lockedPaths`).
-- **Mode-Specific `acceptanceCriteria`:**
-  - **When `resolvedMode === "subscription"`:**
-    - Always supply `verifyUrl` if a local dev server URL is known (e.g., `http://localhost:3000/dashboard`).
-    - Require: `"Verify rendering, core interactions, and 0 console/network errors via Antigravity Browser Subagent and save screenshots to .ag-bridge/artifacts/."`
-    - Require project typecheck/build success.
-  - **When `resolvedMode === "api"`:**
-    - Do not require browser screenshots (API mode runs headlessly).
-    - Require: `"Pass typecheck (npx tsc --noEmit) and project build (npm run build) with 0 errors."`
-
-## 5. Review & Rollback Protocol
+## 4. Review, Token Usage Reporting & Rollback
 
 After `delegate_to_antigravity` returns:
-1. Review `reportMarkdown`, `changedFiles`, `artifacts`, and any `warnings`.
-2. Inspect key diffs (e.g., `git diff`) to ensure alignment with backend contracts and code quality.
-3. Summarize the outcome, modified files, verification results, and artifact paths clearly to the user.
-4. If the result failed, introduced regressions, or fails acceptance criteria, either fix minor issues directly or offer/call `rollback_ag_task({ taskId })` to restore the exact pre-delegation checkpoint.
+1. Review `reportMarkdown`, `changedFiles`, `artifacts`, `metrics`, and `warnings`.
+2. Always report **Token Usage** (`metrics.usage`: input / output / thinking / cache read / total tokens), `metrics.model`, `metrics.durationSeconds`, and `metrics.conversationId` (when present) so the user has full visibility and can resume the Antigravity conversation if needed.
+3. If the result failed or introduced regressions, offer or call `rollback_ag_task({ taskId })` to restore the exact pre-delegation checkpoint.

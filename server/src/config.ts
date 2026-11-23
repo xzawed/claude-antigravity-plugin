@@ -12,6 +12,7 @@ const ExecutionModeSchema = z.enum(['auto', 'subscription', 'api']);
 const GitGuardPolicySchema = z.enum(['best_effort', 'required']);
 const TriggerMethodSchema = z.enum(['cli_or_ipc', 'cli_only', 'clipboard']);
 const AgyModeSchema = z.enum(['accept-edits', 'auto', 'plan']);
+const AgyEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 
 export const PartialBridgeConfigSchema = z
   .object({
@@ -25,7 +26,15 @@ export const PartialBridgeConfigSchema = z
         poll_interval_ms: z.number().int().min(100).max(30000).optional(),
         agy_mode: AgyModeSchema.optional(),
         agy_sandbox: z.boolean().optional(),
+        agy_dangerously_skip_permissions: z.boolean().optional(),
         agy_stream_heartbeat: z.boolean().optional(),
+        agy_model: z.string().min(1).optional(),
+        agy_effort: AgyEffortSchema.optional(),
+        agy_agent: z.string().min(1).optional(),
+        agy_project: z.string().min(1).optional(),
+        agy_remote_agent: z.boolean().optional(),
+        agy_disable_slash_commands: z.boolean().optional(),
+        agy_settings: z.string().min(1).optional(),
       })
       .partial()
       .optional(),
@@ -57,11 +66,17 @@ export function loadConfig(
       : DEFAULT_BRIDGE_CONFIG.execution_mode;
 
   const envModel = env.AG_MODEL?.trim() || DEFAULT_BRIDGE_CONFIG.api.model;
+  const envSkipPerm =
+    env.AG_DANGEROUSLY_SKIP_PERMISSIONS === '1' ||
+    env.AG_DANGEROUSLY_SKIP_PERMISSIONS?.toLowerCase() === 'true';
 
   const base: BridgeConfig = {
     execution_mode: envMode,
     git_guard: DEFAULT_BRIDGE_CONFIG.git_guard,
-    subscription: { ...DEFAULT_BRIDGE_CONFIG.subscription },
+    subscription: {
+      ...DEFAULT_BRIDGE_CONFIG.subscription,
+      agy_dangerously_skip_permissions: envSkipPerm,
+    },
     api: {
       ...DEFAULT_BRIDGE_CONFIG.api,
       model: envModel,

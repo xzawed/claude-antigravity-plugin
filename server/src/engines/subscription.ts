@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
@@ -10,15 +10,31 @@ import {
   readReportMarkdown,
   syncHandoffTemplate,
   writeManifest,
+  writeReportMarkdown,
 } from '../bridge-fs.js';
 import { maskSecrets } from '../config.js';
 import { listGitChangedFiles } from '../git-guard.js';
-import { BridgeManifest } from '../types.js';
+import {
+  AgyModelInfo,
+  BridgeManifest,
+  ExecutionMetrics,
+  TokenUsage,
+} from '../types.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
+
+export interface StreamCaptureState {
+  metrics: ExecutionMetrics;
+  resultReceived: boolean;
+  resultStatus?: string;
+  resultResponse?: string;
+  errorMessage?: string;
+}
 
 export interface TriggerOutcome {
   methodUsed: 'cli' | 'ipc' | 'clipboard' | 'custom';
   warning?: string;
+  streamState?: StreamCaptureState;
+  stopStream?: () => void;
 }
 
 export type TriggerFn = (ctx: ExecutionContext) => Promise<TriggerOutcome>;
@@ -27,8 +43,17 @@ export interface SubscriptionEngineOptions {
   triggerFn?: TriggerFn;
 }
 
-function buildHandoffPrompt(taskId: string): string {
-  return `/claude-handoff Execute delegated task ${taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json and .ag-bridge/report.md when done.`;
+export function buildHandoffPrompt(ctx: ExecutionContext): string {
+  const disableSlash =
+    ctx.agyOptions?.disableSlashCommands ?? ctx.config.subscription.agy_disable_slash_commands;
+
+  // If the user explicitly disabled slash commands or is resuming an existing conversation,
+  // send the direct instructions while referencing .ag-bridge/dispatch.md for full context.
+  if (disableSlash || ctx.agyOptions?.continueConversation || ctx.agyOptions?.conversationId) {
+    return `${ctx.instructions}\n\n(Delegated task ID: ${ctx.manifest.taskId}. Bridge context is also saved in .ag-bridge/dispatch.md.)`;
+  }
+
+  return `/claude-handoff Execute delegated task ${ctx.manifest.taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json and .ag-bridge/report.md when done.`;
 }
 
 function tryCopyToClipboard(text: string, platform: NodeJS.Platform): boolean {
@@ -75,22 +100,75 @@ function tryDesktopNotify(title: string, message: string, platform: NodeJS.Platf
   }
 }
 
+function parseUsageObject(raw: unknown): TokenUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const u = raw as Record<string, unknown>;
+  const inputTokens = Number(u.input_tokens ?? u.inputTokens ?? 0);
+  const outputTokens = Number(u.output_tokens ?? u.outputTokens ?? 0);
+  const thinkingTokens = Number(u.thinking_tokens ?? u.thinkingTokens ?? 0);
+  const cacheReadTokens = Number(u.cache_read_tokens ?? u.cacheReadTokens ?? 0);
+  const totalTokens = Number(
+    u.total_tokens ?? u.totalTokens ?? inputTokens + outputTokens + thinkingTokens,
+  );
+  if (
+    Number.isNaN(inputTokens) &&
+    Number.isNaN(outputTokens) &&
+    Number.isNaN(totalTokens)
+  ) {
+    return undefined;
+  }
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    thinkingTokens: Number.isFinite(thinkingTokens) ? thinkingTokens : 0,
+    cacheReadTokens: Number.isFinite(cacheReadTokens) ? cacheReadTokens : 0,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+  };
+}
+
+export function formatTokenUsageMarkdown(metrics?: ExecutionMetrics): string {
+  if (!metrics?.usage && !metrics?.conversationId && metrics?.durationSeconds === undefined) {
+    return '';
+  }
+  const lines: string[] = ['## Execution Metrics & Token Usage'];
+  if (metrics.model) lines.push(`- **Model:** \`${metrics.model}\``);
+  if (metrics.conversationId) lines.push(`- **Conversation ID:** \`${metrics.conversationId}\``);
+  if (metrics.permissionMode) lines.push(`- **Permission Mode:** \`${metrics.permissionMode}\``);
+  if (metrics.numTurns !== undefined) lines.push(`- **Turns:** ${metrics.numTurns}`);
+  if (metrics.durationSeconds !== undefined) {
+    lines.push(`- **Duration:** ${metrics.durationSeconds.toFixed(2)}s`);
+  }
+  if (metrics.usage) {
+    const u = metrics.usage;
+    lines.push(
+      `- **Tokens:** total \`${u.totalTokens.toLocaleString()}\` (input: \`${u.inputTokens.toLocaleString()}\`, output: \`${u.outputTokens.toLocaleString()}\`, thinking: \`${u.thinkingTokens.toLocaleString()}\`, cache read: \`${u.cacheReadTokens.toLocaleString()}\`)`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 export interface StreamHeartbeatOptions {
   workspaceRoot: string;
   taskId: string;
   logFilePath?: string;
   minHeartbeatIntervalMs?: number;
+  autoFinalizeOnResult?: boolean;
   onEvent?: (event: Record<string, unknown>) => void;
 }
 
 export function attachStreamJsonHeartbeat(
   stream: Readable,
   options: StreamHeartbeatOptions,
-): { stop: () => void } {
+): { stop: () => void; state: StreamCaptureState } {
   const minInterval = options.minHeartbeatIntervalMs ?? 2000;
   let buffer = '';
   let lastBeatMs = 0;
   let stopped = false;
+
+  const state: StreamCaptureState = {
+    metrics: {},
+    resultReceived: false,
+  };
 
   const appendLog = (line: string): void => {
     if (!options.logFilePath) return;
@@ -120,10 +198,85 @@ export function attachStreamJsonHeartbeat(
       writeManifest(options.workspaceRoot, {
         ...current,
         status: 'RUNNING',
+        metrics: { ...(current.metrics ?? {}), ...state.metrics },
         updatedAt: new Date(nowMs).toISOString(),
       });
     } catch {
       // ignore transient manifest lock errors
+    }
+  };
+
+  const handleStreamResult = (resultObj: Record<string, unknown>): void => {
+    state.resultReceived = true;
+    const convId = typeof resultObj.conversation_id === 'string' ? resultObj.conversation_id : undefined;
+    const status = typeof resultObj.status === 'string' ? resultObj.status : undefined;
+    const response = typeof resultObj.response === 'string' ? resultObj.response : undefined;
+    const duration =
+      typeof resultObj.duration_seconds === 'number' ? resultObj.duration_seconds : undefined;
+    const numTurns = typeof resultObj.num_turns === 'number' ? resultObj.num_turns : undefined;
+    const usage = parseUsageObject(resultObj.usage);
+
+    if (convId) state.metrics.conversationId = convId;
+    if (duration !== undefined) state.metrics.durationSeconds = duration;
+    if (numTurns !== undefined) state.metrics.numTurns = numTurns;
+    if (usage) state.metrics.usage = usage;
+    state.resultStatus = status;
+    state.resultResponse = response;
+    if (typeof resultObj.error === 'string') {
+      state.errorMessage = resultObj.error;
+    }
+
+    if (!options.autoFinalizeOnResult) {
+      return;
+    }
+
+    try {
+      const current = readManifest(options.workspaceRoot);
+      if (!current || current.taskId !== options.taskId) {
+        return;
+      }
+
+      // If /claude-handoff already finalized manifest.json, just enrich it with metrics
+      if (current.status === 'VERIFIED' || current.status === 'FAILED') {
+        writeManifest(options.workspaceRoot, {
+          ...current,
+          metrics: { ...(current.metrics ?? {}), ...state.metrics },
+          updatedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const isSuccess = status?.toUpperCase() === 'SUCCESS';
+      const finalStatus = isSuccess ? 'VERIFIED' : 'FAILED';
+      const existingReport = readReportMarkdown(options.workspaceRoot);
+      if (!existingReport) {
+        const usageBlock = formatTokenUsageMarkdown(state.metrics);
+        const autoReport = [
+          '# Antigravity Task Report',
+          '',
+          `- **Task ID:** \`${options.taskId}\``,
+          `- **Status:** ${finalStatus}`,
+          '- **Engine:** subscription (`agy`)',
+          `- **Completed At:** \`${new Date().toISOString()}\``,
+          '',
+          '## Response',
+          maskSecrets(response?.trim() || state.errorMessage || '(No response text emitted.)'),
+          '',
+          usageBlock,
+        ].join('\n');
+        writeReportMarkdown(options.workspaceRoot, autoReport);
+      }
+
+      writeManifest(options.workspaceRoot, {
+        ...current,
+        status: finalStatus,
+        metrics: { ...(current.metrics ?? {}), ...state.metrics },
+        errorCode: isSuccess ? undefined : 'INTERNAL_ERROR',
+        error: isSuccess ? undefined : state.errorMessage ?? `agy CLI finished with status=${status ?? 'UNKNOWN'}`,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // ignore transient error
     }
   };
 
@@ -134,8 +287,42 @@ export function attachStreamJsonHeartbeat(
 
     try {
       const parsed: unknown = JSON.parse(trimmed);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        options.onEvent?.(parsed as Record<string, unknown>);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return;
+      }
+      const ev = parsed as Record<string, unknown>;
+      options.onEvent?.(ev);
+
+      const eventType = typeof ev.event === 'string' ? ev.event : undefined;
+      if (typeof ev.conversation_id === 'string') {
+        state.metrics.conversationId = ev.conversation_id;
+      }
+
+      if (eventType === 'init' && ev.init && typeof ev.init === 'object') {
+        const initObj = ev.init as Record<string, unknown>;
+        if (typeof initObj.model === 'string') state.metrics.model = initObj.model;
+        if (typeof initObj.permission_mode === 'string') {
+          state.metrics.permissionMode = initObj.permission_mode;
+        }
+        maybeBeatManifest();
+      } else if (eventType === 'step_update' && ev.step_update && typeof ev.step_update === 'object') {
+        const stepObj = ev.step_update as Record<string, unknown>;
+        if (typeof stepObj.conversation_id === 'string') {
+          state.metrics.conversationId = stepObj.conversation_id;
+        }
+        const stepUsage = parseUsageObject(stepObj.usage);
+        if (stepUsage) {
+          state.metrics.usage = stepUsage;
+        }
+        maybeBeatManifest();
+      } else if (eventType === 'result' && ev.result && typeof ev.result === 'object') {
+        handleStreamResult(ev.result as Record<string, unknown>);
+      } else {
+        // Generic JSON event (compatibility with custom stream formats)
+        const genericUsage = parseUsageObject(ev.usage);
+        if (genericUsage) {
+          state.metrics.usage = genericUsage;
+        }
         maybeBeatManifest();
       }
     } catch {
@@ -165,6 +352,7 @@ export function attachStreamJsonHeartbeat(
   stream.on('end', onEnd);
 
   return {
+    state,
     stop: () => {
       if (stopped) return;
       stopped = true;
@@ -176,23 +364,95 @@ export function attachStreamJsonHeartbeat(
 
 export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
   const { cliBinary } = ctx.detection.subscription;
-  const prompt = buildHandoffPrompt(ctx.manifest.taskId);
+  const prompt = buildHandoffPrompt(ctx);
 
   if (cliBinary === 'agy') {
-    const args = [
-      '--print',
-      prompt,
-      '--mode',
-      ctx.config.subscription.agy_mode,
-      '--print-timeout',
-      `${ctx.config.subscription.timeout_sec}s`,
-    ];
-    if (ctx.config.subscription.agy_sandbox) {
+    const sub = ctx.config.subscription;
+    const opts = ctx.agyOptions ?? {};
+    const timeoutSec = ctx.timeoutSecOverride ?? sub.timeout_sec;
+
+    const args: string[] = ['--print', prompt];
+
+    const skipPermissions =
+      opts.dangerouslySkipPermissions ?? sub.agy_dangerously_skip_permissions;
+
+    if (skipPermissions) {
+      args.push('--dangerously-skip-permissions');
+      // Only also pass --mode if the caller explicitly requested a mode override
+      if (opts.agyMode) {
+        args.push('--mode', opts.agyMode);
+      }
+    } else {
+      const mode = opts.agyMode ?? sub.agy_mode;
+      args.push('--mode', mode);
+    }
+
+    const useSandbox = opts.sandbox ?? sub.agy_sandbox;
+    if (useSandbox) {
       args.push('--sandbox');
     }
-    if (ctx.config.subscription.agy_stream_heartbeat) {
+
+    const model = opts.model ?? sub.agy_model;
+    if (model) {
+      args.push('--model', model);
+    }
+
+    const effort = opts.effort ?? sub.agy_effort;
+    if (effort) {
+      args.push('--effort', effort);
+    }
+
+    const agent = opts.agent ?? sub.agy_agent;
+    if (agent) {
+      args.push('--agent', agent);
+    }
+
+    if (opts.addDirs && opts.addDirs.length > 0) {
+      for (const dir of opts.addDirs) {
+        args.push('--add-dir', dir);
+      }
+    }
+
+    if (opts.conversationId) {
+      args.push('--conversation', opts.conversationId);
+    } else if (opts.continueConversation) {
+      args.push('--continue');
+    }
+
+    const project = opts.project ?? sub.agy_project;
+    if (project) {
+      args.push('--project', project);
+    }
+
+    if (opts.newProject) {
+      args.push('--new-project');
+    }
+
+    const remoteAgent = opts.remoteAgent ?? sub.agy_remote_agent;
+    if (remoteAgent) {
+      args.push('--remote-agent');
+    }
+
+    if (opts.jsonSchema) {
+      args.push('--json-schema', opts.jsonSchema);
+    }
+
+    const disableSlash = opts.disableSlashCommands ?? sub.agy_disable_slash_commands;
+    if (disableSlash) {
+      args.push('--disable-slash-commands');
+    }
+
+    const settings = opts.settings ?? sub.agy_settings;
+    if (settings) {
+      args.push('--settings', settings);
+    }
+
+    args.push('--print-timeout', `${timeoutSec}s`);
+
+    if (sub.agy_stream_heartbeat) {
       args.push('--output-format', 'stream-json');
     }
+
     return args;
   }
 
@@ -230,10 +490,114 @@ export function buildCliSpawnSpec(
   };
 }
 
-async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
+export function parseAgyModelsOutput(raw: string): AgyModelInfo[] {
+  const models: AgyModelInfo[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || /^fetching\s+/i.test(trimmed)) continue;
+    const tabParts = trimmed.split('\t').map((s) => s.trim()).filter(Boolean);
+    if (tabParts.length >= 2) {
+      models.push({ id: tabParts[0], label: tabParts.slice(1).join(' ') });
+      continue;
+    }
+    const spaceMatch = trimmed.match(/^([a-z0-9._-]+)\s{2,}(.+)$/i);
+    if (spaceMatch) {
+      models.push({ id: spaceMatch[1], label: spaceMatch[2].trim() });
+    }
+  }
+  return models;
+}
+
+export function parseAgyAgentsOutput(raw: string): string[] {
+  const agents: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || /^(fetching|no\s+agents|available\s+agents)/i.test(trimmed)) continue;
+    const first = trimmed.split(/\s+/)[0];
+    if (first) agents.push(first);
+  }
+  return agents;
+}
+
+export async function queryAgyCapabilities(
+  cliPath: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ models: AgyModelInfo[]; agents: string[]; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  const runSub = (subArgs: string[]): Promise<string> =>
+    new Promise((resolve) => {
+      const spec = buildCliSpawnSpec(cliPath, subArgs, platform);
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const finish = (out: string): void => {
+        if (!settled) {
+          settled = true;
+          resolve(out);
+        }
+      };
+
+      try {
+        const child = spawn(spec.command, spec.args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: false,
+          windowsHide: spec.windowsHide,
+          windowsVerbatimArguments: spec.windowsVerbatimArguments,
+        });
+
+        const timer = setTimeout(() => {
+          warnings.push(`Timed out querying \`agy ${subArgs.join(' ')}\` after 15s.`);
+          try {
+            child.kill();
+          } catch {
+            // ignore
+          }
+          finish(stdout);
+        }, 15_000);
+
+        child.stdout?.on('data', (chunk: Buffer | string) => {
+          stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        });
+        child.stderr?.on('data', (chunk: Buffer | string) => {
+          stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        });
+        child.once('error', (err) => {
+          clearTimeout(timer);
+          warnings.push(`Failed to query \`agy ${subArgs.join(' ')}\`: ${err.message}`);
+          finish('');
+        });
+        child.once('close', (code) => {
+          clearTimeout(timer);
+          if (code !== 0 && code !== null) {
+            const errText = stderr.trim().split(/\r?\n/).slice(-2).join(' ');
+            if (errText) {
+              warnings.push(`\`agy ${subArgs.join(' ')}\` exited ${code}: ${maskSecrets(errText)}`);
+            }
+          }
+          finish(stdout);
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        warnings.push(`Failed to query \`agy ${subArgs.join(' ')}\`: ${msg}`);
+        finish('');
+      }
+    });
+
+  const [modelsRaw, agentsRaw] = await Promise.all([runSub(['models']), runSub(['agents'])]);
+  const models = parseAgyModelsOutput(modelsRaw);
+  const agents = parseAgyAgentsOutput(agentsRaw);
+
+  return { models, agents, warnings };
+}
+
+async function tryCliTrigger(
+  ctx: ExecutionContext,
+): Promise<{ ok: boolean; streamState?: StreamCaptureState; stopStream?: () => void }> {
   const { cliBinary, cliPath } = ctx.detection.subscription;
   if (!cliPath) {
-    return false;
+    return { ok: false };
   }
 
   const args = buildCliInvocationArgs(ctx);
@@ -254,7 +618,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
     }
   }
 
-  return new Promise<boolean>((resolve) => {
+  return new Promise((resolve) => {
     let settled = false;
     const closeLogFd = (): void => {
       if (logFd !== null) {
@@ -284,12 +648,13 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
       // Child inherited logFd; close parent descriptor immediately
       closeLogFd();
 
-      let heartbeatHandle: { stop: () => void } | null = null;
+      let heartbeatHandle: { stop: () => void; state: StreamCaptureState } | null = null;
       if (useStreamHeartbeat && child.stdout) {
         heartbeatHandle = attachStreamJsonHeartbeat(child.stdout, {
           workspaceRoot: ctx.workspaceRoot,
           taskId: ctx.manifest.taskId,
           logFilePath,
+          autoFinalizeOnResult: true,
         });
       }
       if (useStreamHeartbeat && child.stderr) {
@@ -308,15 +673,22 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
         heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
-          resolve(false);
+          resolve({ ok: false });
         }
       });
 
       child.once('exit', (code) => {
-        heartbeatHandle?.stop();
+        // Give stream 'end' event a tick to flush final result line before stopping
+        setImmediate(() => {
+          heartbeatHandle?.stop();
+        });
         if (!settled) {
           settled = true;
-          resolve(code === 0);
+          resolve({
+            ok: code === 0,
+            streamState: heartbeatHandle?.state,
+            stopStream: heartbeatHandle?.stop,
+          });
         }
       });
 
@@ -331,14 +703,18 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
               // ignore
             }
           }
-          resolve(true);
+          resolve({
+            ok: true,
+            streamState: heartbeatHandle?.state,
+            stopStream: heartbeatHandle?.stop,
+          });
         }
       }, 400).unref();
     } catch {
       closeLogFd();
       if (!settled) {
         settled = true;
-        resolve(false);
+        resolve({ ok: false });
       }
     }
   });
@@ -346,7 +722,7 @@ async function tryCliTrigger(ctx: ExecutionContext): Promise<boolean> {
 
 function tryOsIpcTrigger(ctx: ExecutionContext): boolean {
   const platform = ctx.detection.platform;
-  const prompt = buildHandoffPrompt(ctx.manifest.taskId);
+  const prompt = buildHandoffPrompt(ctx);
   try {
     if (platform === 'darwin') {
       tryCopyToClipboard(prompt, platform);
@@ -377,12 +753,16 @@ function tryOsIpcTrigger(ctx: ExecutionContext): boolean {
 
 export async function defaultSubscriptionTrigger(ctx: ExecutionContext): Promise<TriggerOutcome> {
   const method = ctx.config.subscription.trigger_method;
-  const prompt = buildHandoffPrompt(ctx.manifest.taskId);
+  const prompt = buildHandoffPrompt(ctx);
 
   if (method === 'cli_only' || method === 'cli_or_ipc') {
-    const cliOk = await tryCliTrigger(ctx);
-    if (cliOk) {
-      return { methodUsed: 'cli' };
+    const cliRes = await tryCliTrigger(ctx);
+    if (cliRes.ok) {
+      return {
+        methodUsed: 'cli',
+        streamState: cliRes.streamState,
+        stopStream: cliRes.stopStream,
+      };
     }
     if (method === 'cli_only') {
       return {
@@ -504,6 +884,16 @@ export class SubscriptionEngine implements ExecutionEngine {
 
   public async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const warnings: string[] = [];
+    const timeoutSec = ctx.timeoutSecOverride ?? ctx.config.subscription.timeout_sec;
+
+    const skipPerm =
+      ctx.agyOptions?.dangerouslySkipPermissions ??
+      ctx.config.subscription.agy_dangerously_skip_permissions;
+    if (skipPerm) {
+      warnings.push(
+        'Executed with `--dangerously-skip-permissions` (permission_mode=always-proceed). Use Git Guard `rollback_ag_task` if any unintended changes occur.',
+      );
+    }
 
     // 1. Sync claude-handoff.md workflow template
     const syncRes = syncHandoffTemplate(ctx.workspaceRoot, ctx.pluginRoot);
@@ -519,65 +909,90 @@ export class SubscriptionEngine implements ExecutionEngine {
       warnings.push(triggerOutcome.warning);
     }
 
-    // 3. Watch .ag-bridge/manifest.json via hybrid fs.watch + polling
-    const waitResult = await waitForManifestCompletion(
-      ctx.workspaceRoot,
-      ctx.manifest.taskId,
-      ctx.config.subscription.timeout_sec,
-      ctx.config.subscription.poll_interval_ms,
-    );
+    try {
+      // 3. Watch .ag-bridge/manifest.json via hybrid fs.watch + polling
+      const waitResult = await waitForManifestCompletion(
+        ctx.workspaceRoot,
+        ctx.manifest.taskId,
+        timeoutSec,
+        ctx.config.subscription.poll_interval_ms,
+      );
 
-    if (waitResult.timedOut) {
-      const failedManifest: BridgeManifest = {
-        ...(waitResult.manifest ?? ctx.manifest),
-        status: 'FAILED',
-        updatedAt: new Date().toISOString(),
-        errorCode: 'TASK_TIMEOUT',
-        error: `Subscription task timed out after ${ctx.config.subscription.timeout_sec}s waiting for .ag-bridge/manifest.json completion.`,
-      };
-      writeManifest(ctx.workspaceRoot, failedManifest);
+      const capturedMetrics = triggerOutcome.streamState?.metrics;
 
-      const partialReport =
+      if (waitResult.timedOut) {
+        const failedManifest: BridgeManifest = {
+          ...(waitResult.manifest ?? ctx.manifest),
+          status: 'FAILED',
+          metrics: {
+            ...(waitResult.manifest?.metrics ?? {}),
+            ...(capturedMetrics ?? {}),
+          },
+          updatedAt: new Date().toISOString(),
+          errorCode: 'TASK_TIMEOUT',
+          error: `Subscription task timed out after ${timeoutSec}s waiting for .ag-bridge/manifest.json completion.`,
+        };
+        writeManifest(ctx.workspaceRoot, failedManifest);
+
+        const partialReport =
+          readReportMarkdown(ctx.workspaceRoot) ??
+          `# Antigravity Task Report\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** FAILED\n- **Reason:** Timed out after ${timeoutSec}s.\n`;
+
+        return {
+          status: 'FAILED',
+          reportMarkdown: partialReport,
+          changedFiles: listGitChangedFiles(ctx.workspaceRoot),
+          artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+          metrics: failedManifest.metrics,
+          warnings,
+          errorCode: 'TASK_TIMEOUT',
+          errorMessage: failedManifest.error,
+        };
+      }
+
+      const finalManifest = waitResult.manifest ?? ctx.manifest;
+      const mergedMetrics: ExecutionMetrics | undefined =
+        finalManifest.metrics || (capturedMetrics && Object.keys(capturedMetrics).length > 0)
+          ? { ...(finalManifest.metrics ?? {}), ...(capturedMetrics ?? {}) }
+          : undefined;
+
+      if (mergedMetrics) {
+        writeManifest(ctx.workspaceRoot, {
+          ...finalManifest,
+          metrics: mergedMetrics,
+        });
+      }
+
+      const diskArtifacts = listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId);
+      const mergedArtifacts = Array.from(
+        new Set([...(finalManifest.artifacts ?? []), ...diskArtifacts]),
+      ).sort();
+
+      const baselineUntracked = new Set(ctx.manifest.gitUntrackedBaseline ?? []);
+      const gitChanged = listGitChangedFiles(ctx.workspaceRoot).filter(
+        (f) => !baselineUntracked.has(f) && !f.startsWith('.agent/') && !f.startsWith('.agents/'),
+      );
+      const mergedChanged = Array.from(
+        new Set([...(finalManifest.changedFiles ?? []), ...gitChanged]),
+      ).sort();
+
+      const reportMarkdown =
         readReportMarkdown(ctx.workspaceRoot) ??
-        `# Antigravity Task Report\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** FAILED\n- **Reason:** Timed out after ${ctx.config.subscription.timeout_sec}s.\n`;
+        `# Antigravity Task Report\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** ${finalManifest.status}\n- **Engine:** subscription\n\n${formatTokenUsageMarkdown(mergedMetrics)}`;
 
       return {
-        status: 'FAILED',
-        reportMarkdown: partialReport,
-        changedFiles: listGitChangedFiles(ctx.workspaceRoot),
-        artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+        status: finalManifest.status === 'VERIFIED' ? 'VERIFIED' : 'FAILED',
+        reportMarkdown,
+        changedFiles: mergedChanged,
+        artifacts: mergedArtifacts,
+        metrics: mergedMetrics,
         warnings,
-        errorCode: 'TASK_TIMEOUT',
-        errorMessage: failedManifest.error,
+        errorCode:
+          finalManifest.status === 'FAILED' ? finalManifest.errorCode ?? 'INTERNAL_ERROR' : undefined,
+        errorMessage: finalManifest.status === 'FAILED' ? finalManifest.error : undefined,
       };
+    } finally {
+      triggerOutcome.stopStream?.();
     }
-
-    const finalManifest = waitResult.manifest ?? ctx.manifest;
-    const diskArtifacts = listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId);
-    const mergedArtifacts = Array.from(
-      new Set([...(finalManifest.artifacts ?? []), ...diskArtifacts]),
-    ).sort();
-
-    const baselineUntracked = new Set(ctx.manifest.gitUntrackedBaseline ?? []);
-    const gitChanged = listGitChangedFiles(ctx.workspaceRoot).filter(
-      (f) => !baselineUntracked.has(f) && !f.startsWith('.agent/') && !f.startsWith('.agents/'),
-    );
-    const mergedChanged = Array.from(
-      new Set([...(finalManifest.changedFiles ?? []), ...gitChanged]),
-    ).sort();
-
-    const reportMarkdown =
-      readReportMarkdown(ctx.workspaceRoot) ??
-      `# Antigravity Task Report\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** ${finalManifest.status}\n- **Engine:** subscription\n\n(No report.md was written by the worker.)\n`;
-
-    return {
-      status: finalManifest.status === 'VERIFIED' ? 'VERIFIED' : 'FAILED',
-      reportMarkdown,
-      changedFiles: mergedChanged,
-      artifacts: mergedArtifacts,
-      warnings,
-      errorCode: finalManifest.status === 'FAILED' ? finalManifest.errorCode ?? 'INTERNAL_ERROR' : undefined,
-      errorMessage: finalManifest.status === 'FAILED' ? finalManifest.error : undefined,
-    };
   }
 }

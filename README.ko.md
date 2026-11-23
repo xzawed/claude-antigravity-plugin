@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#듀얼-실행-모드)
-[![Tests](https://img.shields.io/badge/tests-35%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#보안-및-안전장치)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어**
 
@@ -28,7 +28,7 @@
 
 | ⚡ 환경 진단 속도 | 🛡️ 자동화 검증 | 🌍 크로스플랫폼 CI | 🔒 의존성 보안 |
 | :---: | :---: | :---: | :---: |
-| 평균 **`149.9 ms`** | **`35 / 35`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
+| 평균 **`149.9 ms`** | **`39 / 39`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
 | `check_ag_environment` (`4.3×` 고속화) | 단위 · 보안 · 라이브 Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -37,8 +37,8 @@
 
 `claude-antigravity-plugin`(Claude Code 플러그인 · 내장 MCP 서버명: **`antigravity-delegate`**)은 **Claude Code**(메인 오케스트레이터 · 백엔드 · 아키텍처 총괄)와 **Antigravity**(프론트엔드 UI 구현 · 다중 파일 리팩토링 · 실제 브라우저 E2E 시각적 QA 전담)를 내장 **Stdio MCP 서버**와 투명한 `.ag-bridge/` 파일 프로토콜로 연결합니다.
 
-- **수동 복사·붙여넣기 제거:** Claude가 작업 목표, TypeScript 타입, `lockedPaths`, `verifyUrl`, 완료 조건을 구조화해 Antigravity로 직접 전달하고 검증 리포트와 스크린샷을 자동 회수합니다.
-- **구독자 추가 API 과금 없음:** 로컬에 설치된 Antigravity CLI(`agy`, `antigravity`, `ag`) 또는 데스크톱 앱을 최우선 감지하며, 미설치/헤드리스 환경에서만 `GEMINI_API_KEY` API 모드로 자동 폴백합니다.
+- **수동 복사·붙여넣기 제거 및 `agy` CLI 완전 패리티:** Claude가 프론트엔드 UI, 다중 파일 리팩토링, 브라우저 QA는 물론 커스텀 모델/추론 강도(`--model`/`--effort`), 커스텀 에이전트(`--agent`), 대화 이어가기(`--continue`/`--conversation`), `--dangerously-skip-permissions`(`always-proceed`)까지 Antigravity CLI의 모든 기능을 직접 위임하고 리포트·스크린샷·토큰 사용량을 자동 회수합니다.
+- **구독자 추가 API 과금 없음 & 실시간 토큰 사용량 추적:** 로컬에 설치된 Antigravity CLI(`agy`, `antigravity`, `ag`) 또는 데스크톱 앱을 최우선 감지하며, 미설치/헤드리스 환경에서만 `GEMINI_API_KEY` API 모드로 자동 폴백합니다. 두 엔진 모두 `input`·`output`·`thinking`·`cacheRead`·`total` 토큰 사용량을 `get_ag_usage`(`/ag-usage`)로 집계합니다.
 - **미커밋 작업 손실 방지:** 모든 위임 직전 Git Guard가 현재 작업 트리(staged · unstaged · 기존 untracked 파일 포함)를 무손실 스냅샷으로 고정해 언제든 원클릭 롤백이 가능합니다.
 
 ---
@@ -111,7 +111,7 @@ claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 
 > **팁:** 플러그인 파일을 수정했다면 Claude Code를 재시작하지 않고 세션 안에서 `/reload-plugins`만 입력하면 즉시 반영됩니다.
 
-#### 방법 C — MCP 서버만 단독 등록 *(훅 · 스킬 · 슬래시 커맨드 없이 Tool 3종만 필요할 때)*
+#### 방법 C — MCP 서버만 단독 등록 *(훅 · 스킬 · 슬래시 커맨드 없이 MCP Tool 5종만 필요할 때)*
 
 **macOS / Linux:**
 
@@ -168,11 +168,20 @@ Claude가 `check_ag_environment({})`를 호출해 현재 환경을 표로 출력
 | :--- | :--- | :--- |
 | **Execution Mode** | `auto` → **`subscription`** | 현재 해석된 실행 엔진 |
 | **Subscription App/CLI** | `Detected` | `agy` (`C:\Users\...\agy\bin\agy.exe`), `cli_or_ipc` |
+| **`agy` CLI 기본값** | `mode: accept-edits` | `sandbox: on`, `skipPermissions: off`, `model: default`, `effort: default` |
 | **Gemini API Key** | `Not set` / `Configured (env)` | 환경변수 `GEMINI_API_KEY`, 모델 `gemini-2.5-pro`, 최대 턴 `15` |
-| **Bridge (`.ag-bridge/`)** | `IDLE` | 초기화: `yes`, `.gitignore`: `protected`, 최근 작업: `none` |
+| **Bridge (`.ag-bridge/`)** | `IDLE` | 초기화: `yes`, `.gitignore`: `protected`, 최근 작업 · 대화 ID · 토큰 |
 | **Git Guard** | `Ready` | 브랜치 `main`, 작업 트리 `clean` |
 
-### 2. 실행 모드 · 모델 · 타임아웃 설정 (`/ag-config`)
+### 2. 사용 가능한 모델 · 에이전트 · CLI 기능 실시간 조회 (`/ag-models`)
+
+로컬 `agy`에서 지원하는 최신 모델(`agy models`), 커스텀 에이전트(`agy agents`), 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도 및 CLI 플래그를 실시간 조회합니다:
+
+```text
+/ag-models
+```
+
+### 3. 실행 모드 · 권한(`--dangerously-skip-permissions`) · 모델 · 타임아웃 설정 (`/ag-config`)
 
 프로젝트별 설정은 `.ag-bridge/config.json`에 저장됩니다:
 
@@ -181,38 +190,63 @@ Claude가 `check_ag_environment({})`를 호출해 현재 환경을 표로 출력
 /ag-config mode auto                      # 구독 우선 감지 -> API 자동 폴백 (기본값)
 /ag-config mode subscription              # 로컬 Antigravity 구독 모드 고정
 /ag-config mode api                       # 헤드리스 Gemini API 모드 고정
+/ag-config agy-mode accept-edits          # 구독 모드 권한 정책 (accept-edits | auto | plan)
+/ag-config skip-permissions on            # --dangerously-skip-permissions (always-proceed) 기본 활성화
+/ag-config skip-permissions off           # --dangerously-skip-permissions 비활성화 (기본값)
+/ag-config agy-model gemini-4-neon-high   # 구독 모드 기본 모델 지정 (초기화: clear)
+/ag-config effort high                    # 구독 모드 기본 추론 강도 (low | medium | high | xhigh | max | clear)
+/ag-config agent my-frontend-agent        # 기본 커스텀 에이전트 지정 (초기화: clear)
+/ag-config sandbox off                    # agy --sandbox / --no-sandbox 전환 (on | off)
 /ag-config model gemini-2.5-flash         # API 모드 사용 모델 변경
 /ag-config timeout 600                    # 구독 모드 타임아웃(초) 변경 (30~1800)
 /ag-config max-turns 20                   # API 워커 최대 턴 수 변경 (1~50)
 /ag-config git-guard required             # Git 저장소 필수 정책 설정 (best_effort | required)
 ```
 
-### 3. 자율 위임 사용 (자연어로 요청하기)
+> **환경변수 오버라이드:** 셸 세션 단위로 `AG_DANGEROUSLY_SKIP_PERMISSIONS=1`(`true`/`yes`)을 설정해 `--dangerously-skip-permissions`를 활성화할 수도 있습니다. 활성화 시에도 위임 직전 Git Guard 체크포인트가 자동 생성되므로 `rollback_ag_task`로 안전하게 원복할 수 있습니다.
 
-`skills/ag-delegate/SKILL.md`가 자동 로드되어 있으므로, 프론트엔드 UI 구현·다중 파일 생성·브라우저 시각적 QA가 필요한 작업을 자연어로 요청하면 Claude가 자동으로 위임을 판단합니다.
+### 4. 자율 위임 사용 (자연어로 요청하기)
+
+`skills/ag-delegate/SKILL.md`가 자동 로드되어 있으므로, 프론트엔드 UI 구현·다중 파일 생성·브라우저 시각적 QA·특정 `agy` 모델/플래그 작업을 자연어로 요청하면 Claude가 자동으로 위임을 판단합니다.
 
 > *"백엔드 `/api/checkout` 스펙(`src/server/checkout.ts`)에 맞춰 `src/components/checkout/`와 `src/pages/CheckoutPage.tsx`에 반응형 결제 화면과 장바구니 드로어를 구현하고, `http://localhost:3000/checkout`에서 실제 렌더링과 폼 제출에 콘솔 에러가 없는지 검증해 줘."*
 
 **내부 자동 실행 흐름:**
 1. Claude가 `check_ag_environment`로 현재 활성 엔진(`subscription` 또는 `api`)을 확인합니다.
-2. 최소 권한 `lockedPaths`(`["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`), API 타입, `verifyUrl`, 모드별 완료 조건을 담아 `delegate_to_antigravity`를 호출합니다.
-3. MCP 서버가 무손실 Git Guard 체크포인트를 생성하고 `.ag-bridge/dispatch.md`와 `manifest.json`을 기록한 뒤 Antigravity(`agy --print --mode accept-edits --sandbox --output-format stream-json`) 또는 Gemini API 워커를 실행합니다.
-4. `agy` 실행 중 수신되는 NDJSON 스트림 이벤트로 `manifest.json` 하트비트가 자동 갱신되며 마스킹된 로그가 `.ag-bridge/artifacts/<taskId>/agy-cli.log`에 저장됩니다.
-5. 완료(`VERIFIED`) 시 Claude가 `.ag-bridge/report.md`, `changedFiles`, 스크린샷 경로를 회수해 `git diff` 검수 후 결과를 보고합니다.
+2. 최소 권한 `lockedPaths`(`["src/components/checkout/", "src/pages/CheckoutPage.tsx"]`), API 타입, `verifyUrl`, 선택적 `agy` 플래그(`model`, `effort`, `dangerouslySkipPermissions` 등), 모드별 완료 조건을 담아 `delegate_to_antigravity`를 호출합니다.
+3. MCP 서버가 무손실 Git Guard 체크포인트를 생성하고 `.ag-bridge/dispatch.md`와 `manifest.json`을 기록한 뒤 Antigravity(`agy --print ... --output-format stream-json`) 또는 Gemini API 워커를 실행합니다.
+4. `agy` 실행 중 수신되는 NDJSON 스트림 이벤트로 `manifest.json` 하트비트가 자동 갱신되고 `conversationId`·`permissionMode`·토큰 사용량(`usage`)이 자동 수집되며 마스킹된 로그가 `.ag-bridge/artifacts/<taskId>/agy-cli.log`에 저장됩니다.
+5. 완료(`VERIFIED`) 시 Claude가 `.ag-bridge/report.md`, `changedFiles`, 스크린샷 경로, **토큰 사용량 및 실행 메트릭(`metrics`)**을 회수해 `git diff` 검수 후 결과를 보고합니다.
 
-### 4. 수동 명시적 위임 (`/ag-delegate`)
+### 5. 수동 명시적 위임 (`/ag-delegate`)
 
-직접 위임 범위와 검증 URL을 지정해 실행하고 싶을 때 사용합니다:
+직접 위임 범위, 모델, 권한(`--dangerously-skip-permissions`), 대화 이어가기 등 모든 `agy` CLI 옵션을 지정해 실행할 수 있습니다:
 
 ```text
 # 구독 모드: 로컬 개발 서버 브라우저 E2E 및 스크린샷 검증 포함
 /ag-delegate 대시보드 KPI 카드와 필터 테이블 구현 --paths src/components/analytics/,src/pages/Analytics.tsx --url http://localhost:3000/analytics
 
+# 최고 자율 권한(--dangerously-skip-permissions) + 모델/추론 강도 지정 실행
+/ag-delegate 대시보드 차트 리팩토링 및 빌드 검증 수행 --paths src/components/charts/ --model gemini-4-neon-high --effort high --dangerously-skip-permissions
+
+# 직전 Antigravity 대화 또는 특정 대화 ID 이어가기
+/ag-delegate 방금 만든 카드에 다크모드 지원 추가해 줘 --continue
+/ag-delegate 모바일 반응형 브레이크포인트 수정해 줘 --conversation 89a5b562-2468-420f-a6c1-8a191e634164
+
 # API 모드 강제 지정: 헤드리스 코드 리팩토링 및 tsc/빌드 검증
 /ag-delegate FormField와 SelectInput 컴포넌트를 Tailwind v4 토큰으로 리팩토링 --paths src/components/forms/ --mode api
 ```
 
-### 5. 결과 검수 및 원클릭 롤백 (`rollback_ag_task`)
+### 6. 누적 토큰 사용량 및 작업 메트릭 조회 (`/ag-usage`)
+
+현재 워크스페이스의 누적 및 작업별 토큰 사용량(`input` · `output` · `thinking` · `cacheRead` · `total`), 소요 시간, `conversationId`, 구독/API 모드별 집계를 확인합니다:
+
+```text
+/ag-usage        # 최근 20건 작업 + 누적 토큰 합계
+/ag-usage 50     # 최근 최대 50건 조회
+```
+
+### 7. 결과 검수 및 원클릭 롤백 (`rollback_ag_task`)
 
 위임 완료 후 Claude의 요약, `.ag-bridge/report.md`, `.ag-bridge/artifacts/<taskId>/` 스크린샷을 확인하세요. 결과가 마음에 들지 않으면 Claude에게 바로 요청하면 됩니다:
 
@@ -246,15 +280,19 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 
 | MCP Tool | 입력 파라미터 | 역할 |
 | :--- | :--- | :--- |
-| **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths`, `acceptanceCriteria`, `verifyUrl?`, `modeOverride?`, `workspaceRoot?` | Git 체크포인트 생성 → `.ag-bridge/dispatch.md` 기록 → 구독/API 엔진 실행 → `reportMarkdown` · `changedFiles` · `artifacts` 반환 |
-| **`check_ag_environment`** | `workspaceRoot?` | 해석된 실행 모드, 감지된 Antigravity CLI/앱 경로(축소된 MCP `PATH` 대응), 마스킹된 API 키 상태, Git/Bridge 상태 진단 |
+| **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths?`, `acceptanceCriteria?`, `verifyUrl?`, `modeOverride?`, `timeoutSec?`, `model?`, `effort?`, `agent?`, `agyMode?`, `sandbox?`, `dangerouslySkipPermissions?`, `addDirs?`, `continueConversation?`, `conversationId?`, `project?`, `newProject?`, `remoteAgent?`, `jsonSchema?`, `disableSlashCommands?`, `settings?`, `workspaceRoot?` | Git 체크포인트 생성 → `.ag-bridge/dispatch.md` 기록 → 구독(`agy` 전체 CLI 패리티)/API 엔진 실행 → `reportMarkdown` · `changedFiles` · `artifacts` · 토큰 `metrics` 반환 |
+| **`check_ag_environment`** | `workspaceRoot?` | 해석된 실행 모드, 감지된 Antigravity CLI/앱 경로, 활성 `agyConfig` 기본값, 마스킹된 API 키 상태, Git/Bridge 및 최근 토큰 사용량 진단 |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | `gitCheckpointRef`로 추적·staged·unstaged·삭제 파일 원복 (현재 작업 및 `history/` 아카이브 작업 모두 지원, 기존 untracked 보존) |
+| **`list_ag_capabilities`** | `workspaceRoot?` | `agy models` · `agy agents`를 병렬 실시간 조회하고 지원 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도, 전체 CLI 플래그 및 현재 기본값 반환 |
+| **`get_ag_usage`** | `workspaceRoot?`, `limit?` | 현재 작업 + `history/*.json` 아카이브 전체의 누적/작업별 토큰 사용량(`input`·`output`·`thinking`·`cacheRead`·`total`), 소요 시간, 모드별 통계 집계 |
 
 | 슬래시 커맨드 | 문법 |
 | :--- | :--- |
-| **`/ag-delegate`** | `/ag-delegate <작업 설명> [--paths p1,p2] [--url http://localhost:3000] [--mode auto\|subscription\|api]` |
-| **`/ag-config`** | `/ag-config [mode\|model\|timeout\|max-turns\|git-guard <값>]` |
+| **`/ag-delegate`** | `/ag-delegate <작업 설명> [--paths p1,p2] [--url ...] [--mode auto\|subscription\|api] [--model <id>] [--effort <lvl>] [--agent <name>] [--agy-mode accept-edits\|auto\|plan] [--sandbox\|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <json>] [--disable-slash-commands] [--settings <val>] [--timeout <sec>]` |
+| **`/ag-config`** | `/ag-config [mode\|agy-mode\|agy-model\|effort\|agent\|sandbox\|skip-permissions\|stream-heartbeat\|model\|timeout\|max-turns\|git-guard <값>]` |
 | **`/ag-status`** | `/ag-status` |
+| **`/ag-models`** | `/ag-models` |
+| **`/ag-usage`** | `/ag-usage [limit]` |
 
 ---
 
@@ -270,7 +308,7 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (라이브 Stdio MCP) | `< 500 ms` | 평균 `652.9 ms` | 평균 **`149.9 ms`** (`4.3×` 고속화) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` 훅) | `< 300 ms` | 평균 `99.1 ms` | 평균 **`90.3 ms`** (`3.3×` 여유) | ✅ **PASS** |
-| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`35 / 35` 테스트 (6 스위트)** | ✅ **PASS** |
+| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`39 / 39` 테스트 (6 스위트)** | ✅ **PASS** |
 | Windows `.cmd` CLI 스폰 (Node 20.12+/24) | `EINVAL` 크래시 없음 | `spawn EINVAL` | `buildCliSpawnSpec` 안전 래핑 | ✅ **PASS** |
 
 ---
@@ -317,13 +355,13 @@ claude-antigravity-plugin/
 ├── .github/workflows/ci.yml       # 크로스플랫폼 CI (Ubuntu/Windows/macOS × Node 20/22)
 ├── hooks/hooks.json               # SessionStart 자동 초기화 훅
 ├── skills/ag-delegate/SKILL.md    # 자율 위임 판단 및 검수 스킬
-├── commands/                      # /ag-delegate, /ag-config, /ag-status
+├── commands/                      # /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
 ├── templates/claude-handoff.md    # Antigravity 핸드오프 워크플로우 템플릿
 ├── server/                        # TypeScript MCP 서버, 듀얼 엔진, 검증 스크립트 및 테스트
 │   ├── src/
-│   │   ├── index.ts               # MCP Stdio 서버 엔트리포인트 (3 Tools)
+│   │   ├── index.ts               # MCP Stdio 서버 엔트리포인트 (5 Tools)
 │   │   ├── cli-init.ts            # SessionStart 초기화 CLI
-│   │   ├── types.ts               # 상태 머신 · 설정 · 에러 코드 타입
+│   │   ├── types.ts               # 상태 머신 · 설정 · 메트릭 · 에러 코드 타입
 │   │   ├── config.ts              # 설정 우선순위 · Zod 검증 · 비밀 마스킹
 │   │   ├── path-guard.ts          # lockedPaths 정규화 및 Path Traversal 차단
 │   │   ├── bridge-fs.ts           # 원자적 .ag-bridge/ I/O · 잠금 · 히스토리 아카이브
@@ -331,10 +369,10 @@ claude-antigravity-plugin/
 │   │   ├── detector.ts            # 순수 JS 크로스플랫폼 agy/antigravity 및 API 키 감지기
 │   │   └── engines/
 │   │       ├── base.ts            # ExecutionEngine 전략 인터페이스
-│   │       ├── subscription.ts    # 로컬 Antigravity CLI/IPC + stream-json 하트비트 감시
-│   │       └── api-worker.ts      # @google/genai 4-Tool 자율 루프 엔진
+│   │       ├── subscription.ts    # agy CLI 전체 패리티 · stream-json 토큰 수집 · 기능 조회
+│   │       └── api-worker.ts      # @google/genai 4-Tool 자율 루프 + usageMetadata 집계
 │   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 Stdio MCP 스모크 검증 스크립트
-│   └── tests/                     # 6 스위트 / 35개 자동화 테스트 (단위·보안·E2E)
+│   └── tests/                     # 6 스위트 / 39개 자동화 테스트 (단위·보안·E2E)
 ├── AGENTS.md                      # Antigravity 워크스페이스 규칙 및 PR 단위 협업 원칙
 ├── CONTRIBUTING.md                # 기여 가이드 및 PR 워크플로우
 ├── SECURITY.md                    # 보안 취약점 제보 및 보안 경계 정책
@@ -357,6 +395,7 @@ claude-antigravity-plugin/
     "poll_interval_ms": 2000,
     "agy_mode": "accept-edits",
     "agy_sandbox": true,
+    "agy_dangerously_skip_permissions": false,
     "agy_stream_heartbeat": true
   },
   "api": {

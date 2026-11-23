@@ -192,6 +192,40 @@ export function readArchivedManifest(workspaceRoot: string, taskId: string): Bri
   return readJsonWithRetry<BridgeManifest>(archivePath);
 }
 
+export function readAllTaskManifests(workspaceRoot: string): BridgeManifest[] {
+  const byId = new Map<string, BridgeManifest>();
+
+  const historyDir = getHistoryDir(workspaceRoot);
+  if (fs.existsSync(historyDir)) {
+    for (const entry of fs.readdirSync(historyDir)) {
+      if (!entry.endsWith('.json')) continue;
+      try {
+        const m = readJsonWithRetry<BridgeManifest>(path.join(historyDir, entry));
+        if (m?.taskId) {
+          byId.set(m.taskId, m);
+        }
+      } catch {
+        // skip corrupted archive file
+      }
+    }
+  }
+
+  try {
+    const current = readManifest(workspaceRoot);
+    if (current?.taskId) {
+      byId.set(current.taskId, current);
+    }
+  } catch {
+    // ignore transient error
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const ta = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+    const tb = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+    return tb - ta;
+  });
+}
+
 export function acquireBridgeLock(
   workspaceRoot: string,
   timeoutSec: number,
@@ -257,8 +291,14 @@ export function writeDispatchMarkdown(
   },
 ): string {
   const { manifest, instructions, acceptanceCriteria } = params;
-  const lockedList = manifest.lockedPaths.map((p) => `- \`${p}\``).join('\n');
-  const criteriaList = acceptanceCriteria.map((c) => `- [ ] ${c}`).join('\n');
+  const lockedList =
+    manifest.lockedPaths.length > 0
+      ? manifest.lockedPaths.map((p) => `- \`${p}\``).join('\n')
+      : '- (general / read-only or unrestricted subscription delegation)';
+  const criteriaList =
+    acceptanceCriteria.length > 0
+      ? acceptanceCriteria.map((c) => `- [ ] ${c}`).join('\n')
+      : '- [ ] Complete the requested task and summarize results clearly';
 
   const content = [
     '# Antigravity Task Dispatch',

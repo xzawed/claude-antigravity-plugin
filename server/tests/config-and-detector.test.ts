@@ -176,5 +176,23 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(merged.execution_mode).toBe('subscription');
     expect(merged.api.model).toBe('gemini-2.5-flash');
     expect(merged.api.max_turns).toBe(8);
+
+    const envSkip = loadConfig(tmpRoot, { AG_DANGEROUSLY_SKIP_PERMISSIONS: 'true' });
+    expect(envSkip.subscription.agy_dangerously_skip_permissions).toBe(true);
+
+    fs.writeFileSync(
+      path.join(tmpRoot, '.ag-bridge', 'config.json'),
+      JSON.stringify({
+        subscription: {
+          agy_dangerously_skip_permissions: false,
+          agy_model: 'gemini-4-neon-high',
+          agy_effort: 'high',
+        },
+      }),
+    );
+    const overridden = loadConfig(tmpRoot, { AG_DANGEROUSLY_SKIP_PERMISSIONS: 'true' });
+    expect(overridden.subscription.agy_dangerously_skip_permissions).toBe(false);
+    expect(overridden.subscription.agy_model).toBe('gemini-4-neon-high');
+    expect(overridden.subscription.agy_effort).toBe('high');
   });
 });
