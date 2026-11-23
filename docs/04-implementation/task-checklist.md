@@ -59,3 +59,5 @@
 | `2026-11-22` | Phase 4 | `npm --prefix server test` | `PASS` | 6개 테스트 스위트, 24개 테스트 케이스 전원 통과 (`TC-U*`, `TC-S*`, `TC-I*`) |
 | `2026-11-22` | Phase 4 | G3 Windows 공백 경로 스모크 + G4 JSON/아티팩트 검증 | `PASS` | `cli-init.js --silent`, `index.js`, 매니페스트 5종 정상 확인 |
 | `2026-11-22` | Post-v1.0 실측 검증 | 실측 벤치마크 + TDD 확장 (`npm test` + `npm run verify`) | `PASS` | `check_ag_environment` `652.9ms`→`162.6ms` (4× 개선), Windows `.cmd` `EINVAL` 수정, **33/33 테스트 통과** |
+| `2026-11-23` | v1.0.0 보안·문서·실측 | `npm audit` + 8단계 E2E 감사 + 10단계 릴리스 전 실측 (`PRE-01`~`PRE-10`) | `PASS` | **0 vulnerabilities**, **35/35 테스트**, `claude plugin validate` 0 errors/warnings, `check_ag_environment` `144.9ms` |
+| `2026-11-23` | v1.0.0 릴리스 배포 | `git tag v1.0.0` + `gh release create v1.0.0` | `PASS` | `v1.0.0` 정식 릴리스 발행 및 `main` 7/7 CI 통과 완료 |
