@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-003` |
-| **버전** | `1.1.0` |
+| **버전** | `1.2.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [사용자/에이전트 플로우](../01-planning/user-flows.md), [MCP API 명세](./mcp-tools-api.md), [PRD](../01-planning/PRD.md) |
@@ -12,11 +12,12 @@
 
 ## 1. 프롬프트 자산 목록
 
-플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 7개이다.
+플러그인이 포함하는 마크다운 기반 프롬프트/워크플로우 파일은 총 8개이다.
 
 | 파일 경로 | 실행 주체 | 역할 |
 | :--- | :--- | :--- |
 | `skills/ag-delegate/SKILL.md` | Claude Code | 자율 위임 여부 판단, 전체 `agy` CLI 옵션 매핑, 토큰 사용량 보고, 결과 검수 및 롤백 의사결정 |
+| `commands/ag-login.md` | Claude Code | `/ag-login` Google OAuth 로그인(브라우저/수동 링크+코드), 인증 상태 확인, 안전 로그아웃 안내 |
 | `commands/ag-delegate.md` | Claude Code | `/ag-delegate` 명시적 위임 커맨드 (전체 `agy` 플래그 및 `--dangerously-skip-permissions` 지원) |
 | `commands/ag-config.md` | Claude Code | `/ag-config` 실행 모드·모델·추론 강도·권한(`skip-permissions`)·샌드박스·타임아웃 설정 커맨드 |
 | `commands/ag-status.md` | Claude Code | `/ag-status` 연결 상태, `agy` 권한/모델 설정, 최근 토큰 사용량 및 환경 진단 표 출력 커맨드 |
@@ -63,7 +64,17 @@ description: >-
 
 ---
 
-## 3. 슬래시 커맨드 5종 설계 명세
+## 3. 슬래시 커맨드 6종 설계 명세
+
+### 3.0 `commands/ag-login.md` (`/ag-login`)
+- **사용법:**
+  - `/ag-login` (로그인 상태 확인 후 미인증 시 로컬 브라우저 OAuth 자동 실행; SSH/헤드리스 환경은 링크+코드 모드 자동 전환)
+  - `/ag-login status` (실시간 인증 상태, 인증 방식, 사용 가능 모델 수 점검)
+  - `/ag-login --manual` / `--no-browser` (채팅에 클릭 가능한 Google OAuth 링크 출력)
+  - `/ag-login complete <code-or-url> [sessionId]` (복사한 인가 코드/콜백 URL 제출, 원본 코드 재출력 금지)
+  - `/ag-login --force` (이미 인증된 상태에서도 계정 전환/재인증 강제)
+  - `/ag-login cancel` (대기 중인 수동 로그인 세션 취소)
+  - `/ag-login logout` (OS 키링 안전 로그아웃 절차 안내)
 
 ### 3.1 `commands/ag-delegate.md` (`/ag-delegate`)
 - **사용법:**

@@ -77,6 +77,7 @@ async function main() {
     assert(
       JSON.stringify(names) ===
         JSON.stringify([
+          'ag_auth',
           'check_ag_environment',
           'delegate_to_antigravity',
           'get_ag_usage',
@@ -98,6 +99,13 @@ async function main() {
     });
     const usageParsed = JSON.parse(usageRes.content?.[0]?.text ?? '{}');
     assert(typeof usageParsed.totalTasks === 'number', 'get_ag_usage missing totalTasks');
+
+    const authRes = await client.callTool({
+      name: 'ag_auth',
+      arguments: { action: 'logout', workspaceRoot: pluginRoot },
+    });
+    const authParsed = JSON.parse(authRes.content?.[0]?.text ?? '{}');
+    assert(authParsed.status === 'LOGOUT_INSTRUCTIONS', 'ag_auth logout check failed');
 
     console.log('  OK: MCP Stdio tools:', names.join(', '));
     console.log(

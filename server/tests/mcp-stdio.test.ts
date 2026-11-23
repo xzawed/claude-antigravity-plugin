@@ -20,7 +20,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('TC-I01: exposes all 5 MCP tools over clean stdio JSON-RPC and executes check_ag_environment', async () => {
+  it('TC-I01: exposes all 6 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth', async () => {
     if (!fs.existsSync(distIndex)) {
       throw new Error(`Built server not found at ${distIndex}. Run "npm run build" before tests.`);
     }
@@ -32,13 +32,14 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       stderr: 'pipe',
     });
 
-    const client = new Client({ name: 'test-mcp-client', version: '1.0.0' });
+    const client = new Client({ name: 'test-mcp-client', version: '1.2.0' });
     await client.connect(transport);
 
     try {
       const toolsRes = await client.listTools();
       const toolNames = toolsRes.tools.map((t) => t.name).sort();
       expect(toolNames).toEqual([
+        'ag_auth',
         'check_ag_environment',
         'delegate_to_antigravity',
         'get_ag_usage',
@@ -60,6 +61,26 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       };
       expect(parsed.configuredMode).toBe('auto');
       expect(parsed.bridge.currentStatus).toBe('IDLE');
+
+      const authLogoutCall = await client.callTool({
+        name: 'ag_auth',
+        arguments: { action: 'logout', workspaceRoot: tmpRoot },
+      });
+      const authLogout = JSON.parse(
+        ((authLogoutCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; status: string };
+      expect(authLogout.ok).toBe(true);
+      expect(authLogout.status).toBe('LOGOUT_INSTRUCTIONS');
+
+      const authCancelCall = await client.callTool({
+        name: 'ag_auth',
+        arguments: { action: 'cancel', workspaceRoot: tmpRoot },
+      });
+      const authCancel = JSON.parse(
+        ((authCancelCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; status: string };
+      expect(authCancel.ok).toBe(true);
+      expect(authCancel.status).toBe('CANCELLED');
     } finally {
       await client.close();
     }

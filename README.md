@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
-[![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-44%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **Language:** **English** · [한국어 (README.ko.md)](./README.ko.md)
 
@@ -28,7 +28,7 @@
 
 | ⚡ Diagnostics Speed | 🛡️ Automated Verification | 🌍 Cross-Platform CI | 🔒 Dependency Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** avg | **`39 / 39`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
+| **`149.9 ms`** avg | **`44 / 44`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
 | `check_ag_environment` (`4.3×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -125,10 +125,16 @@ claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigr
 claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
-### Step 3 — Configure Your Execution Provider
+### Step 3 — Sign In to Antigravity Inside Claude Code (`/ag-login`)
 
-- **If you have Antigravity installed (Subscription Mode):** No extra setup is required. The plugin automatically detects `agy`, `antigravity`, `ag`, or the desktop app even when the MCP host strips `PATH`.
-- **If you want API Fallback Mode (No local app / Headless SSH / CI):** Set `GEMINI_API_KEY` in your shell environment before starting Claude Code:
+- **Subscription Mode (Recommended):** Inside Claude Code, simply run **`/ag-login`** — it checks your live auth state and launches Google OAuth (`agy acp --login`) in your local browser (or prints a clickable OAuth link + code-paste prompt over SSH/headless) so credentials are stored in your OS keyring:
+  ```text
+  /ag-login                    # One-click local browser OAuth (auto-switches to link+code over SSH)
+  /ag-login --manual           # Clickable Google OAuth link + `/ag-login complete <code>` inside chat
+  /ag-login status             # Verify active login & available model count
+  /ag-login --force            # Switch Google account or re-authenticate
+  ```
+- **API Fallback Mode (No local app / Headless SSH / CI):** Set `GEMINI_API_KEY` in your shell environment before starting Claude Code:
 
 ```bash
 # macOS / Linux (~/.bashrc or ~/.zshrc)
@@ -280,6 +286,7 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 
 | MCP Tool | Input Parameters | Description |
 | :--- | :--- | :--- |
+| **`ag_auth`** | `action?` (`status\|login\|complete\|cancel\|logout`), `flow?` (`auto\|browser\|manual`), `force?`, `code?`, `sessionId?`, `timeoutSec?`, `workspaceRoot?` | Runs Google OAuth login via `agy acp --login` (local browser or manual link+code flow), checks live auth status via `agy models`, completes/cancels pending code sessions, and guides safe logout. |
 | **`delegate_to_antigravity`** | `title`, `instructions`, `lockedPaths?`, `acceptanceCriteria?`, `verifyUrl?`, `modeOverride?`, `timeoutSec?`, `model?`, `effort?`, `agent?`, `agyMode?`, `sandbox?`, `dangerouslySkipPermissions?`, `addDirs?`, `continueConversation?`, `conversationId?`, `project?`, `newProject?`, `remoteAgent?`, `jsonSchema?`, `disableSlashCommands?`, `settings?`, `workspaceRoot?` | Creates a Git checkpoint, writes `.ag-bridge/dispatch.md`, executes Subscription (`agy` full CLI parity) or API engine, and returns `reportMarkdown`, `changedFiles`, `artifacts`, and token `metrics`. |
 | **`check_ag_environment`** | `workspaceRoot?` | Diagnoses resolved mode, detected Antigravity CLI/app paths, active `agyConfig` defaults, redacted API key status, Git state, and bridge/last usage state. |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | Restores tracked, staged, unstaged, and deleted files to `gitCheckpointRef` (supports both current and archived `taskId`s) while preserving pre-existing untracked files. |
@@ -288,6 +295,7 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 
 | Slash Command | Syntax |
 | :--- | :--- |
+| **`/ag-login`** | `/ag-login [status \| --manual \| --force \| complete <code-or-url> \| cancel \| logout]` |
 | **`/ag-delegate`** | `/ag-delegate <instructions> [--paths p1,p2] [--url ...] [--mode auto\|subscription\|api] [--model <id>] [--effort <lvl>] [--agent <name>] [--agy-mode accept-edits\|auto\|plan] [--sandbox\|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <json>] [--disable-slash-commands] [--settings <val>] [--timeout <sec>]` |
 | **`/ag-config`** | `/ag-config [mode\|agy-mode\|agy-model\|effort\|agent\|sandbox\|skip-permissions\|stream-heartbeat\|model\|timeout\|max-turns\|git-guard <value>]` |
 | **`/ag-status`** | `/ag-status` |
@@ -308,7 +316,7 @@ Every performance target (`NFR-005`) and cross-platform edge case is empirically
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`149.9 ms` avg** (`4.3×` faster) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`90.3 ms` avg** (`3.3×` headroom) | ✅ **PASS** |
-| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`39 / 39` tests (6 suites)** | ✅ **PASS** |
+| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`44 / 44` tests (7 suites)** | ✅ **PASS** |
 | Windows `.cmd` CLI Spawn (Node 20.12+/24) | No `EINVAL` crash | `spawn EINVAL` | `buildCliSpawnSpec` safe wrapper | ✅ **PASS** |
 
 ---
@@ -355,11 +363,12 @@ claude-antigravity-plugin/
 ├── .github/workflows/ci.yml       # Cross-platform CI (Ubuntu/Windows/macOS x Node 20/22)
 ├── hooks/hooks.json               # SessionStart auto-initialization hook
 ├── skills/ag-delegate/SKILL.md    # Autonomous delegation & review skill
-├── commands/                      # /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
+├── commands/                      # /ag-login, /ag-delegate, /ag-config, /ag-status, /ag-models, /ag-usage
 ├── templates/claude-handoff.md    # Antigravity handoff workflow template
 ├── server/                        # TypeScript MCP server, dual engines, verifier & tests
 │   ├── src/
-│   │   ├── index.ts               # MCP Stdio server entrypoint (5 tools)
+│   │   ├── index.ts               # MCP Stdio server entrypoint (6 tools)
+│   │   ├── auth.ts                # Google OAuth login (agy acp --login), manual code flow & status
 │   │   ├── cli-init.ts            # SessionStart initializer CLI
 │   │   ├── types.ts               # State machine, config, metrics & error code types
 │   │   ├── config.ts              # Config precedence, Zod validation & secret masking
@@ -372,7 +381,7 @@ claude-antigravity-plugin/
 │   │       ├── subscription.ts    # Full agy CLI parity, stream-json usage & capability query
 │   │       └── api-worker.ts      # @google/genai 4-tool autonomous loop + usageMetadata
 │   ├── scripts/verify-plugin.mjs  # Live healthcheck & Stdio MCP smoke verifier
-│   └── tests/                     # 6 suites / 39 automated tests (unit, security, E2E)
+│   └── tests/                     # 7 suites / 44 automated tests (unit, auth, security, E2E)
 ├── AGENTS.md                      # Antigravity workspace rules & PR workflow invariants
 ├── CONTRIBUTING.md                # Contributor workflow & engineering invariants
 ├── SECURITY.md                    # Vulnerability reporting & security boundaries

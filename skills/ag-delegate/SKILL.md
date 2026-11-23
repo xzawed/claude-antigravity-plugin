@@ -12,13 +12,14 @@ description: >-
 
 Use the `antigravity-delegate` MCP server to offload UI-heavy implementation, multi-file refactoring, browser E2E visual verification, and full Antigravity CLI (`agy`) capabilities while keeping Claude Code focused on orchestration, architecture, and final review.
 
-## 1. Available MCP Tools (5)
+## 1. Available MCP Tools (6)
 
-1. `delegate_to_antigravity` — Dispatch any task to Antigravity (`agy` CLI or Gemini API) with full CLI flag support (`model`, `effort`, `agent`, `agyMode`, `sandbox`, `dangerouslySkipPermissions`, `addDirs`, `continueConversation`, `conversationId`, `project`, `remoteAgent`, `jsonSchema`, `disableSlashCommands`, `settings`, `timeoutSec`) and receive `reportMarkdown`, `changedFiles`, `artifacts`, and `metrics` (token usage + `conversationId`).
-2. `check_ag_environment` — Inspect detected mode, local `agy`/app path, active `agyConfig` (permissions/sandbox/model/effort), API key status (redacted), Git Guard state, and latest task usage.
-3. `list_ag_capabilities` — Dynamically discover all available `agy models`, `agy agents`, permission modes, effort levels, and supported CLI flags.
-4. `get_ag_usage` — Inspect cumulative and per-task token usage (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`) and duration across current and archived delegations.
-5. `rollback_ag_task` — Losslessly restore the workspace to its exact pre-delegation Git checkpoint (`gitCheckpointRef`).
+1. `ag_auth` — Sign in to Antigravity (`agy acp --login`) via Google OAuth (local browser or headless/manual link+code flow), check live authentication status, complete/cancel a pending code-paste login, or view safe logout steps.
+2. `delegate_to_antigravity` — Dispatch any task to Antigravity (`agy` CLI or Gemini API) with full CLI flag support (`model`, `effort`, `agent`, `agyMode`, `sandbox`, `dangerouslySkipPermissions`, `addDirs`, `continueConversation`, `conversationId`, `project`, `remoteAgent`, `jsonSchema`, `disableSlashCommands`, `settings`, `timeoutSec`) and receive `reportMarkdown`, `changedFiles`, `artifacts`, and `metrics` (token usage + `conversationId`).
+3. `check_ag_environment` — Inspect detected mode, local `agy`/app path, active `agyConfig` (permissions/sandbox/model/effort), API key status (redacted), Git Guard state, and latest task usage.
+4. `list_ag_capabilities` — Dynamically discover all available `agy models`, `agy agents`, permission modes, effort levels, and supported CLI flags.
+5. `get_ag_usage` — Inspect cumulative and per-task token usage (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`) and duration across current and archived delegations.
+6. `rollback_ag_task` — Losslessly restore the workspace to its exact pre-delegation Git checkpoint (`gitCheckpointRef`).
 
 ## 2. When to Delegate
 
@@ -30,7 +31,7 @@ Delegate via `delegate_to_antigravity` when the user's request involves:
 
 ## 3. Mandatory Pre-Flight Check & Permission Policy
 
-1. Call `check_ag_environment({})` before delegating. If `resolvedMode === "unavailable"`, report `recommendations` and stop.
+1. Call `check_ag_environment({})` before delegating. If `resolvedMode === "unavailable"`, report `recommendations` and suggest `/ag-login` (for Subscription OAuth) or setting `GEMINI_API_KEY`, then stop. If Subscription mode is detected but unauthenticated, guide the user to run `/ag-login` (or call `ag_auth({ action: "status" })`).
 2. **Permissions (`--dangerously-skip-permissions`):**
    - Default config uses safe `agy_mode: "accept-edits"` + `agy_sandbox: true` (`agy_dangerously_skip_permissions: false`).
    - When the user explicitly requests unrestricted/unattended execution (`--dangerously-skip-permissions` or configured `agy_dangerously_skip_permissions: true`), pass `dangerouslySkipPermissions: true` (and `sandbox: false` only if requested). Git Guard still snapshots the workspace automatically before execution so `rollback_ag_task` remains available.
