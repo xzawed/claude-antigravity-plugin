@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#듀얼-실행-모드)
-[![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-55%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#보안-및-안전장치)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어**
 
@@ -28,7 +28,7 @@
 
 | ⚡ 환경 진단 속도 | 🛡️ 자동화 검증 | 🌍 크로스플랫폼 CI | 🔒 의존성 보안 |
 | :---: | :---: | :---: | :---: |
-| 평균 **`149.9 ms`** | **`49 / 49`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
+| 평균 **`149.9 ms`** | **`55 / 55`** 통과 | **`7 / 7`** 잡 통과 | 취약점 **`0`건** |
 | `check_ag_environment` (`4.3×` 고속화) | 단위 · 보안 · 라이브 Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -295,6 +295,9 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 | **`start_ag_task`** | `delegate_to_antigravity` 동일 + `rawPrompt?` | 비동기 백그라운드 위임: Git 체크포인트 생성 후 구독/API 엔진을 백그라운드로 실행하고 즉시 `jobId`를 반환(병렬 작업 가능) |
 | **`get_ag_job`** | `jobId?`, `workspaceRoot?`, `includeLogTail?`, `limit?` | 백그라운드 작업의 실시간 진행 상태, 마스킹된 로그 tail, 토큰 사용량, `reportMarkdown`, `structuredOutput` 조회 또는 전체 목록 반환 |
 | **`cancel_ag_job`** | `jobId?`, `workspaceRoot?` | 실행 중인 백그라운드 작업의 프로세스 트리를 안전하게 종료하고 `FAILED(TASK_CANCELLED)` 기록 및 롤백용 `gitCheckpointRef` 반환 |
+| **`ag_session`** | `action` (`start\|send\|list\|close`), `sessionId?`, `prompt?`, `model?`, `effort?`, `dangerouslySkipPermissions?`, ... | 상주 `agy --input-format stream-json --output-format stream-json` 세션으로 콜드 스타트 없는 고속 멀티턴 대화 및 프롬프트 캐시 히트 극대화 |
+| **`list_ag_artifacts`** | `taskId?`, `workspaceRoot?`, `includeReport?`, `includeLogTail?`, `logTailLines?` | `.ag-bridge/artifacts/<taskId>/` 내 스크린샷·로그·리포트·JSON 아티팩트 분류 및 마스킹된 `report.md`·`agy-cli.log` 미리보기 |
+| **`ag_cli_admin`** | `action` (`mcp_*\|remote_*\|changelog\|update`), `name?`, `commandOrUrl?`, `args?`, `dryRun?`, `maxLines?` | `agy mcp`(워크스페이스 `.mcp.json` 드라이런 동기화 포함), `agy remote-control`, `agy changelog`, `agy update` 안전 실행 |
 
 | 슬래시 커맨드 | 문법 |
 | :--- | :--- |
@@ -314,6 +317,11 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 | **`/ag-status`** | `/ag-status` |
 | **`/ag-models`** | `/ag-models` |
 | **`/ag-usage`** | `/ag-usage [limit]` |
+| **`/ag-session`** | `/ag-session <start [프롬프트] \| send [sessionId] <프롬프트> \| list \| close [sessionId]>` |
+| **`/ag-artifacts`** | `/ag-artifacts [taskId] [--lines <n>] [--no-report] [--no-logs]` |
+| **`/ag-mcp`** | `/ag-mcp <list \| add <이름> <명령/URL> [인자...] \| remove \| enable \| disable \| sync [--apply]>` |
+| **`/ag-remote`** | `/ag-remote [status \| start \| stop]` |
+| **`/ag-update`** | `/ag-update [changelog [--lines <n>] \| apply]` |
 
 ---
 
@@ -329,7 +337,7 @@ Claude가 `rollback_ag_task({ taskId })`를 호출하여:
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (라이브 Stdio MCP) | `< 500 ms` | 평균 `652.9 ms` | 평균 **`149.9 ms`** (`4.3×` 고속화) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` 훅) | `< 300 ms` | 평균 `99.1 ms` | 평균 **`90.3 ms`** (`3.3×` 여유) | ✅ **PASS** |
-| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`49 / 49` 테스트 (8 스위트)** | ✅ **PASS** |
+| 자동화 TDD 스위트 (`vitest run`) | 핵심 경로 `>= 80%` | 27개 테스트 | **`55 / 55` 테스트 (9 스위트)** | ✅ **PASS** |
 | Windows `.cmd` CLI 스폰 (Node 20.12+/24) | `EINVAL` 크래시 없음 | `spawn EINVAL` | `buildCliSpawnSpec` 안전 래핑 | ✅ **PASS** |
 
 ---

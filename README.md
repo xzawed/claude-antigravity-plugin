@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
-[![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-55%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **Language:** **English** · [한국어 (README.ko.md)](./README.ko.md)
 
@@ -28,7 +28,7 @@
 
 | ⚡ Diagnostics Speed | 🛡️ Automated Verification | 🌍 Cross-Platform CI | 🔒 Dependency Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** avg | **`49 / 49`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
+| **`149.9 ms`** avg | **`55 / 55`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
 | `check_ag_environment` (`4.3×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -295,6 +295,9 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 | **`start_ag_task`** | Same as `delegate_to_antigravity` + `rawPrompt?` | Non-blocking background delegation: creates Git checkpoint, starts Subscription/API execution asynchronously, and immediately returns `jobId` for parallel work. |
 | **`get_ag_job`** | `jobId?`, `workspaceRoot?`, `includeLogTail?`, `limit?` | Inspects live status, masked log tail, token usage, `reportMarkdown`, and `structuredOutput` for a background job, or lists active and recent jobs. |
 | **`cancel_ag_job`** | `jobId?`, `workspaceRoot?` | Gracefully terminates a running background job process tree, updates manifest to `FAILED(TASK_CANCELLED)`, and returns `gitCheckpointRef` for optional rollback. |
+| **`ag_session`** | `action` (`start\|send\|list\|close`), `sessionId?`, `prompt?`, `model?`, `effort?`, `dangerouslySkipPermissions?`, ... | Maintains a warm persistent `agy --input-format stream-json --output-format stream-json` process for multi-turn dialogue with zero cold-start latency and maximum prompt-cache reuse. |
+| **`list_ag_artifacts`** | `taskId?`, `workspaceRoot?`, `includeReport?`, `includeLogTail?`, `logTailLines?` | Lists screenshots, logs, reports, and JSON artifacts under `.ag-bridge/artifacts/<taskId>/` with masked `report.md` and `agy-cli.log` previews. |
+| **`ag_cli_admin`** | `action` (`mcp_*\|remote_*\|changelog\|update`), `name?`, `commandOrUrl?`, `args?`, `dryRun?`, `maxLines?` | Safely manages `agy mcp` (including dry-run sync from `.mcp.json`), `agy remote-control`, `agy changelog`, and `agy update`. |
 
 | Slash Command | Syntax |
 | :--- | :--- |
@@ -314,6 +317,11 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 | **`/ag-status`** | `/ag-status` |
 | **`/ag-models`** | `/ag-models` |
 | **`/ag-usage`** | `/ag-usage [limit]` |
+| **`/ag-session`** | `/ag-session <start [prompt] \| send [sessionId] <prompt> \| list \| close [sessionId]>` |
+| **`/ag-artifacts`** | `/ag-artifacts [taskId] [--lines <n>] [--no-report] [--no-logs]` |
+| **`/ag-mcp`** | `/ag-mcp <list \| add <name> <cmd/url> [args...] \| remove \| enable \| disable \| sync [--apply]>` |
+| **`/ag-remote`** | `/ag-remote [status \| start \| stop]` |
+| **`/ag-update`** | `/ag-update [changelog [--lines <n>] \| apply]` |
 
 ---
 
@@ -329,7 +337,7 @@ Every performance target (`NFR-005`) and cross-platform edge case is empirically
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`149.9 ms` avg** (`4.3×` faster) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`90.3 ms` avg** (`3.3×` headroom) | ✅ **PASS** |
-| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`49 / 49` tests (8 suites)** | ✅ **PASS** |
+| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`55 / 55` tests (9 suites)** | ✅ **PASS** |
 | Windows `.cmd` CLI Spawn (Node 20.12+/24) | No `EINVAL` crash | `spawn EINVAL` | `buildCliSpawnSpec` safe wrapper | ✅ **PASS** |
 
 ---

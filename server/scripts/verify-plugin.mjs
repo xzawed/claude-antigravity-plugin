@@ -78,11 +78,14 @@ async function main() {
       JSON.stringify(names) ===
         JSON.stringify([
           'ag_auth',
+          'ag_cli_admin',
+          'ag_session',
           'cancel_ag_job',
           'check_ag_environment',
           'delegate_to_antigravity',
           'get_ag_job',
           'get_ag_usage',
+          'list_ag_artifacts',
           'list_ag_capabilities',
           'rollback_ag_task',
           'start_ag_task',
@@ -116,6 +119,20 @@ async function main() {
     });
     const jobsParsed = JSON.parse(jobsRes.content?.[0]?.text ?? '{}');
     assert(jobsParsed.ok === true && typeof jobsParsed.activeCount === 'number', 'get_ag_job check failed');
+
+    const sessRes = await client.callTool({
+      name: 'ag_session',
+      arguments: { action: 'list', workspaceRoot: pluginRoot },
+    });
+    const sessParsed = JSON.parse(sessRes.content?.[0]?.text ?? '{}');
+    assert(sessParsed.ok === true && Array.isArray(sessParsed.sessions), 'ag_session list failed');
+
+    const artRes = await client.callTool({
+      name: 'list_ag_artifacts',
+      arguments: { workspaceRoot: pluginRoot },
+    });
+    const artParsed = JSON.parse(artRes.content?.[0]?.text ?? '{}');
+    assert(artParsed.ok === true && Array.isArray(artParsed.artifacts), 'list_ag_artifacts failed');
 
     console.log('  OK: MCP Stdio tools:', names.join(', '));
     console.log(

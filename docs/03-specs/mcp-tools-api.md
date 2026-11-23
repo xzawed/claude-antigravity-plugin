@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.3.0` |
+| **버전** | `1.4.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -13,7 +13,7 @@
 ## 1. MCP 서버 기본 규격 (`server/src/index.ts`)
 
 - **서버 이름:** `antigravity-delegate`
-- **버전:** `1.3.0`
+- **버전:** `1.4.0`
 - **트랜스포트:** `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`)
 - **로깅 규칙:** 모든 내부 진단 로그는 `console.error(...)` (`stderr`)로만 출력. `stdout`은 MCP JSON-RPC 프레임 전용.
 - **작업 디렉터리 해석:** 도구 입력에 `workspaceRoot`가 생략되면 `process.cwd()`를 사용한다.
@@ -35,7 +35,7 @@
 
 ---
 
-## 2. 노출 MCP Tools 명세 (9종)
+## 2. 노출 MCP Tools 명세 (12종)
 
 ### 2.1 Tool 1: `delegate_to_antigravity`
 Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 뒤 감지된 엔진(`subscription` 또는 `api`)으로 Antigravity에 작업을 위임하고 완료 보고서 및 토큰 사용량/실행 메트릭을 반환한다. `agy` CLI가 제공하는 모든 주요 플래그(모델, 추론 강도, 에이전트, 대화 이어가기, `--dangerously-skip-permissions`, 추가 디렉터리, 프로젝트/원격 에이전트, JSON 스키마 등)를 1:1 지원한다.
@@ -317,6 +317,18 @@ export interface AgAuthToolOutput {
 
 ### 2.9 Tool 9: `cancel_ag_job` (백그라운드 작업 중단)
 실행 중인 백그라운드 작업(`jobId` 또는 최신 활성 작업)에 `AbortSignal`을 전달해 자식 프로세스 트리를 종료하고 `.ag-bridge/manifest.json`을 `FAILED(TASK_CANCELLED)`로 갱신하며, 선택적 롤백용 `gitCheckpointRef`를 반환한다.
+
+### 2.10 Tool 10: `ag_session` (지속 멀티턴 `stream-json` 세션)
+`agy --input-format stream-json --output-format stream-json` 상주 프로세스를 관리한다(`action`: `start | send | list | close`).
+- `start`: Git Guard 체크포인트 생성 후 상주 워커를 띄우고, 선택적 `prompt`가 있으면 즉시 1턴 실행.
+- `send`: 살아있는 세션의 `stdin`에 `{"event":"user","message":{"content":"..."}}` NDJSON을 전송해 콜드 스타트 없이 후속 턴 실행 및 누적 캐시 히트(`cacheReadTokens`) 수집(동시 전송 시 `SESSION_BUSY` 보호).
+- `list` / `close`: 활성 세션 목록 조회 및 정상 종료(`stdin.end()` + 프로세스 정리).
+
+### 2.11 Tool 11: `list_ag_artifacts` (아티팩트·스크린샷·로그 뷰어)
+`.ag-bridge/artifacts/<taskId>/` 내 파일 목록을 `screenshot | log | report | json | other`로 분류하고, 마스킹된 `report.md` 및 `agy-cli.log` tail과 최근 작업 목록을 반환한다.
+
+### 2.12 Tool 12: `ag_cli_admin` (Antigravity CLI 플랫폼 통합 관리)
+`agy` 하위 관리 명령을 안전하게(`shell: false`, 비밀 마스킹) 래핑한다: `mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`(기본 `dryRun: true`, 자기 자신 `antigravity-delegate` 재귀 방지 자동 제외), `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`.
 
 ---
 

@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { handleListArtifacts } from './artifacts.js';
 import { AuthDependencies, disposePendingAuthSessions, handleAgAuth } from './auth.js';
+import { CliAdminDependencies, handleAgCliAdmin } from './cli-admin.js';
 import {
   disposeActiveJobs,
   handleCancelAgJob,
@@ -12,6 +14,11 @@ import {
   handleStartAgTask,
   JobDependencies,
 } from './jobs.js';
+import {
+  disposePersistentSessions,
+  handleAgSession,
+  SessionDependencies,
+} from './sessions.js';
 import {
   acquireBridgeLock,
   ensureBridgeDirs,
@@ -65,6 +72,8 @@ export interface ServerDependencies {
     | ReturnType<typeof queryAgyCapabilities>;
   authDeps?: AuthDependencies;
   jobDeps?: JobDependencies;
+  sessionDeps?: SessionDependencies;
+  cliAdminDeps?: CliAdminDependencies;
 }
 
 function getDefaultPluginRoot(): string {
@@ -445,7 +454,7 @@ export async function handleRollbackAgTask(
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {
   const server = new McpServer({
     name: 'antigravity-delegate',
-    version: '1.3.0',
+    version: '1.4.0',
   });
 
   const sharedDelegateSchema = {
@@ -691,6 +700,121 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     },
   );
 
+  server.tool(
+    'ag_session',
+    'Manage persistent multi-turn Antigravity `stream-json` sessions (`start`, `send`, `list`, `close`) using `agy --input-format stream-json --output-format stream-json` for zero cold-start latency and high cache-hit token savings across turns.',
+    {
+      action: z.enum(['start', 'send', 'list', 'close']),
+      sessionId: z.string().min(1).optional(),
+      prompt: z.string().min(1).optional(),
+      model: z.string().min(1).optional(),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+      agent: z.string().min(1).optional(),
+      agyMode: z.enum(['accept-edits', 'auto', 'plan']).optional(),
+      sandbox: z.boolean().optional(),
+      dangerouslySkipPermissions: z.boolean().optional(),
+      addDirs: z.array(z.string().min(1)).optional(),
+      continueConversation: z.boolean().optional(),
+      conversationId: z.string().min(1).optional(),
+      project: z.string().min(1).optional(),
+      remoteAgent: z.boolean().optional(),
+      jsonSchema: z.string().min(1).optional(),
+      disableSlashCommands: z.boolean().optional(),
+      settings: z.string().min(1).optional(),
+      timeoutSec: z.number().int().min(5).max(3600).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+    },
+    async (args) => {
+      try {
+        const result = await handleAgSession(args, {
+          detectorDeps: deps.detectorDeps,
+          ...deps.sessionDeps,
+        });
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] ag_session error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
+  server.tool(
+    'list_ag_artifacts',
+    'List screenshots, logs, reports, and JSON artifacts under `.ag-bridge/artifacts/<taskId>/`, along with masked `report.md` and `agy-cli.log` tail previews.',
+    {
+      taskId: z.string().min(1).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+      includeReport: z.boolean().optional(),
+      includeLogTail: z.boolean().optional(),
+      logTailLines: z.number().int().min(5).max(200).optional(),
+    },
+    async (args) => {
+      try {
+        const result = handleListArtifacts(args);
+        return toJsonToolResponse(result, false);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] list_ag_artifacts error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
+  server.tool(
+    'ag_cli_admin',
+    'Manage Antigravity CLI platform integrations safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`).',
+    {
+      action: z.enum([
+        'mcp_list',
+        'mcp_add',
+        'mcp_remove',
+        'mcp_enable',
+        'mcp_disable',
+        'mcp_sync_from_claude',
+        'remote_status',
+        'remote_start',
+        'remote_stop',
+        'changelog',
+        'update',
+      ]),
+      name: z.string().min(1).optional(),
+      commandOrUrl: z.string().min(1).optional(),
+      args: z.array(z.string()).optional(),
+      serverType: z.enum(['stdio', 'http']).optional(),
+      envVars: z.array(z.string().min(1)).optional(),
+      headers: z.array(z.string().min(1)).optional(),
+      dryRun: z.boolean().optional(),
+      maxLines: z.number().int().min(10).max(300).optional(),
+      workspaceRoot: z.string().min(1).optional(),
+    },
+    async (args) => {
+      try {
+        const result = await handleAgCliAdmin(args, {
+          detectorDeps: deps.detectorDeps,
+          ...deps.cliAdminDeps,
+        });
+        return toJsonToolResponse(result, !result.ok);
+      } catch (err) {
+        const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';
+        const message = maskSecrets(err instanceof Error ? err.message : String(err));
+        console.error(`[antigravity-delegate] ag_cli_admin error (${code}): ${message}`);
+        return toJsonToolResponse(
+          { ok: false, errorCode: code, errorMessage: message },
+          true,
+        );
+      }
+    },
+  );
+
   return server;
 }
 
@@ -702,6 +826,7 @@ if (isDirectExecution) {
   process.once('exit', () => {
     disposePendingAuthSessions();
     disposeActiveJobs();
+    disposePersistentSessions();
   });
   const server = createAntigravityMcpServer();
   const transport = new StdioServerTransport();
