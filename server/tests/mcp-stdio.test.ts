@@ -20,7 +20,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('TC-I01: exposes all 9 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth + get_ag_job', async () => {
+  it('TC-I01: exposes all 12 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth + get_ag_job + ag_session + list_ag_artifacts', async () => {
     if (!fs.existsSync(distIndex)) {
       throw new Error(`Built server not found at ${distIndex}. Run "npm run build" before tests.`);
     }
@@ -32,7 +32,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       stderr: 'pipe',
     });
 
-    const client = new Client({ name: 'test-mcp-client', version: '1.3.0' });
+    const client = new Client({ name: 'test-mcp-client', version: '1.4.0' });
     await client.connect(transport);
 
     try {
@@ -40,11 +40,14 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       const toolNames = toolsRes.tools.map((t) => t.name).sort();
       expect(toolNames).toEqual([
         'ag_auth',
+        'ag_cli_admin',
+        'ag_session',
         'cancel_ag_job',
         'check_ag_environment',
         'delegate_to_antigravity',
         'get_ag_job',
         'get_ag_usage',
+        'list_ag_artifacts',
         'list_ag_capabilities',
         'rollback_ag_task',
         'start_ag_task',
@@ -95,6 +98,26 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       expect(jobsData.ok).toBe(true);
       expect(jobsData.activeCount).toBe(0);
       expect(Array.isArray(jobsData.jobs)).toBe(true);
+
+      const sessCall = await client.callTool({
+        name: 'ag_session',
+        arguments: { action: 'list', workspaceRoot: tmpRoot },
+      });
+      const sessData = JSON.parse(
+        ((sessCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; sessions: unknown[] };
+      expect(sessData.ok).toBe(true);
+      expect(sessData.sessions).toEqual([]);
+
+      const artCall = await client.callTool({
+        name: 'list_ag_artifacts',
+        arguments: { workspaceRoot: tmpRoot },
+      });
+      const artData = JSON.parse(
+        ((artCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; artifacts: unknown[] };
+      expect(artData.ok).toBe(true);
+      expect(artData.artifacts).toEqual([]);
     } finally {
       await client.close();
     }

@@ -28,6 +28,10 @@ export type AgErrorCode =
   | 'AUTH_TIMEOUT'
   | 'TASK_CANCELLED'
   | 'JOB_NOT_FOUND'
+  | 'SESSION_NOT_FOUND'
+  | 'SESSION_BUSY'
+  | 'SESSION_FAILED'
+  | 'CLI_ADMIN_FAILED'
   | 'INTERNAL_ERROR';
 
 export class AgPluginError extends Error {
@@ -407,6 +411,135 @@ export interface CancelJobToolOutput {
   gitCheckpointRef?: string;
   message: string;
   nextSteps: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+
+export type AgSessionAction = 'start' | 'send' | 'list' | 'close';
+
+export interface AgSessionToolInput {
+  action: AgSessionAction;
+  sessionId?: string;
+  prompt?: string;
+  model?: string;
+  effort?: AgyEffortLevel;
+  agent?: string;
+  agyMode?: AgyExecutionMode;
+  sandbox?: boolean;
+  dangerouslySkipPermissions?: boolean;
+  addDirs?: string[];
+  continueConversation?: boolean;
+  conversationId?: string;
+  project?: string;
+  remoteAgent?: boolean;
+  jsonSchema?: string;
+  disableSlashCommands?: boolean;
+  settings?: string;
+  timeoutSec?: number;
+  workspaceRoot?: string;
+}
+
+export interface AgSessionSummary {
+  sessionId: string;
+  workspaceRoot: string;
+  active: boolean;
+  busy: boolean;
+  conversationId?: string;
+  model?: string;
+  permissionMode?: string;
+  numTurns: number;
+  durationSeconds: number;
+  usage?: TokenUsage;
+  gitCheckpointRef?: string;
+  createdAt: string;
+  lastActivityAt: string;
+}
+
+export interface AgSessionToolOutput {
+  ok: boolean;
+  action: AgSessionAction;
+  sessionId?: string;
+  session?: AgSessionSummary;
+  sessions?: AgSessionSummary[];
+  response?: string;
+  structuredOutput?: unknown;
+  metrics?: ExecutionMetrics;
+  warnings: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+
+export type AgArtifactKind = 'screenshot' | 'log' | 'report' | 'json' | 'other';
+
+export interface AgArtifactEntry {
+  name: string;
+  relativePath: string;
+  absolutePath: string;
+  kind: AgArtifactKind;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface ListArtifactsToolInput {
+  taskId?: string;
+  workspaceRoot?: string;
+  includeReport?: boolean;
+  includeLogTail?: boolean;
+  logTailLines?: number;
+}
+
+export interface ListArtifactsToolOutput {
+  ok: boolean;
+  workspaceRoot: string;
+  taskId?: string;
+  taskTitle?: string;
+  taskStatus?: TaskStatus;
+  artifacts: AgArtifactEntry[];
+  reportMarkdown?: string;
+  logTail?: string;
+  availableTasks: Array<{
+    taskId: string;
+    title: string;
+    status: TaskStatus;
+    artifactCount: number;
+    updatedAt: string;
+  }>;
+}
+
+export type AgCliAdminAction =
+  | 'mcp_list'
+  | 'mcp_add'
+  | 'mcp_remove'
+  | 'mcp_enable'
+  | 'mcp_disable'
+  | 'mcp_sync_from_claude'
+  | 'remote_status'
+  | 'remote_start'
+  | 'remote_stop'
+  | 'changelog'
+  | 'update';
+
+export interface AgCliAdminToolInput {
+  action: AgCliAdminAction;
+  name?: string;
+  commandOrUrl?: string;
+  args?: string[];
+  serverType?: 'stdio' | 'http';
+  envVars?: string[];
+  headers?: string[];
+  dryRun?: boolean;
+  maxLines?: number;
+  workspaceRoot?: string;
+}
+
+export interface AgCliAdminToolOutput {
+  ok: boolean;
+  action: AgCliAdminAction;
+  cliPath?: string;
+  exitCode?: number;
+  output: string;
+  syncedServers?: Array<{ name: string; status: 'planned' | 'synced' | 'skipped' | 'failed'; detail: string }>;
+  warnings: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
 }
