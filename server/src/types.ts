@@ -26,6 +26,8 @@ export type AgErrorCode =
   | 'AUTH_LOGIN_FAILED'
   | 'AUTH_SESSION_NOT_FOUND'
   | 'AUTH_TIMEOUT'
+  | 'TASK_CANCELLED'
+  | 'JOB_NOT_FOUND'
   | 'INTERNAL_ERROR';
 
 export class AgPluginError extends Error {
@@ -76,6 +78,7 @@ export interface AgyCliOptions {
   jsonSchema?: string;
   disableSlashCommands?: boolean;
   settings?: string;
+  rawPrompt?: boolean;
 }
 
 export interface SubscriptionConfig {
@@ -225,6 +228,7 @@ export interface DelegateToolOutput {
   changedFiles: string[];
   artifacts: string[];
   reportMarkdown: string;
+  structuredOutput?: unknown;
   metrics?: ExecutionMetrics;
   warnings: string[];
   errorCode?: AgErrorCode;
@@ -334,6 +338,75 @@ export interface AgAuthToolOutput {
   message: string;
   nextSteps: string[];
   warnings: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+
+export type BackgroundJobState = 'RUNNING' | 'VERIFIED' | 'FAILED' | 'CANCELLED';
+
+export interface BackgroundJobSummary {
+  jobId: string;
+  taskId: string;
+  title: string;
+  mode: ResolvedExecutionMode;
+  status: BackgroundJobState;
+  active: boolean;
+  startedAt: string;
+  updatedAt: string;
+  elapsedSeconds: number;
+  gitCheckpointRef?: string;
+  conversationId?: string;
+  model?: string;
+  metrics?: ExecutionMetrics;
+  changedFiles?: string[];
+  artifacts?: string[];
+  reportMarkdown?: string;
+  structuredOutput?: unknown;
+  logTail?: string;
+  warnings: string[];
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+
+export interface StartJobToolOutput {
+  ok: boolean;
+  jobId: string;
+  taskId: string;
+  mode: ResolvedExecutionMode;
+  status: 'RUNNING';
+  gitCheckpointRef?: string;
+  warnings: string[];
+  nextSteps: string[];
+}
+
+export interface GetJobToolInput {
+  jobId?: string;
+  workspaceRoot?: string;
+  includeLogTail?: boolean;
+  limit?: number;
+}
+
+export interface GetJobToolOutput {
+  ok: boolean;
+  job?: BackgroundJobSummary;
+  jobs?: BackgroundJobSummary[];
+  activeCount: number;
+  errorCode?: AgErrorCode;
+  errorMessage?: string;
+}
+
+export interface CancelJobToolInput {
+  jobId?: string;
+  workspaceRoot?: string;
+}
+
+export interface CancelJobToolOutput {
+  ok: boolean;
+  jobId?: string;
+  status: 'CANCELLED' | 'NOT_RUNNING';
+  gitCheckpointRef?: string;
+  message: string;
+  nextSteps: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
 }

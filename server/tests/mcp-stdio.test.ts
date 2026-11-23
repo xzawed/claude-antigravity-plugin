@@ -20,7 +20,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('TC-I01: exposes all 6 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth', async () => {
+  it('TC-I01: exposes all 9 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth + get_ag_job', async () => {
     if (!fs.existsSync(distIndex)) {
       throw new Error(`Built server not found at ${distIndex}. Run "npm run build" before tests.`);
     }
@@ -32,7 +32,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       stderr: 'pipe',
     });
 
-    const client = new Client({ name: 'test-mcp-client', version: '1.2.0' });
+    const client = new Client({ name: 'test-mcp-client', version: '1.3.0' });
     await client.connect(transport);
 
     try {
@@ -40,11 +40,14 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       const toolNames = toolsRes.tools.map((t) => t.name).sort();
       expect(toolNames).toEqual([
         'ag_auth',
+        'cancel_ag_job',
         'check_ag_environment',
         'delegate_to_antigravity',
+        'get_ag_job',
         'get_ag_usage',
         'list_ag_capabilities',
         'rollback_ag_task',
+        'start_ag_task',
       ]);
 
       const envCall = await client.callTool({
@@ -81,6 +84,17 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       ) as { ok: boolean; status: string };
       expect(authCancel.ok).toBe(true);
       expect(authCancel.status).toBe('CANCELLED');
+
+      const jobsCall = await client.callTool({
+        name: 'get_ag_job',
+        arguments: { workspaceRoot: tmpRoot },
+      });
+      const jobsData = JSON.parse(
+        ((jobsCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; activeCount: number; jobs: unknown[] };
+      expect(jobsData.ok).toBe(true);
+      expect(jobsData.activeCount).toBe(0);
+      expect(Array.isArray(jobsData.jobs)).toBe(true);
     } finally {
       await client.close();
     }

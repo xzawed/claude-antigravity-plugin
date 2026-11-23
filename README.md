@@ -11,10 +11,10 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/MCP-Stdio%20Server-6B4FBB)](https://modelcontextprotocol.io/)
 [![Dual Engine](https://img.shields.io/badge/engines-Subscription%20%7C%20Gemini%20API-4285F4)](#dual-execution-modes)
-[![Tests](https://img.shields.io/badge/tests-44%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#security--safety-guarantees)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue)](./.claude-plugin/plugin.json)
 
 🌐 **Language:** **English** · [한국어 (README.ko.md)](./README.ko.md)
 
@@ -28,7 +28,7 @@
 
 | ⚡ Diagnostics Speed | 🛡️ Automated Verification | 🌍 Cross-Platform CI | 🔒 Dependency Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** avg | **`44 / 44`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
+| **`149.9 ms`** avg | **`49 / 49`** tests | **`7 / 7`** matrix jobs | **`0`** vulnerabilities |
 | `check_ag_environment` (`4.3×` speedup) | Unit · Security · Live Stdio MCP | Ubuntu · macOS · Windows (Node 20/22) | `vitest 5.1` · `zod 4.6` · `MCP 1.27` |
 
 ---
@@ -292,11 +292,24 @@ Default `execution_mode: "auto"` resolves the optimal engine automatically:
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | Restores tracked, staged, unstaged, and deleted files to `gitCheckpointRef` (supports both current and archived `taskId`s) while preserving pre-existing untracked files. |
 | **`list_ag_capabilities`** | `workspaceRoot?` | Queries live `agy models` and `agy agents` in parallel and reports supported permission modes (`--dangerously-skip-permissions` included), effort levels, CLI flags, and workspace defaults. |
 | **`get_ag_usage`** | `workspaceRoot?`, `limit?` | Aggregates cumulative and per-task token usage (`input`, `output`, `thinking`, `cacheRead`, `total`), duration, and Subscription vs. API stats across current + `history/*.json` tasks. |
+| **`start_ag_task`** | Same as `delegate_to_antigravity` + `rawPrompt?` | Non-blocking background delegation: creates Git checkpoint, starts Subscription/API execution asynchronously, and immediately returns `jobId` for parallel work. |
+| **`get_ag_job`** | `jobId?`, `workspaceRoot?`, `includeLogTail?`, `limit?` | Inspects live status, masked log tail, token usage, `reportMarkdown`, and `structuredOutput` for a background job, or lists active and recent jobs. |
+| **`cancel_ag_job`** | `jobId?`, `workspaceRoot?` | Gracefully terminates a running background job process tree, updates manifest to `FAILED(TASK_CANCELLED)`, and returns `gitCheckpointRef` for optional rollback. |
 
 | Slash Command | Syntax |
 | :--- | :--- |
 | **`/ag-login`** | `/ag-login [status \| --manual \| --force \| complete <code-or-url> \| cancel \| logout]` |
 | **`/ag-delegate`** | `/ag-delegate <instructions> [--paths p1,p2] [--url ...] [--mode auto\|subscription\|api] [--model <id>] [--effort <lvl>] [--agent <name>] [--agy-mode accept-edits\|auto\|plan] [--sandbox\|--no-sandbox] [--dangerously-skip-permissions] [--add-dir <dir>] [--continue] [--conversation <id>] [--project <name>] [--new-project] [--remote-agent] [--json-schema <json>] [--disable-slash-commands] [--settings <val>] [--timeout <sec>]` |
+| **`/ag-start`** | `/ag-start <instructions> [same flags as /ag-delegate]` *(non-blocking parallel background run)* |
+| **`/ag-jobs`** | `/ag-jobs [jobId] [--no-logs] [--limit <n>]` |
+| **`/ag-cancel`** | `/ag-cancel [jobId]` |
+| **`/ag-browser`** | `/ag-browser <http://localhost:...> [scenario] [--model <id>] [--dangerously-skip-permissions] [--bg]` |
+| **`/ag-boost`** | `/ag-boost <complex task> [--paths p1,p2] [--model <id>] [--effort high\|xhigh\|max] [--bg]` |
+| **`/ag-swarm`** | `/ag-swarm <parallel project task> [--paths p1,p2] [--model <id>] [--dangerously-skip-permissions] [--bg]` |
+| **`/ag-goal`** | `/ag-goal <objective & criteria> [--paths p1,p2] [--url ...] [--dangerously-skip-permissions] [--bg]` |
+| **`/ag-review`** | `/ag-review [staged \| branch \| <path>] [--model <id>] [--effort high\|xhigh\|max] [--bg]` |
+| **`/ag-resume`** | `/ag-resume [taskId \| conversationId] <follow-up instructions> [--bg]` |
+| **`/ag-rollback`** | `/ag-rollback [taskId]` |
 | **`/ag-config`** | `/ag-config [mode\|agy-mode\|agy-model\|effort\|agent\|sandbox\|skip-permissions\|stream-heartbeat\|model\|timeout\|max-turns\|git-guard <value>]` |
 | **`/ag-status`** | `/ag-status` |
 | **`/ag-models`** | `/ag-models` |
@@ -316,7 +329,7 @@ Every performance target (`NFR-005`) and cross-platform edge case is empirically
 | :--- | :---: | :---: | :---: | :---: |
 | `check_ag_environment` (Live Stdio MCP) | `< 500 ms` | `652.9 ms` avg | **`149.9 ms` avg** (`4.3×` faster) | ✅ **PASS** |
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | `99.1 ms` avg | **`90.3 ms` avg** (`3.3×` headroom) | ✅ **PASS** |
-| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`44 / 44` tests (7 suites)** | ✅ **PASS** |
+| Automated TDD Suite (`vitest run`) | `>= 80%` core paths | 27 tests | **`49 / 49` tests (8 suites)** | ✅ **PASS** |
 | Windows `.cmd` CLI Spawn (Node 20.12+/24) | No `EINVAL` crash | `spawn EINVAL` | `buildCliSpawnSpec` safe wrapper | ✅ **PASS** |
 
 ---

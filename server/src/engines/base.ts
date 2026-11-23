@@ -18,11 +18,13 @@ export interface ExecutionContext {
   detection: EnvironmentDetectionResult;
   agyOptions?: AgyCliOptions;
   timeoutSecOverride?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface ExecutionResult {
   status: 'VERIFIED' | 'FAILED';
   reportMarkdown: string;
+  structuredOutput?: unknown;
   changedFiles: string[];
   artifacts: string[];
   metrics?: ExecutionMetrics;
