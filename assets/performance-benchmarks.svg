@@ -45,9 +45,9 @@
   <text x="52" y="166" class="kpi-sub">652.9ms → 149.9ms avg</text>
 
   <rect x="300" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="320" y="124" class="kpi-accent-b">35 / 35</text>
+  <text x="320" y="124" class="kpi-accent-b">55 / 55</text>
   <text x="320" y="148" class="kpi-label">Automated TDD Tests Passing</text>
-  <text x="320" y="166" class="kpi-sub">6 suites · Unit + Security + E2E</text>
+  <text x="320" y="166" class="kpi-sub">9 suites · Unit + Auth + Jobs + E2E</text>
 
   <rect x="568" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
   <text x="588" y="124" class="kpi-accent-p">7 / 7</text>
