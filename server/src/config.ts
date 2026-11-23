@@ -163,8 +163,13 @@ export function maskSecrets(
     result = result.split(secret).join('[REDACTED]');
   }
 
-  // Mask common Google/Gemini API key patterns (AIza...)
+  // Mask common provider API key & OAuth token patterns
   result = result.replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED]');
+  result = result.replace(/ya29\.[0-9A-Za-z._-]{20,}/g, '[REDACTED]');
+  result = result.replace(/\b4\/0[A-Za-z0-9_-]{20,}\b/g, '[REDACTED]');
+  result = result.replace(/\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}\b/g, '[REDACTED]');
+  result = result.replace(/\bgh[pousr]_[0-9A-Za-z]{20,}\b/g, '[REDACTED]');
+  result = result.replace(/\b(Bearer\s+)[A-Za-z0-9\-._~+/=]{16,}/gi, '$1[REDACTED]');
 
   return result;
 }

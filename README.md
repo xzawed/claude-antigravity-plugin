@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#full-command--mcp-reference)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#visual-map-of-all-21-commands)
-[![Tests](https://img.shields.io/badge/tests-55%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#built-in-safety-net)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
@@ -55,7 +55,7 @@ flowchart LR
 
 | ⚡ Fast Diagnostics | 🧩 Complete Coverage | 🛡️ Automated Quality | 🔒 Zero-Risk Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** env check | **`21`** Slash Commands | **`55 / 55`** tests passing | **`0`** npm vulnerabilities |
+| **`149.9 ms`** env check | **`21`** Slash Commands | **`57 / 57`** tests passing | **`0`** npm vulnerabilities |
 | **`397 ms`** async job launch | **`12`** MCP Tools | **`7 / 7`** OS/Node CI jobs | Auto Git Guard + Path Guard |
 
 ---
@@ -420,7 +420,7 @@ Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) a
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | **`90.3 ms` avg** | ✅ PASS |
 | `start_ag_task` non-blocking dispatch (Live `agy`) | Instant return | **`397 ms`** (while task runs in background) | ✅ PASS |
 | `ag_session` 2-turn persistent session (Live `agy`) | Cache reuse | Turn 2 **`7,691` `cacheReadTokens`** hit | ✅ PASS |
-| Automated Test Suite (`vitest run`) | Core paths | **`55 / 55` tests (9 suites)** | ✅ PASS |
+| Automated Test Suite (`vitest run`) | Core paths | **`57 / 57` tests (9 suites)** | ✅ PASS |
 | Cross-Platform CI (Ubuntu · macOS · Windows × Node 20/22) | All green | **`7 / 7` jobs passing** | ✅ PASS |
 
 ---
@@ -474,7 +474,7 @@ claude-antigravity-plugin/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
 │   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, config.ts, detector.ts, engines/
 │   ├── scripts/verify-plugin.mjs  # Live healthcheck & 12-tool Stdio MCP verifier
-│   └── tests/                     # 9 suites / 55 automated tests
+│   └── tests/                     # 9 suites / 57 automated tests
 ├── README.md                      # English guide (this file)
 ├── README.ko.md                   # Complete Korean guide
 └── docs/                          # Engineering standards & specs (00~06)

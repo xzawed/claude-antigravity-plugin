@@ -49,7 +49,9 @@
 | `TC-S02` | `path-guard.ts` | `src/ui/link.ts`가 워크스페이스 외부 파일을 가리키는 Symlink일 때 쓰기 시도 | `realpath` 검증으로 차단 | `NFR-001` |
 | `TC-S03` | `path-guard.ts` | `lockedPaths`에 `.git/config` 또는 `.env` 포함 시도 | 금지 목록(Denylist)에 의해 무조건 거부 | `NFR-001` |
 | `TC-S04` | `api-worker.ts` | `run_command("npm run build && rm -rf /")` 또는 `curl ...` 호출 | `COMMAND_NOT_ALLOWED` 반환, 프로세스 미실행 | `ARC-003` |
-| `TC-S05` | `config.ts` / `index.ts` | `GEMINI_API_KEY="AIzaSyDummySecretKey1234567890"` 설정 후 오류 로그 및 `check_ag_environment` 검사 | 모든 출력/로그/리포트에서 원문 0건 노출 (`[REDACTED]`) | `NFR-002` |
+| `TC-S05` | `config.ts` / `index.ts` | 더미 `GEMINI_API_KEY` (`AIza` 패턴) 설정 후 오류 로그 및 `check_ag_environment` 검사 | 모든 출력/로그/리포트에서 원문 0건 노출 (`[REDACTED]`) | `NFR-002` |
+| `TC-S06` | `bridge-fs.ts` / `artifacts.ts` | `taskId: "../../.."` 또는 `"../config"`로 아티팩트/아카이브 조회 시도 | `PATH_TRAVERSAL_BLOCKED` 즉시 거부 | `NFR-001` |
+| `TC-S07` | `config.ts` / `cli-admin.ts` | `ya29.`/`4/0...`/`sk-`/`ghp_`/`Bearer` 토큰 마스킹 및 `mcp_add` CRLF 제어문자 주입 시도 | 모든 토큰 `[REDACTED]` 처리 및 제어문자 거부 | `NFR-002` |
 
 ---
 

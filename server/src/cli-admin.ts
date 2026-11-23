@@ -19,6 +19,11 @@ export interface CliAdminDependencies {
 }
 
 const VALID_SERVER_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+const CONTROL_CHAR_RE = /[\r\n\0]/;
+
+function hasControlChars(values: Array<string | undefined>): boolean {
+  return values.some((v) => typeof v === 'string' && CONTROL_CHAR_RE.test(v));
+}
 
 export function defaultRunAdminCli(
   cliPath: string,
@@ -283,6 +288,24 @@ export async function handleAgCliAdmin(
           warnings,
           errorCode: 'CLI_ADMIN_FAILED',
           errorMessage: '`commandOrUrl` is required for `mcp_add`.',
+        };
+      }
+      if (
+        hasControlChars([
+          input.commandOrUrl,
+          ...(input.args ?? []),
+          ...(input.envVars ?? []),
+          ...(input.headers ?? []),
+        ])
+      ) {
+        return {
+          ok: false,
+          action: input.action,
+          cliPath,
+          output: '',
+          warnings,
+          errorCode: 'CLI_ADMIN_FAILED',
+          errorMessage: 'Control characters (CR/LF/NUL) are not allowed in `mcp_add` arguments, envVars, or headers.',
         };
       }
       cliArgs = buildMcpAddArgs({

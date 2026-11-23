@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#전체-커맨드--mcp-상세-레퍼런스)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#한눈에-보는-21개-슬래시-커맨드-지도)
-[![Tests](https://img.shields.io/badge/tests-55%20passed-brightgreen)](./docs/05-verification/verification-report.md)
+[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
 [![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#자동-안전장치--원클릭-되돌리기)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
@@ -55,7 +55,7 @@ flowchart LR
 
 | ⚡ 빠른 반응 속도 | 🧩 완벽한 기능 커버리지 | 🛡️ 자동화 품질 검증 | 🔒 빈틈없는 보안 |
 | :---: | :---: | :---: | :---: |
-| 환경 진단 **`149.9 ms`** | 슬래시 커맨드 **`21`종** | 테스트 **`55 / 55`** 통과 | 보안 취약점 **`0`건** |
+| 환경 진단 **`149.9 ms`** | 슬래시 커맨드 **`21`종** | 테스트 **`57 / 57`** 통과 | 보안 취약점 **`0`건** |
 | 백그라운드 착수 **`397 ms`** | 내장 MCP Tool **`12`종** | 3개 OS CI **`7 / 7`** 통과 | 자동 Git 백업 · 비밀 자동 가림 |
 
 ---
@@ -420,7 +420,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | `cli-init.js --silent` (세션 시작 자동 초기화) | `< 300 ms` | 평균 **`90.3 ms`** | ✅ 통과 |
 | `start_ag_task` 비동기 백그라운드 착수 (실제 `agy`) | 즉시 반환 | **`397 ms`** (백그라운드 병렬 수행) | ✅ 통과 |
 | `ag_session` 2턴 지속 세션 (실제 `agy`) | 프롬프트 캐시 재사용 | 2턴 **`7,691` `cacheReadTokens`** 히트 | ✅ 통과 |
-| 자동화 테스트 스위트 (`vitest run`) | 핵심 경로 검증 | **`55 / 55` 테스트 통과 (9 스위트)** | ✅ 통과 |
+| 자동화 테스트 스위트 (`vitest run`) | 핵심 경로 검증 | **`57 / 57` 테스트 통과 (9 스위트)** | ✅ 통과 |
 | 크로스플랫폼 CI (Ubuntu · macOS · Windows × Node 20/22) | 전체 통과 | **`7 / 7` 잡 전체 통과** | ✅ 통과 |
 
 ---
@@ -474,7 +474,7 @@ claude-antigravity-plugin/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
 │   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, config.ts, detector.ts, engines/
 │   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 12-Tool Stdio MCP 검증 스크립트
-│   └── tests/                     # 9 스위트 / 55개 자동화 테스트
+│   └── tests/                     # 9 스위트 / 57개 자동화 테스트
 ├── README.md                      # 영문 공식 가이드
 ├── README.ko.md                   # 한글 공식 가이드 (현재 파일)
 └── docs/                          # 안티그래비티 개발 표준 문서 허브 (00~06)

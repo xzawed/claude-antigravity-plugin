@@ -8,6 +8,13 @@ server/dist/
 # Local bridge session artifacts
 .ag-bridge/
 
+# Secrets & local environment files (never commit!)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # Logs & OS files
 *.log
 .DS_Store

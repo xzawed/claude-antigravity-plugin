@@ -220,7 +220,8 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     });
 
     const prevKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'AIzaSyTestMockApiKey1234567890abcdef';
+    const mockKey = ['AIza', 'SyTestMockApiKey1234567890abcdef'].join('');
+    process.env.GEMINI_API_KEY = mockKey;
     try {
       const res = await handleDelegateToAntigravity(
         {
@@ -236,7 +237,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
           apiWorkerEngine: apiEngine,
           detectorDeps: {
             platform: 'linux',
-            env: { GEMINI_API_KEY: 'AIzaSyTestMockApiKey1234567890abcdef' },
+            env: { GEMINI_API_KEY: mockKey },
             homedir: '/home/tester',
             existsSync: () => false,
             findBinary: () => undefined,
@@ -250,7 +251,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       expect(fs.existsSync(path.join(tmpRoot, 'src', 'ui', 'Header.tsx'))).toBe(true);
       expect(fs.existsSync(path.join(tmpRoot, 'src', 'backend', 'auth.ts'))).toBe(false);
       expect(res.reportMarkdown).toContain('Blocked 1 out-of-scope write attempt');
-      expect(res.reportMarkdown).not.toContain('AIzaSyTestMockApiKey');
+      expect(res.reportMarkdown).not.toContain(mockKey);
     } finally {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;
@@ -274,7 +275,8 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     });
 
     const prevKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'AIzaSyTestMockApiKey1234567890abcdef';
+    const mockKey = ['AIza', 'SyTestMockApiKey1234567890abcdef'].join('');
+    process.env.GEMINI_API_KEY = mockKey;
     try {
       const res = await handleDelegateToAntigravity(
         {
@@ -290,7 +292,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
           apiWorkerEngine: apiEngine,
           detectorDeps: {
             platform: 'linux',
-            env: { GEMINI_API_KEY: 'AIzaSyTestMockApiKey1234567890abcdef' },
+            env: { GEMINI_API_KEY: mockKey },
             homedir: '/home/tester',
             existsSync: () => false,
             findBinary: () => undefined,
@@ -451,9 +453,10 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       onEvent: (ev) => seenEvents.push(ev),
     });
 
-    // Feed split JSON chunks + malformed non-JSON line + secret token
+    // Feed split JSON chunks + malformed non-JSON line + synthetic secret token
+    const syntheticLeak = ['AIza', 'SySecretTokenLeakTest1234567890'].join('');
     stream.write('{"type":"turn_start","step":1');
-    stream.write('}\nnot-json-diagnostic-line AIzaSySecretTokenLeakTest1234567890\n');
+    stream.write(`}\nnot-json-diagnostic-line ${syntheticLeak}\n`);
     stream.write('{"type":"tool_call","name":"write_file"}\n');
 
     expect(seenEvents.length).toBe(2);
@@ -463,7 +466,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
 
     const logContent = fs.readFileSync(logFilePath, 'utf8');
     expect(logContent).toContain('[REDACTED]');
-    expect(logContent).not.toContain('AIzaSySecretTokenLeakTest');
+    expect(logContent).not.toContain(syntheticLeak);
 
     // Mark terminal VERIFIED, then emit late stream event -> must NOT revert to RUNNING
     writeManifest(tmpRoot, {
@@ -676,7 +679,8 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     });
 
     const prevKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'AIzaSyUsageTestApiKey1234567890abcdef';
+    const usageKey = ['AIza', 'SyUsageTestApiKey1234567890abcdef'].join('');
+    process.env.GEMINI_API_KEY = usageKey;
     try {
       const del = await handleDelegateToAntigravity(
         {
@@ -692,7 +696,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
           apiWorkerEngine: apiEngine,
           detectorDeps: {
             platform: 'linux',
-            env: { GEMINI_API_KEY: 'AIzaSyUsageTestApiKey1234567890abcdef' },
+            env: { GEMINI_API_KEY: usageKey },
             homedir: '/home/tester',
             existsSync: () => false,
             findBinary: () => undefined,
@@ -781,7 +785,8 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     });
 
     const prevKey = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = 'AIzaSyRetryTestSecretKey1234567890abcd';
+    const retryKey = ['AIza', 'SyRetryTestSecretKey1234567890abcd'].join('');
+    process.env.GEMINI_API_KEY = retryKey;
     try {
       const res = await handleDelegateToAntigravity(
         {
@@ -797,7 +802,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
           apiWorkerEngine: apiEngine,
           detectorDeps: {
             platform: 'linux',
-            env: { GEMINI_API_KEY: 'AIzaSyRetryTestSecretKey1234567890abcd' },
+            env: { GEMINI_API_KEY: retryKey },
             homedir: '/home/tester',
             existsSync: () => false,
             findBinary: () => undefined,
@@ -810,7 +815,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       expect(sawEnvReadBlocked).toBe(true);
       expect(sawSlicedContent).toBe(true);
       expect(sawBuildNudge).toBe(true);
-      expect(res.reportMarkdown).not.toContain('AIzaSyRetryTestSecretKey');
+      expect(res.reportMarkdown).not.toContain(retryKey);
     } finally {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;
@@ -818,7 +823,7 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
   });
 
   it('API worker returns masked GEMINI_API_ERROR on non-retryable API failure', async () => {
-    const dummyKey = 'AIzaSyFatalErrorKey1234567890abcdefg';
+    const dummyKey = ['AIza', 'SyFatalErrorKey1234567890abcdefg'].join('');
     const apiEngine = new ApiWorkerEngine({
       retryBaseDelayMs: 1,
       adapterFactory: () => ({

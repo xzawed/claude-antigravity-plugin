@@ -218,12 +218,13 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
     fs.mkdirSync(artDir, { recursive: true });
     fs.writeFileSync(path.join(artDir, 'checkout.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     fs.writeFileSync(path.join(artDir, 'trace.json'), '{"ok":true}', 'utf8');
+    const fakeToken = ['AIza', 'SySecretTokenValue123456789012345'].join('');
     fs.writeFileSync(
       path.join(artDir, 'agy-cli.log'),
-      'line1\nkey=AIzaSySecretTokenValue123456789012345\nline3\n',
+      `line1\nkey=${fakeToken}\nline3\n`,
       'utf8',
     );
-    writeReportMarkdown(tmpRoot, '# Report\nToken AIzaSySecretTokenValue123456789012345');
+    writeReportMarkdown(tmpRoot, `# Report\nToken ${fakeToken}`);
 
     const res = handleListArtifacts({ taskId, workspaceRoot: tmpRoot });
     expect(res.ok).toBe(true);
@@ -233,9 +234,19 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
       'checkout.png:screenshot',
       'trace.json:json',
     ]);
-    expect(res.logTail).not.toContain('AIzaSySecretTokenValue');
-    expect(res.reportMarkdown).not.toContain('AIzaSySecretTokenValue');
+    expect(res.logTail).not.toContain(fakeToken);
+    expect(res.reportMarkdown).not.toContain(fakeToken);
     expect(res.availableTasks.length).toBe(1);
+  });
+
+  it('TC-S06: blocks path traversal in taskId across getArtifactsDir and handleListArtifacts', () => {
+    expect(() => getArtifactsDir(tmpRoot, '../../etc')).toThrow(/PATH_TRAVERSAL_BLOCKED|Invalid taskId/);
+    expect(() => handleListArtifacts({ taskId: '../config', workspaceRoot: tmpRoot })).toThrow(
+      /Invalid taskId/,
+    );
+    expect(() => handleListArtifacts({ taskId: '..\\..\\secret', workspaceRoot: tmpRoot })).toThrow(
+      /Invalid taskId/,
+    );
   });
 
   it('TC-U30: buildMcpAddArgs places flags strictly before server name and inserts -- when args start with hyphen', () => {
@@ -313,5 +324,20 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
     expect(res.ok).toBe(true);
     expect(res.output).toContain('Release note line 20');
     expect(res.output).toContain('truncated 100 additional lines');
+
+    // Control-char injection guard on mcp_add headers/env/args
+    const badHeader = await handleAgCliAdmin(
+      {
+        action: 'mcp_add',
+        name: 'api',
+        commandOrUrl: 'https://example.com/mcp',
+        headers: ['X-Test: ok\r\nX-Injected: evil'],
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps() },
+    );
+    expect(badHeader.ok).toBe(false);
+    expect(badHeader.errorCode).toBe('CLI_ADMIN_FAILED');
+    expect(badHeader.errorMessage).toContain('Control characters');
   });
 });

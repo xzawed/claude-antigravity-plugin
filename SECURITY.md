@@ -6,7 +6,8 @@ Security updates are actively maintained for the latest minor release of the `1.
 
 | Version | Supported |
 | :--- | :---: |
-| `1.x` (current `main`) | ✅ Yes |
+| `1.4.x` (current `main`) | ✅ Yes |
+| `1.0.x` – `1.3.x` | ⚠️ Upgrade to latest `1.4.x` |
 | `< 1.0.0` | ❌ No |
 
 ---
@@ -15,12 +16,12 @@ Security updates are actively maintained for the latest minor release of the `1.
 
 **Please do not report security vulnerabilities through public GitHub issues or pull requests.**
 
-If you discover a security vulnerability (such as a `lockedPaths` traversal bypass, symlink escape, shell command injection, Git Guard data loss, or API key leak):
+If you discover a security vulnerability (such as a `lockedPaths` or `taskId` traversal bypass, symlink escape, shell command injection, Git Guard data loss, OAuth code/token exposure, or API key leak):
 
 1. Open a private report via **GitHub Security Advisories** (`Security` tab → `Report a vulnerability`) on this repository:
    - `https://github.com/xzawed/claude-antigravity-plugin/security/advisories/new`
 2. Include as much detail as possible:
-   - Affected component/file (e.g., `server/src/path-guard.ts`, `server/src/engines/api-worker.ts`)
+   - Affected component/file (e.g., `server/src/path-guard.ts`, `server/src/bridge-fs.ts`, `server/src/auth.ts`, `server/src/cli-admin.ts`, `server/src/engines/api-worker.ts`)
    - OS and Node.js version
    - Minimal reproduction steps or proof-of-concept payload
    - Potential impact and suggested remediation (if known)
@@ -33,21 +34,26 @@ If you discover a security vulnerability (such as a `lockedPaths` traversal bypa
 
 ---
 
-## Security Architecture & Boundaries
+## Security Architecture & Boundaries (`v1.4.0`)
 
-This plugin delegates file edits and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S05`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S07`):
 
-1. **Fail-Closed `lockedPaths` Isolation (`server/src/path-guard.ts`):**
+1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
+   - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
    - Canonicalizes target paths with `path.resolve` + `fs.realpathSync` to block `../` traversal and symlink/junction escapes outside the workspace or `lockedPaths`.
-   - Unconditionally blocks writes to `.git/**`, `.env`, `.env.*`, `node_modules/**`, and `.ag-bridge/config.json`.
-   - Blocks reads of `.env` secrets, `.ssh`, `*.pem`, `*.key`, and SSH private keys.
-2. **Restricted Verification Shell (`server/src/engines/api-worker.ts`):**
-   - `run_command` validates commands against a strict allowlist (`npm run`/`test`, `pnpm`, `yarn`, `bun`, `npx tsc`/`eslint`/`prettier`/`vitest`/`jest`/`next`/`vite`) and rejects shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `<`, `>`, `^`, `%`, `!`) and destructive binaries (`rm`, `git`, `curl`, `wget`, `powershell`, `bash`, `sudo`).
-   - Strips `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` from child process environments.
-3. **Secret Redaction & Local Isolation (`server/src/config.ts`, `server/src/bridge-fs.ts`):**
-   - `.ag-bridge/` is automatically added to `.gitignore`.
-   - `maskSecrets()` redacts configured API keys and Google API key patterns (`AIza...`) to `[REDACTED]` across MCP responses, `report.md`, `agy-cli.log`, and `stderr`.
-4. **Lossless Rollback (`server/src/git-guard.ts`):**
+   - Unconditionally blocks writes to `.git/**`, `.env`, `.env.*`, `node_modules/**`, and `.ag-bridge/config.json`, and blocks reads of `.env*`, `.ssh`, `*.pem`, `*.key`, and SSH private keys.
+   - Strictly validates `taskId` (`assertSafeTaskId`) against `^[a-zA-Z0-9._-]{1,128}$` without `..` segments in `getArtifactsDir`, `readArchivedManifest`, and `archiveManifest` so `list_ag_artifacts`, `get_ag_job`, and `rollback_ag_task` cannot escape `.ag-bridge/`.
+2. **Restricted Verification Shell & Safe Subprocess Spawning (`server/src/engines/api-worker.ts`, `server/src/cli-admin.ts`, `server/src/engines/subscription.ts`):**
+   - `run_command` validates commands against a strict build/typecheck/lint/test allowlist and rejects shell metacharacters and destructive binaries (`rm`, `git`, `curl`, `wget`, `powershell`, `bash`, `sudo`).
+   - All subprocess executions default to `shell: false` (with quoted `cmd.exe /d /s /c` wrapping only for Windows `.cmd`/`.bat` shims).
+   - `ag_cli_admin` validates server names, rejects CR/LF/NUL control characters in `mcp_add` arguments/env/headers, defaults `mcp_sync_from_claude` to `dryRun: true`, and skips self-registration of `antigravity-delegate` to prevent recursive loops.
+   - Strips `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` from API worker child environments.
+3. **Authentication, Permissions & Secret Redaction (`server/src/auth.ts`, `server/src/config.ts`):**
+   - `/ag-login` delegates Google OAuth exclusively to official `agy acp --login` (storing tokens in the OS native keyring) and never logs or echoes manual OAuth authorization codes.
+   - `--dangerously-skip-permissions` (`always-proceed`) is **disabled by default** (`agy_dangerously_skip_permissions: false`), requires explicit opt-in, emits an audit warning, and remains paired with lossless Git Guard snapshots.
+   - `maskSecrets()` redacts configured secrets plus Google API keys (`AIza...`), Google OAuth tokens (`ya29....`) & authorization codes (`4/0...`), OpenAI/Anthropic keys (`sk-...`), GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`), and `Bearer` headers across MCP responses, `report.md`, `agy-cli.log`, and `stderr`.
+4. **Lossless Rollback & Process Hygiene (`server/src/git-guard.ts`, `server/src/jobs.ts`, `server/src/sessions.ts`):**
    - Snapshots working trees via `git stash create` pinned under `refs/ag-bridge/checkpoints/<taskId>` without altering `HEAD` or the user's `git stash list`, and preserves pre-existing untracked files on rollback.
+   - Automatically disposes pending auth sessions, background jobs, and persistent `stream-json` workers on MCP server exit.
 5. **Dependency Hygiene:**
-   - All dependencies are audited via `npm --prefix server audit` (currently **0 known vulnerabilities**).
+   - All dependencies are audited via `npm --prefix server audit` (**0 known vulnerabilities**), and GitHub Actions CI runs with least-privilege `permissions: contents: read`.

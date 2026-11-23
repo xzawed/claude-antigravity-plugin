@@ -11,6 +11,24 @@ import {
 
 export const BRIDGE_DIR_NAME = '.ag-bridge';
 const MAX_HISTORY_ITEMS = 20;
+const SAFE_TASK_ID_RE = /^[a-zA-Z0-9._-]{1,128}$/;
+
+export function assertSafeTaskId(taskId: string): string {
+  const trimmed = taskId.trim();
+  if (
+    !trimmed ||
+    !SAFE_TASK_ID_RE.test(trimmed) ||
+    trimmed === '.' ||
+    trimmed === '..' ||
+    trimmed.includes('..')
+  ) {
+    throw new AgPluginError(
+      'PATH_TRAVERSAL_BLOCKED',
+      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal segments.`,
+    );
+  }
+  return trimmed;
+}
 
 export function getBridgeDir(workspaceRoot: string): string {
   return path.join(workspaceRoot, BRIDGE_DIR_NAME);
@@ -30,7 +48,7 @@ export function getReportPath(workspaceRoot: string): string {
 
 export function getArtifactsDir(workspaceRoot: string, taskId?: string): string {
   const base = path.join(getBridgeDir(workspaceRoot), 'artifacts');
-  return taskId ? path.join(base, taskId) : base;
+  return taskId ? path.join(base, assertSafeTaskId(taskId)) : base;
 }
 
 export function getHistoryDir(workspaceRoot: string): string {
@@ -164,8 +182,9 @@ export function writeManifest(workspaceRoot: string, manifest: BridgeManifest): 
 
 export function archiveManifest(workspaceRoot: string, manifest: BridgeManifest): void {
   ensureBridgeDirs(workspaceRoot);
+  const safeId = assertSafeTaskId(manifest.taskId);
   const historyDir = getHistoryDir(workspaceRoot);
-  const archivePath = path.join(historyDir, `${manifest.taskId}.json`);
+  const archivePath = path.join(historyDir, `${safeId}.json`);
   atomicWriteFile(archivePath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   // Prune old history files beyond MAX_HISTORY_ITEMS
@@ -188,7 +207,8 @@ export function archiveManifest(workspaceRoot: string, manifest: BridgeManifest)
 }
 
 export function readArchivedManifest(workspaceRoot: string, taskId: string): BridgeManifest | null {
-  const archivePath = path.join(getHistoryDir(workspaceRoot), `${taskId}.json`);
+  const safeId = assertSafeTaskId(taskId);
+  const archivePath = path.join(getHistoryDir(workspaceRoot), `${safeId}.json`);
   return readJsonWithRetry<BridgeManifest>(archivePath);
 }
 
