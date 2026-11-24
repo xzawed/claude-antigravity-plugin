@@ -4,6 +4,7 @@ import path from 'node:path';
 import { generateTaskId } from './bridge-fs.js';
 import { loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
+import { requireExecutable } from './exec-path.js';
 import { buildCliSpawnSpec } from './engines/subscription.js';
 import { createCheckpoint } from './git-guard.js';
 import {
@@ -104,7 +105,7 @@ function killSessionProcess(child: ChildProcess, platform: NodeJS.Platform): voi
   }
   try {
     if (platform === 'win32') {
-      execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      execFileSync(requireExecutable('taskkill'), ['/pid', String(child.pid), '/T', '/F'], {
         stdio: 'ignore',
         timeout: 5000,
       });

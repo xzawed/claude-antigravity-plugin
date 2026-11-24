@@ -8,6 +8,7 @@ import {
   writeReportMarkdown,
 } from '../bridge-fs.js';
 import { maskSecrets, resolveApiKey } from '../config.js';
+import { requireExecutable, windowsShell } from '../exec-path.js';
 import { listGitChangedFiles } from '../git-guard.js';
 import { assertReadablePath, assertWritablePath } from '../path-guard.js';
 import { AgPluginError, BridgeManifest, ExecutionMetrics, TokenUsage } from '../types.js';
@@ -220,7 +221,7 @@ function killProcessTree(pid: number | undefined, isWin: boolean): void {
   if (!pid) return;
   try {
     if (isWin) {
-      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      execFileSync(requireExecutable('taskkill'), ['/pid', String(pid), '/T', '/F'], {
         stdio: 'ignore',
         timeout: 5000,
       });
@@ -244,7 +245,9 @@ export async function defaultCommandRunner(
   const { bin, args } = validateCommandPolicy(command);
   const env = createSanitizedEnv();
   const isWin = process.platform === 'win32';
-  const execBin = isWin ? 'cmd.exe' : bin;
+  // The interpreter is an absolute path (TC-S15). `bin` itself stays a name: the allowlisted
+  // build/test tools run the workspace's own scripts and configs by design.
+  const execBin = isWin ? windowsShell(env) : bin;
   const execArgs = isWin ? ['/d', '/s', '/c', bin, ...args] : args;
 
   return new Promise<CommandExecResult>((resolve) => {

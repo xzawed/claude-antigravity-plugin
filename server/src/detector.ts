@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveApiKey } from './config.js';
+import { absolutePathDirs } from './exec-path.js';
 import {
   AgPluginError,
   BridgeConfig,
@@ -25,19 +26,9 @@ export function findBinaryInPath(
   env: NodeJS.ProcessEnv = process.env,
   existsSyncFn: (p: string) => boolean = fs.existsSync,
 ): string | undefined {
-  // Handle Windows case-insensitive PATH/Path env var lookup
-  const pathKey =
-    Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const rawPath = env[pathKey];
-  if (!rawPath) {
-    return undefined;
-  }
-
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
-  const dirs = rawPath
-    .split(pathApi.delimiter)
-    .map((d) => d.trim().replace(/^"|"$/g, ''))
-    .filter(Boolean);
+  // Fully qualified entries only: "." or "bin" would find an agy the opened workspace ships (TC-S13).
+  const dirs = absolutePathDirs(platform, env);
 
   const extensions =
     platform === 'win32'

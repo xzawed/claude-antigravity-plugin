@@ -87,6 +87,21 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(foundPosix).toBe(posixBin);
   });
 
+  it('TC-S13: findBinaryInPath ignores relative PATH entries, so an agy the workspace ships is never detected', () => {
+    // "." and "bin" resolve against the cwd — the opened repository. Each holds a planted agy here.
+    const plantedWin = new Set(['agy.exe', 'bin\\agy.exe', 'C:\\Tools\\agy.exe']);
+    expect(
+      findBinaryInPath('agy', 'win32', { Path: '.;bin;C:\\Tools', PATHEXT: '.EXE;.CMD' }, (p) =>
+        plantedWin.has(p),
+      ),
+    ).toBe('C:\\Tools\\agy.exe');
+
+    const plantedPosix = new Set(['agy', 'bin/agy', '/usr/local/bin/agy']);
+    expect(
+      findBinaryInPath('agy', 'linux', { PATH: '.:bin:/usr/local/bin' }, (p) => plantedPosix.has(p)),
+    ).toBe('/usr/local/bin/agy');
+  });
+
   it('TC-U13: infers cliBinary when subscription.app_path explicitly overrides agy or antigravity', () => {
     const customAgy = 'C:\\CustomTools\\agy.exe';
     const agyRes = detectEnvironment(

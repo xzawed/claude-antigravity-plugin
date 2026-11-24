@@ -2,6 +2,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
+import { requireExecutable, windowsShell } from '../exec-path.js';
 import {
   getArtifactsDir,
   getBridgeDir,
@@ -78,25 +79,39 @@ export function buildHandoffPrompt(ctx: ExecutionContext): string {
   return `/claude-handoff Execute delegated task ${ctx.manifest.taskId} from .ag-bridge/dispatch.md and update .ag-bridge/manifest.json and .ag-bridge/report.md when done.`;
 }
 
+// Helper programs are launched by absolute path (exec-path.ts): requireExecutable throws where a
+// bare name would have failed with ENOENT, so each existing catch keeps its meaning.
 function tryCopyToClipboard(text: string, platform: NodeJS.Platform): boolean {
   try {
     if (platform === 'darwin') {
-      execFileSync('pbcopy', [], { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 3000 });
+      execFileSync(requireExecutable('pbcopy'), [], {
+        input: text,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        timeout: 3000,
+      });
       return true;
     }
     if (platform === 'win32') {
-      execFileSync('clip', [], { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 3000 });
+      execFileSync(requireExecutable('clip'), [], {
+        input: text,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        timeout: 3000,
+      });
       return true;
     }
     try {
-      execFileSync('xclip', ['-selection', 'clipboard'], {
+      execFileSync(requireExecutable('xclip'), ['-selection', 'clipboard'], {
         input: text,
         stdio: ['pipe', 'ignore', 'ignore'],
         timeout: 3000,
       });
       return true;
     } catch {
-      execFileSync('wl-copy', [], { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 3000 });
+      execFileSync(requireExecutable('wl-copy'), [], {
+        input: text,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        timeout: 3000,
+      });
       return true;
     }
   } catch {
@@ -110,12 +125,12 @@ function tryDesktopNotify(title: string, message: string, platform: NodeJS.Platf
       const escapedMsg = message.replace(/"/g, '\\"');
       const escapedTitle = title.replace(/"/g, '\\"');
       execFileSync(
-        'osascript',
+        requireExecutable('osascript'),
         ['-e', `display notification "${escapedMsg}" with title "${escapedTitle}"`],
         { stdio: 'ignore', timeout: 3000 },
       );
     } else if (platform === 'linux') {
-      execFileSync('notify-send', [title, message], { stdio: 'ignore', timeout: 3000 });
+      execFileSync(requireExecutable('notify-send'), [title, message], { stdio: 'ignore', timeout: 3000 });
     }
   } catch {
     // Best-effort notification only
@@ -494,15 +509,16 @@ export function buildCliSpawnSpec(
   cliPath: string,
   args: string[],
   platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
 ): { command: string; args: string[]; windowsHide: boolean; windowsVerbatimArguments?: boolean } {
   // Node.js 20.12+/24 on Windows throws EINVAL when spawning .cmd/.bat with shell: false.
   // Wrapping the full command line in outer quotes for `cmd.exe /d /s /c` with
   // windowsVerbatimArguments preserves paths containing spaces (e.g. "C:\Program Files\...")
-  // as well as multi-word arguments.
+  // as well as multi-word arguments. The interpreter itself is an absolute path (TC-S15).
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(cliPath)) {
     const innerCmd = [quoteForWindowsCmd(cliPath), ...args.map(quoteForWindowsCmd)].join(' ');
     return {
-      command: 'cmd.exe',
+      command: windowsShell(env),
       args: ['/d', '/s', '/c', `"${innerCmd}"`],
       windowsHide: true,
       windowsVerbatimArguments: true,
@@ -689,7 +705,7 @@ async function tryCliTrigger(
         }
         try {
           if (ctx.detection.platform === 'win32') {
-            execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+            execFileSync(requireExecutable('taskkill'), ['/pid', String(child.pid), '/T', '/F'], {
               stdio: 'ignore',
               timeout: 5000,
             });
@@ -797,7 +813,7 @@ function tryOsIpcTrigger(ctx: ExecutionContext): boolean {
   try {
     if (platform === 'darwin') {
       tryCopyToClipboard(prompt, platform);
-      execFileSync('osascript', ['-e', 'tell application "Antigravity" to activate'], {
+      execFileSync(requireExecutable('osascript'), ['-e', 'tell application "Antigravity" to activate'], {
         stdio: 'ignore',
         timeout: 3000,
       });
@@ -806,7 +822,7 @@ function tryOsIpcTrigger(ctx: ExecutionContext): boolean {
     if (platform === 'win32') {
       tryCopyToClipboard(prompt, platform);
       execFileSync(
-        'powershell',
+        requireExecutable('powershell'),
         [
           '-NoProfile',
           '-Command',

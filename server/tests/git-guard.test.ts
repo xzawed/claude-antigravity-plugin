@@ -24,7 +24,37 @@ function initRepo(dir: string): void {
   git(dir, ['commit', '-m', 'Initial commit']);
 }
 
-describe('git-guard (TC-U07 ~ TC-U09)', () => {
+/**
+ * Plant a fake `git` in `dir` that answers `git status …` with a porcelain header naming itself.
+ * Windows: a Node binary named git.exe runs `<cwd>/status` as its script.
+ */
+function plantFakeGit(dir: string): void {
+  if (process.platform === 'win32') {
+    try {
+      fs.linkSync(process.execPath, path.join(dir, 'git.exe'));
+    } catch {
+      fs.copyFileSync(process.execPath, path.join(dir, 'git.exe'));
+    }
+    fs.writeFileSync(path.join(dir, 'status'), "process.stdout.write('## planted-by-workspace\\n');\n");
+  } else {
+    fs.writeFileSync(path.join(dir, 'git'), "#!/bin/sh\necho '## planted-by-workspace'\n", { mode: 0o755 });
+  }
+}
+
+/** Run `fn` with a relative entry prepended to PATH (measured: a bare `git` then runs a planted one). */
+function withRelativePathEntry<T>(entry: string, fn: () => T): T {
+  const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const saved = process.env[key];
+  process.env[key] = `${entry}${path.delimiter}${saved ?? ''}`;
+  try {
+    return fn();
+  } finally {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+  }
+}
+
+describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
   let tmpRoot: string;
 
   beforeEach(() => {
@@ -112,6 +142,21 @@ describe('git-guard (TC-U07 ~ TC-U09)', () => {
     expect(res.warning).toContain('not a Git repository');
 
     expect(() => createCheckpoint(tmpRoot, 'task-nogit-2', 'required')).toThrow(AgPluginError);
+  });
+
+  it('TC-S14: a git the workspace ships never runs, even with "." on PATH (non-repo folder)', () => {
+    plantFakeGit(tmpRoot);
+    const info = withRelativePathEntry('.', () => getGitInfo(tmpRoot));
+    expect(info).toEqual({ isGitRepo: false });
+  });
+
+  it('TC-S14b: in a repository that ships a git binary, Git Guard still reads the real branch', () => {
+    initRepo(tmpRoot);
+    const realBranch = git(tmpRoot, ['symbolic-ref', '--short', 'HEAD']); // before planting
+    plantFakeGit(tmpRoot);
+    const info = withRelativePathEntry('.', () => getGitInfo(tmpRoot));
+    expect(info.isGitRepo).toBe(true);
+    expect(info.currentBranch).toBe(realBranch);
   });
 
   it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {
