@@ -19265,7 +19265,7 @@ var require_util3 = __commonJS({
     exports.isValidFile = isValidFile;
     exports.getWellKnownCertificateConfigFileLocation = getWellKnownCertificateConfigFileLocation;
     var fs16 = __require("fs");
-    var os3 = __require("os");
+    var os4 = __require("os");
     var path16 = __require("path");
     var WELL_KNOWN_CERTIFICATE_CONFIG_FILE = "certificate_config.json";
     var CLOUDSDK_CONFIG_DIRECTORY = "gcloud";
@@ -19363,7 +19363,7 @@ var require_util3 = __commonJS({
       return path16.join(configDir, WELL_KNOWN_CERTIFICATE_CONFIG_FILE);
     }
     function _isWindows() {
-      return os3.platform().startsWith("win");
+      return os4.platform().startsWith("win");
     }
   }
 });
@@ -24746,7 +24746,7 @@ var require_googleauth = __commonJS({
     var fs16 = __require("fs");
     var gaxios_1 = require_src2();
     var gcpMetadata = require_src4();
-    var os3 = __require("os");
+    var os4 = __require("os");
     var path16 = __require("path");
     var crypto_1 = require_crypto3();
     var computeclient_1 = require_computeclient();
@@ -25255,7 +25255,7 @@ var require_googleauth = __commonJS({
        * @api private
        */
       _isWindows() {
-        const sys = os3.platform();
+        const sys = os4.platform();
         if (sys && sys.length >= 3) {
           if (sys.substring(0, 3).toLowerCase() === "win") {
             return true;
@@ -59609,6 +59609,7 @@ function windowsShell(env = process.env) {
 // src/git-guard.ts
 import { execFileSync } from "node:child_process";
 import fs3 from "node:fs";
+import os from "node:os";
 import path3 from "node:path";
 var NO_REPO_COMMANDS = [
   "-c",
@@ -59634,14 +59635,46 @@ function runGit(workspaceRoot, args, input2) {
     maxBuffer: 64 * 1024 * 1024
   }).trimEnd();
 }
+function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "function Get-Procs { @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, @{ n = 'Created'; e = { $_.CreationDate.ToUniversalTime() } }) }",
+    "$all = Get-Procs",
+    `$from = [datetime]::Parse('${startedAt.toISOString()}').ToUniversalTime().AddSeconds(-1)`,
+    `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddMilliseconds(250)`,
+    `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.Created -ge $from -and $_.Created -le $to })`,
+    "$found = @()",
+    "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created }) }",
+    "foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }",
+    "$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })",
+    "foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }",
+    "$found.Count + $late.Count"
+  ].join("; ");
+  try {
+    const out = execFileSync(requireExecutable("powershell"), ["-NoProfile", "-NonInteractive", "-Command", script], {
+      cwd: os.tmpdir(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3e4,
+      windowsHide: true
+    });
+    const ended = Number(out.trim().split(/\r?\n/).pop());
+    return Number.isInteger(ended) && ended > 0 ? ended : 0;
+  } catch {
+    return 0;
+  }
+}
 function tryRunGit(workspaceRoot, args, input2) {
+  const startedAt = /* @__PURE__ */ new Date();
   try {
     const stdout = runGit(workspaceRoot, args, input2);
-    return { ok: true, stdout, stderr: "", timedOut: false };
+    return { ok: true, stdout, stderr: "", timedOut: false, leftoversEnded: 0 };
   } catch (err) {
     const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
     const timedOut = Boolean(err && typeof err === "object" && err.code === "ETIMEDOUT");
-    return { ok: false, stdout: "", stderr, timedOut };
+    const pid = err && typeof err === "object" ? err.pid : void 0;
+    const leftoversEnded = timedOut && process.platform === "win32" && typeof pid === "number" ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : 0;
+    return { ok: false, stdout: "", stderr, timedOut, leftoversEnded };
   }
 }
 var isBridgePath = (p) => p === ".ag-bridge" || p.startsWith(".ag-bridge/");
@@ -59651,7 +59684,10 @@ function isTrackedFile(workspaceRoot, pathspec) {
 function getGitInfo(workspaceRoot) {
   const statusRes = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-b"]);
   if (!statusRes.ok) {
-    return statusRes.timedOut ? { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms` } : { isGitRepo: false };
+    if (!statusRes.timedOut) return { isGitRepo: false };
+    const ended = statusRes.leftoversEnded;
+    const cleanup = ended > 0 ? ` (ended ${ended} process${ended === 1 ? "" : "es"} it left running)` : "";
+    return { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` };
   }
   const lines = statusRes.stdout.split(/\r?\n/).filter((l) => l.length > 0);
   const header = lines[0] ?? "";
@@ -60432,12 +60468,12 @@ function handleListArtifacts(input2 = {}) {
 import { spawn as spawn2 } from "node:child_process";
 import crypto3 from "node:crypto";
 import fs9 from "node:fs";
-import os2 from "node:os";
+import os3 from "node:os";
 import path9 from "node:path";
 
 // src/detector.ts
 import fs7 from "node:fs";
-import os from "node:os";
+import os2 from "node:os";
 import path7 from "node:path";
 function findBinaryInPath(name, platform = process.platform, env = process.env, existsSyncFn = fs7.existsSync) {
   const pathApi = platform === "win32" ? path7.win32 : path7.posix;
@@ -60462,7 +60498,7 @@ function getDefaultDetectorDeps() {
   return {
     platform,
     env,
-    homedir: os.homedir(),
+    homedir: os2.homedir(),
     existsSync: (p) => fs7.existsSync(p),
     findBinary: (name) => findBinaryInPath(name, platform, env, fs7.existsSync)
   };
@@ -61692,7 +61728,7 @@ function extractOAuthUrl(text) {
   }
   return void 0;
 }
-function readAgySettingsAuthHints(homeDir = os2.homedir()) {
+function readAgySettingsAuthHints(homeDir = os3.homedir()) {
   const settingsPath = path9.join(homeDir, ".gemini", "antigravity-cli", "settings.json");
   try {
     if (!fs9.existsSync(settingsPath)) {

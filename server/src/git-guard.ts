@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { requireExecutable } from './exec-path.js';
 import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './types.js';
@@ -46,14 +47,61 @@ function runGit(workspaceRoot: string, args: string[], input?: string): string {
   }).trimEnd();
 }
 
+/**
+ * End what a timed-out git left running on Windows, and say how many processes that was.
+ *
+ * `git` on PATH is usually Git for Windows' launcher (cmd\git.exe). The time limit kills only the
+ * launcher; the real git it started runs on through its filters and holds the work tree (measured:
+ * still running after the cut, gone at 6.9 s; TC-U34b). Running mingw64\bin\git.exe directly is no
+ * way out: with the launcher's PATH its sh filters fail ("cannot spawn sh") while status and
+ * `stash create` still exit 0.
+ *
+ * One PowerShell walks the ParentProcessId links down from the launcher and stops each process
+ * found. A child must have been created between the launcher's start and the cut, and a deeper one
+ * after its parent, so a reused pid is never followed. Best effort: 0 when anything fails.
+ */
+function endWindowsLeftovers(launcherPid: number, startedAt: Date, cutAt: Date): number {
+  // Times are compared in UTC throughout (a local-time compare breaks across a DST fall-back), the
+  // window is tight (the launcher's children were all made before the cut), and a second look stops
+  // what a found process started between the listing and its stop (reviewers' points, ARC-003 §5.4).
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "function Get-Procs { @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, @{ n = 'Created'; e = { $_.CreationDate.ToUniversalTime() } }) }",
+    '$all = Get-Procs',
+    `$from = [datetime]::Parse('${startedAt.toISOString()}').ToUniversalTime().AddSeconds(-1)`,
+    `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddMilliseconds(250)`,
+    `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.Created -ge $from -and $_.Created -le $to })`,
+    '$found = @()',
+    'while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created }) }',
+    'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }',
+    '$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })',
+    'foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }',
+    '$found.Count + $late.Count',
+  ].join('; ');
+  try {
+    const out = execFileSync(requireExecutable('powershell'), ['-NoProfile', '-NonInteractive', '-Command', script], {
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 30_000,
+      windowsHide: true,
+    });
+    const ended = Number(out.trim().split(/\r?\n/).pop());
+    return Number.isInteger(ended) && ended > 0 ? ended : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function tryRunGit(
   workspaceRoot: string,
   args: string[],
   input?: string,
-): { ok: boolean; stdout: string; stderr: string; timedOut: boolean } {
+): { ok: boolean; stdout: string; stderr: string; timedOut: boolean; leftoversEnded: number } {
+  const startedAt = new Date();
   try {
     const stdout = runGit(workspaceRoot, args, input);
-    return { ok: true, stdout, stderr: '', timedOut: false };
+    return { ok: true, stdout, stderr: '', timedOut: false, leftoversEnded: 0 };
   } catch (err) {
     const stderr =
       err && typeof err === 'object' && 'stderr' in err
@@ -62,7 +110,12 @@ function tryRunGit(
           ? err.message
           : String(err);
     const timedOut = Boolean(err && typeof err === 'object' && (err as { code?: unknown }).code === 'ETIMEDOUT');
-    return { ok: false, stdout: '', stderr, timedOut };
+    const pid = err && typeof err === 'object' ? (err as { pid?: unknown }).pid : undefined;
+    const leftoversEnded =
+      timedOut && process.platform === 'win32' && typeof pid === 'number'
+        ? endWindowsLeftovers(pid, startedAt, new Date())
+        : 0;
+    return { ok: false, stdout: '', stderr, timedOut, leftoversEnded };
   }
 }
 
@@ -77,9 +130,10 @@ export function getGitInfo(workspaceRoot: string): GitStatusInfo {
   // Single subprocess (`git status --porcelain=v1 -b`) reduces latency ~3x vs 3 separate git calls
   const statusRes = tryRunGit(workspaceRoot, ['status', '--porcelain=v1', '-b']);
   if (!statusRes.ok) {
-    return statusRes.timedOut
-      ? { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms` }
-      : { isGitRepo: false };
+    if (!statusRes.timedOut) return { isGitRepo: false };
+    const ended = statusRes.leftoversEnded;
+    const cleanup = ended > 0 ? ` (ended ${ended} process${ended === 1 ? '' : 'es'} it left running)` : '';
+    return { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` };
   }
 
   const lines = statusRes.stdout.split(/\r?\n/).filter((l) => l.length > 0);
