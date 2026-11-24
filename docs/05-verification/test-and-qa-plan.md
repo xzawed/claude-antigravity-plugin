@@ -75,7 +75,7 @@
 | `TC-S19` ~ `TC-S19d` | `detector.ts` / `index.ts` / `jobs.ts` / `sessions.ts` | 추적되는 설정 파일이 민감 키를 품은 채 `check_ag_environment` · 위임 · `start_ag_task` · `ag_session` 호출 | 권고·경고에 무시한 키와 해결 방법(`git rm --cached …`) 표시, 엔진은 안전한 기본값으로 실행 | `NFR-001` |
 | `TC-S20` ~ `TC-S20c` | `git-guard.ts` | 저장소 `.git/config`의 `core.fsmonitor` 프로그램 · `.git/hooks/reference-transaction` 훅이 있는 저장소에서 상태 확인·체크포인트; 원격을 `ssh://`+`core.sshCommand`로 바꾼 부분 클론에서 없는 blob이 필요한 롤백 | 어느 것도 실행되지 않음(표식 파일 없음), 체크포인트 ref는 정상 생성, 지연 fetch가 필요한 롤백은 실패로 끝남 | `NFR-001` |
 | `TC-S21` ~ `TC-S21c` | `path-guard.ts` (Windows) | `.env`·`.git`·`node_modules`의 8.3 짧은 이름(`ENV~1`·`GIT~1`·`NODE_M~1`, 8.3이 꺼진 볼륨이면 건너뜀), `.env::$DATA`·`App.tsx:hidden`(대체 데이터 스트림), `.git.`·`.env `·`ui. `(끝 점/공백) | 모두 거부(`PROTECTED_PATH_BLOCKED` 또는 `PATH_TRAVERSAL_BLOCKED`), 일반 점 포함 이름(`App.test.tsx`)은 그대로 허용 | `NFR-001` |
-| `TC-S22`, `TC-S22b` | `git-guard.ts` | 기준선 없는 매니페스트로 롤백(사용자의 untracked 파일 존재); 저장소가 아닌 폴더에서 untracked 목록 요청 | untracked 파일을 하나도 지우지 않고 `untrackedBaselineMissing`; 목록 실패는 `[]`가 아니라 `undefined` | `NFR-001` |
+| `TC-S22` ~ `TC-S22c` | `git-guard.ts` | 기준선 없는 매니페스트로 롤백(사용자의 untracked 파일 존재); 저장소가 아닌 폴더에서 untracked 목록 요청; `core.ignorecase=false` 저장소에서 에이전트가 추적 파일 이름의 대소문자만 바꾼 뒤 롤백(Windows·macOS) | untracked 파일을 하나도 지우지 않고 `untrackedBaselineMissing`; 목록 실패는 `[]`가 아니라 `undefined`; 추적 파일은 롤백 뒤에도 남음 | `NFR-001` |
 
 ---
 

@@ -127,6 +127,8 @@ flowchart TD
      - 목록을 얻지 못하면(오류·시간 초과·출력 초과) `listUntrackedFiles`는 "없음"(`[]`)이 아니라 "모름"(`undefined`)을 돌려준다(`TC-S22b`). 체크포인트 생성 때 모르면 체크포인트를 만들지 않는다.
      - 매니페스트에 기준선이 없으면(이전 버전) untracked 파일을 하나도 지우지 않고 경고한다(`TC-S22`).
      - 예전에는 "모름"을 "없음"으로 다뤘다. 그래서 체크포인트 때 목록이 실패하면 롤백이 모든 untracked 파일을 지울 수 있었다. 실측으로는 untracked 2만 개(경로 1.3MB)에서 이전 목록이 출력 한도(1MiB)를 넘겨 0개를 돌려줬다.
+   - **Windows·macOS에서는 `-c core.ignorecase=true`로 센다.** 저장소 설정이 `core.ignorecase=false`(리눅스에서 가져온 저장소 등)이면, git은 디스크에서 대소문자만 바뀐 추적 파일(`Foo.txt` → `foo.txt`)을 untracked로 내놓는다. 그러면 롤백이 방금 복원한 추적 파일을 지웠다(Antigravity 레그 지적을 실측, `TC-S22c`).
+   - **알려진 한계:** 위임 도중 사용자가 같은 폴더에 새로 만든 untracked 파일도 기준선에 없으므로 롤백이 지운다. 삭제 대신 `.ag-bridge/` 아래로 옮겨 복구 가능하게 하는 것이 다음 개선 후보다.
 4. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제 및 복구된 파일 목록 반환.
 
 ### 5.4 git 호출 시간 제한
