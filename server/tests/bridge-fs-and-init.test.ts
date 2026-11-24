@@ -168,6 +168,21 @@ describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10, TC-S08 ~ TC-S10)', () =
     expect(porcelain(linked)).toBe('');
   });
 
+  it('TC-U04g: an existing info/exclude without a trailing newline (or with CRLF) still gets its patterns on their own lines', () => {
+    for (const existing of ['custom-pattern', 'custom-pattern\r\n']) {
+      const repo = fs.mkdtempSync(path.join(tmpRoot, 'repo-'));
+      initRepo(repo);
+      const exclude = path.join(repo, '.git', 'info', 'exclude');
+      fs.writeFileSync(exclude, existing);
+
+      runCliInit({ workspaceRoot: repo, silent: true, forceTemplate: false, pluginRoot });
+
+      expect(countLines(exclude, 'custom-pattern'), JSON.stringify(existing)).toBe(1);
+      expect(countLines(exclude, '.ag-bridge/'), JSON.stringify(existing)).toBe(1);
+      expect(porcelain(repo), JSON.stringify(existing)).toBe('');
+    }
+  });
+
   it('TC-S08: the SessionStart hook bundle cannot execute programs (no child_process in dist/cli-init.js)', () => {
     // The hook runs in every folder Claude Code opens. Spawning a bare `git` there runs a binary
     // planted in that folder when PATH holds a relative entry such as "." (measured on Windows).
