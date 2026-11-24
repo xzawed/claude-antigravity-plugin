@@ -28,6 +28,11 @@ function tryRunGit(workspaceRoot: string, args: string[]): { ok: boolean; stdout
   }
 }
 
+/** Whether git tracks a file matching `pathspec` (pathspec magic allowed). False outside a repository. */
+export function isTrackedFile(workspaceRoot: string, pathspec: string): boolean {
+  return tryRunGit(workspaceRoot, ['ls-files', '--error-unmatch', '--', pathspec]).ok;
+}
+
 export function getGitInfo(workspaceRoot: string): GitStatusInfo {
   // Single subprocess (`git status --porcelain=v1 -b`) reduces latency ~3x vs 3 separate git calls
   const statusRes = tryRunGit(workspaceRoot, ['status', '--porcelain=v1', '-b']);

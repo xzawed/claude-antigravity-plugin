@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-002` |
-| **버전** | `1.1.0` |
+| **버전** | `1.2.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-23` |
+| **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [시스템 아키텍처](../02-architecture/system-architecture.md), [MCP API 명세](./mcp-tools-api.md), [ADR-002](../06-adr/ADR-002-dual-execution-engine.md), [ADR-003](../06-adr/ADR-003-antigravity-cli-and-paths.md) |
 
 ---
@@ -50,8 +50,8 @@ export interface ExecutionEngine {
 
 ### 2.1 감지 우선순위 (`execution_mode === 'auto'`)
 1. **Subscription Provider 감지 (`detectSubscriptionApp`):**
-   - **사용자 지정 경로 최우선:** `config.subscription.app_path !== 'auto'`이면 해당 경로 존재 여부(`fs.existsSync`) 확인 및 바이너리 타입(`agy` / `antigravity` / `ag`) 자동 추론.
-   - **CLI 바이너리 탐색 순서:** `agy` → `antigravity` → `ag` (순수 JS `PATH` 탐색 + MCP 호스트가 `PATH`를 축소한 경우 OS 표준 설치 경로 폴백).
+   - **사용자 지정 경로 최우선:** `config.subscription.app_path !== 'auto'`이면 해당 경로 존재 여부(`fs.existsSync`)를 확인하고 바이너리 타입(`agy` / `antigravity` / `ag`)을 자동 추론한다. 단, `loadConfig`는 두 경우에 이 값을 `auto`로 되돌린다. 하나는 워크스페이스 밖의 절대 경로가 아닌 값이고, 다른 하나는 저장소가 넣었을 수 있는 설정 파일의 값이다([ARC-003 §7](../02-architecture/security-and-git-guard.md)).
+   - **CLI 바이너리 탐색 순서:** `agy` → `antigravity` → `ag`. 순수 JS `PATH` 탐색은 완전한 절대 경로 항목만 보고([ARC-003 §6](../02-architecture/security-and-git-guard.md)), MCP 호스트가 `PATH`를 축소한 경우 OS 표준 설치 경로로 폴백한다.
    - **데스크톱 앱 기본 경로 탐색:**
      - macOS: `/Applications/Antigravity.app`, `~/Applications/Antigravity.app`
      - Windows: `%LOCALAPPDATA%\agy\bin\agy.exe`, `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`, `%ProgramFiles%\Antigravity\Antigravity.exe`

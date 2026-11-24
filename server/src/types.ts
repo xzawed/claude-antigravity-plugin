@@ -116,6 +116,8 @@ export interface BridgeConfig {
   git_guard: GitGuardPolicy;
   subscription: SubscriptionConfig;
   api: ApiConfig;
+  /** Settings `loadConfig` dropped from `.ag-bridge/config.json`, each with its reason. */
+  ignoredSettings?: string[];
 }
 
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {

@@ -1,4 +1,4 @@
-import { ChildProcess } from 'node:child_process';
+import { ChildProcess, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -60,6 +60,31 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
   afterEach(() => {
     sessionManager.disposeAll();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('TC-S19d: ag_session start reports the settings it ignored from a config git tracks', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpRoot, '.ag-bridge', 'config.json'),
+      JSON.stringify({ subscription: { agy_dangerously_skip_permissions: true } }),
+    );
+    execFileSync('git', ['add', '-f', '.ag-bridge/config.json'], { cwd: tmpRoot, stdio: 'ignore' });
+
+    const res = await handleAgSession(
+      { action: 'start', workspaceRoot: tmpRoot },
+      {
+        sessionManager,
+        detectorDeps: {
+          platform: 'linux',
+          env: {},
+          homedir: '/tmp/nonexistent-home',
+          existsSync: () => false,
+          findBinary: () => undefined,
+        },
+      },
+    );
+    expect(res.warnings.join('\n')).toContain('subscription.agy_dangerously_skip_permissions');
   });
 
   it('TC-U27: buildStreamSessionArgs includes stream-json input/output, skip-permissions, model, and effort', () => {

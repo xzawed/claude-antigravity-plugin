@@ -43,6 +43,37 @@ function resolveRealPathOrNearestParent(targetPath: string): string {
     : realExisting;
 }
 
+/**
+ * The OS's real path (`fs.realpathSync.native`) of `targetPath`, or of its nearest existing parent
+ * with the rest appended. Unlike the JS implementation it normalizes Windows `\\?\` prefixes and 8.3
+ * short names (measured), so two spellings of one folder compare equal.
+ */
+function nativeRealPathOrNearestParent(targetPath: string): string {
+  let current = path.resolve(targetPath);
+  const trailingSegments: string[] = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync.native(current);
+      return trailingSegments.length > 0 ? path.join(real, ...trailingSegments) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return path.resolve(targetPath);
+      }
+      trailingSegments.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** Whether `candidatePath`, resolved through links and path aliases, lies inside `workspaceRoot`. */
+export function isInsideWorkspace(workspaceRoot: string, candidatePath: string): boolean {
+  return isInsideRoot(
+    nativeRealPathOrNearestParent(workspaceRoot),
+    nativeRealPathOrNearestParent(candidatePath),
+  );
+}
+
 function isProtectedWritePath(posixRel: string): boolean {
   const lower = posixRel.toLowerCase();
   const segments = lower.split('/').filter(Boolean);

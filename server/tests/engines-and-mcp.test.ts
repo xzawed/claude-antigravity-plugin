@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -136,6 +137,46 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     expect(res.changedFiles).toContain('src/ui/Card.tsx');
     expect(res.artifacts.some((a) => a.endsWith('dashboard.png'))).toBe(true);
     expect(res.reportMarkdown).toContain('Implemented Card component');
+  });
+
+  it('TC-S19b: a delegation runs with the safe default and reports the setting it ignored from a tracked config', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpRoot, '.ag-bridge', 'config.json'),
+      JSON.stringify({ subscription: { agy_sandbox: false, timeout_sec: 5, poll_interval_ms: 100 } }),
+    );
+    execFileSync('git', ['add', '-f', '.ag-bridge/config.json'], { cwd: tmpRoot, stdio: 'ignore' });
+
+    let sandboxSeen: boolean | undefined;
+    const subEngine = new SubscriptionEngine({
+      triggerFn: async (ctx) => {
+        sandboxSeen = ctx.config.subscription.agy_sandbox;
+        setTimeout(() => {
+          const cur = readManifest(ctx.workspaceRoot);
+          if (cur) writeManifest(ctx.workspaceRoot, { ...cur, status: 'VERIFIED', updatedAt: new Date().toISOString() });
+        }, 50);
+        return { methodUsed: 'custom' };
+      },
+    });
+
+    const res = await handleDelegateToAntigravity(
+      { title: 'Trust check', instructions: 'Change nothing.', modeOverride: 'subscription', workspaceRoot: tmpRoot },
+      {
+        pluginRoot,
+        subscriptionEngine: subEngine,
+        detectorDeps: {
+          platform: 'linux',
+          env: {},
+          homedir: '/home/tester',
+          existsSync: () => false,
+          findBinary: (name) => (name === 'agy' ? '/usr/local/bin/agy' : undefined),
+        },
+      },
+    );
+
+    expect(sandboxSeen).toBe(true);
+    expect(res.warnings.join('\n')).toContain('subscription.agy_sandbox');
   });
 
   it('TC-I03: times out cleanly in Subscription mode and transitions manifest to FAILED(TASK_TIMEOUT)', async () => {

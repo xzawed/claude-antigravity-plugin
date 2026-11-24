@@ -2,7 +2,7 @@ import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { generateTaskId } from './bridge-fs.js';
-import { loadConfig, maskSecrets } from './config.js';
+import { describeIgnoredSettings, loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
 import { requireExecutable } from './exec-path.js';
 import { buildCliSpawnSpec } from './engines/subscription.js';
@@ -649,6 +649,10 @@ export async function handleAgSession(
   // action === 'start'
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
   const config = loadConfig(workspaceRoot, detDeps.env);
+  const ignoredAdvice = describeIgnoredSettings(config);
+  if (ignoredAdvice) {
+    warnings.push(ignoredAdvice);
+  }
   const detection = detectEnvironment(config, 'subscription', detDeps);
 
   if (!detection.subscription.detected || detection.subscription.cliBinary !== 'agy' || !detection.subscription.cliPath) {

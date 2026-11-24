@@ -442,6 +442,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | **세션 뒤 `git status`에 ` M .gitignore`·`?? .agent/`가 보임** | v1.4.0 이하는 추적 파일 `.gitignore`에 `# Antigravity Claude Bridge` 블록을 덧붙이고 `.agent/workflows/claude-handoff.md`를 추적되지 않은 채로 남겼음 | v1.4.1 이상으로 업데이트하면 로컬 전용 `.git/info/exclude`를 쓰므로 다음 세션 시작 때 `.agent/`가 사라집니다. 그다음 `.gitignore`에서 `# Antigravity Claude Bridge` 3줄 블록을 지우세요(그 파일의 유일한 변경이면 `git restore .gitignore`). |
 | **업데이트했는데 새 커맨드가 안 보임** | `server/dist/` 재빌드 또는 플러그인 리로드 누락 | 위 [업데이트 블록](#-업데이트-방법-복사해서-바로-실행) 실행 후 Claude Code에서 `/reload-plugins` 입력 |
 | **`BRIDGE_BUSY`** | 현재 폴더에서 이전 위임 작업이 아직 `RUNNING` 중 | `/ag-jobs`로 진행 상황 확인하거나 `/ag-cancel`로 안전 중단 |
+| **`/ag-status`가 `.ag-bridge/config.json` 설정 일부를 무시했다고 알림** | 파일이 git에 추적되거나 링크로 닿아 저장소가 넣었을 수 있음 — 그런 파일에서는 실행 프로그램·비밀을 고르거나 안전 기본값을 푸는 설정을 무시합니다([SECURITY.md](./SECURITY.md)) | 설정 파일을 git에서 빼세요: `git rm --cached .ag-bridge/config.json`. `app_path`는 프로젝트 밖의 `agy`를 가리키게 하거나, 해당 옵션을 호출마다 직접 넘기세요. |
 | **Windows 공백 포함 폴더 경로 오류** | 경로에 큰따옴표 누락 | 경로 전체를 큰따옴표로 감싸세요: `claude --plugin-dir "C:\My Plugins\claude-antigravity-plugin"` |
 
 ---
