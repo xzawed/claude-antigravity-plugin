@@ -59614,7 +59614,7 @@ function windowsShell(env = process.env) {
 }
 
 // src/git-guard.ts
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs3 from "node:fs";
 import os from "node:os";
 import path3 from "node:path";
@@ -59631,16 +59631,91 @@ function gitTimeoutMs() {
   const configured = Number(process.env.AG_GIT_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
 }
-function runGit(workspaceRoot, args, input2) {
-  return execFileSync(requireExecutable("git"), [...NO_REPO_COMMANDS, ...args], {
-    cwd: workspaceRoot,
-    encoding: "utf8",
-    stdio: [input2 === void 0 ? "ignore" : "pipe", "pipe", "pipe"],
-    input: input2,
-    timeout: gitTimeoutMs(),
-    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
-    maxBuffer: 64 * 1024 * 1024
-  }).trimEnd();
+function scanPosixGroup(pgid) {
+  const psPath = resolveExecutable("ps");
+  if (!psPath) {
+    return { members: 0, includesSelf: false };
+  }
+  try {
+    const res = spawnSync(psPath, ["-eo", "pid=,pgid="], {
+      cwd: os.tmpdir(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5e3
+    });
+    if (res.status !== 0 || typeof res.stdout !== "string") {
+      return { members: 0, includesSelf: false };
+    }
+    let members2 = 0;
+    let includesSelf = false;
+    for (const line of res.stdout.split(/\r?\n/)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 2 && Number(parts[1]) === pgid) {
+        if (Number(parts[0]) === process.pid) {
+          includesSelf = true;
+        } else {
+          members2 += 1;
+        }
+      }
+    }
+    return { members: members2, includesSelf };
+  } catch {
+    return { members: 0, includesSelf: false };
+  }
+}
+function buildPosixGitCommand(gitBin, gitArgs) {
+  const setsidPath = resolveExecutable("setsid");
+  if (setsidPath) {
+    return {
+      command: setsidPath,
+      args: ["--", gitBin, ...gitArgs],
+      isolatedGroup: true
+    };
+  }
+  const perlPath = resolveExecutable("perl");
+  if (perlPath) {
+    return {
+      command: perlPath,
+      args: ["-e", "setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127", gitBin, ...gitArgs],
+      isolatedGroup: true
+    };
+  }
+  return {
+    command: gitBin,
+    args: gitArgs,
+    isolatedGroup: false
+  };
+}
+function endPosixLeftovers(pgid, killFn = process.kill.bind(process), scanFn = scanPosixGroup) {
+  if (!Number.isInteger(pgid) || pgid <= 1 || pgid === process.pid) {
+    return 0;
+  }
+  const firstScan = scanFn(pgid);
+  if (firstScan.includesSelf) {
+    return 0;
+  }
+  try {
+    killFn(-pgid, 0);
+  } catch (err) {
+    if (err?.code === "ESRCH") {
+      return 0;
+    }
+  }
+  try {
+    killFn(-pgid, "SIGKILL");
+  } catch (err) {
+    if (err?.code === "ESRCH") {
+      return 0;
+    }
+  }
+  const secondScan = scanFn(pgid);
+  if (!secondScan.includesSelf && secondScan.members > 0) {
+    try {
+      killFn(-pgid, "SIGKILL");
+    } catch {
+    }
+  }
+  return Math.max(firstScan.members + (secondScan.includesSelf ? 0 : secondScan.members), 1);
 }
 function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
   const script = [
@@ -59674,18 +59749,42 @@ function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
 }
 function tryRunGit(workspaceRoot, args, input2) {
   const startedAt = /* @__PURE__ */ new Date();
+  let gitBin;
   try {
-    const stdout = runGit(workspaceRoot, args, input2);
-    return { ok: true, stdout, stderr: "", timedOut: false, leftoversEnded: 0 };
+    gitBin = requireExecutable("git");
   } catch (err) {
-    const rawStderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
-    const timedOut = Boolean(err && typeof err === "object" && err.code === "ETIMEDOUT");
-    const pid = err && typeof err === "object" ? err.pid : void 0;
-    const leftoversEnded = timedOut && process.platform === "win32" && typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : 0;
-    const cleanup = leftoversEnded > 0 ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? "" : "es"} it left running)` : "";
-    const stderr = timedOut && rawStderr.trim().length === 0 ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` : rawStderr;
-    return { ok: false, stdout: "", stderr, timedOut, leftoversEnded };
+    const stderr2 = err instanceof Error ? err.message : String(err);
+    return { ok: false, stdout: "", stderr: stderr2, timedOut: false, leftoversEnded: 0 };
   }
+  const fullGitArgs = [...NO_REPO_COMMANDS, ...args];
+  const launch = process.platform === "win32" ? { command: gitBin, args: fullGitArgs, isolatedGroup: false } : buildPosixGitCommand(gitBin, fullGitArgs);
+  const res = spawnSync(launch.command, launch.args, {
+    cwd: workspaceRoot,
+    encoding: "utf8",
+    stdio: [input2 === void 0 ? "ignore" : "pipe", "pipe", "pipe"],
+    input: input2,
+    timeout: gitTimeoutMs(),
+    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true
+  });
+  if (!res.error && res.status === 0 && res.signal === null) {
+    return {
+      ok: true,
+      stdout: (res.stdout ?? "").trimEnd(),
+      stderr: "",
+      timedOut: false,
+      leftoversEnded: 0
+    };
+  }
+  const errCode = res.error?.code;
+  const timedOut = errCode === "ETIMEDOUT";
+  const pid = res.pid;
+  const leftoversEnded = timedOut && typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? process.platform === "win32" ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : launch.isolatedGroup ? endPosixLeftovers(pid) : 0 : 0;
+  const cleanup = leftoversEnded > 0 ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? "" : "es"} it left running)` : "";
+  const rawStderr = typeof res.stderr === "string" && res.stderr.length > 0 ? res.stderr : res.error instanceof Error ? res.error.message : res.error ? String(res.error) : "";
+  const stderr = timedOut && rawStderr.trim().length === 0 ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` : rawStderr;
+  return { ok: false, stdout: "", stderr, timedOut, leftoversEnded };
 }
 var isBridgePath = (p) => p === ".ag-bridge" || p.startsWith(".ag-bridge/");
 function checkTrackedFile(workspaceRoot, pathspec) {

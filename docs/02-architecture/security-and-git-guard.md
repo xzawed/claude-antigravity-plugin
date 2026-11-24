@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.12.0` |
+| **버전** | `1.13.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-24` |
+| **최종 수정일** | `2026-11-25` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
 
 ---
@@ -191,10 +191,12 @@ flowchart TD
     - 이 세 가지는 구현 검토 레그의 지적이다(Antigravity는 대조군 통과. Grok은 대조군에 실패했고, 날짜 관련 답이 그 거짓 전제 위에 있어 채택하지 않았다).
   - 실측(런처 모드 4회): 모두 "ended 2 processes"(실제 git과 그 필터)였고, 폴더는 반환 직후 풀렸다. 호출당 약 1.9초였다(CI에서는 PowerShell 시작이 2.5~3초).
   - 기각: 실제 바이너리를 직접 실행하는 방식. 런처의 PATH에서는 sh 필터가 `cannot spawn sh`로 돌지 않는데도 `status`·`stash create`가 0으로 끝났다(필터 안 거친 내용이 체크포인트에 들어간다).
+  - **POSIX(macOS·Linux)에서는 격리된 프로세스 그룹을 통째로 끝낸다(`TC-U34d`, `TC-U34e`).**
+    - Node.js `spawnSync`는 `detached: true`를 지원하지 않으므로, `tryRunGit`이 POSIX에서 `setsid -- <git> …`(Linux) 또는 `perl -e 'setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127' <git> …`(macOS 폴백, 둘 다 `exec-path.ts` 절대 경로로 해석)으로 git을 자기 프로세스 그룹(`PGID = git.pid`) 안에서 in-place 실행한다. git이 띄운 clean/smudge 필터와 하위 셸(`sh`, `sleep`)은 git이 먼저 종료·회수되어 PID 1에 재입양되더라도 같은 PGID를 유지한다.
+    - `ETIMEDOUT`이면 `endPosixLeftovers(pid)`가 `ps -eo pid=,pgid=`로 현재 서버 PID가 포함되지 않았음을 확인하고 `process.kill(-pid, 0)`으로 잔존 그룹을 확인한 뒤 `process.kill(-pid, 'SIGKILL')`로 일괄 종료(2차 훑기 포함)하며 `getGitInfo` 오류에 끝낸 수를 보고한다. `setsid`·`perl`이 모두 없는 환경에서는 git을 직접 실행하고 프로세스 그룹 시그널을 보내지 않는다(자기 프로세스 그룹 보호).
   - 한계:
-    - 재사용 PID 방지 조건과 두 번째 훑기는 테스트로 재현할 수 없다. 그 조건을 지운 변이가 살아남는다.
-    - 측정된 트리는 두 단계(git → sh)다. MSYS의 `sleep`은 Windows 부모로 연결되지 않았다. 그래서 깊이 탐색과 두 번째 훑기 중 하나만 있어도 `TC-U34b`는 통과하고, 깊이 탐색을 지운 변이가 살아남는다. 둘 다 둔다.
-    - Windows 밖에서는 실행한 git이 직접 끊기며, 그 필터 프로세스는 측정하지 않았다.
+    - Windows에서 재사용 PID 방지 조건과 두 번째 훑기는 테스트로 재현할 수 없다. 그 조건을 지운 변이가 살아남는다.
+    - Windows 측정 트리는 두 단계(git → sh)다. MSYS의 `sleep`은 Windows 부모로 연결되지 않았다. 그래서 깊이 탐색과 두 번째 훑기 중 하나만 있어도 `TC-U34b`는 통과하고, 깊이 탐색을 지운 변이가 살아남는다. 둘 다 둔다.
 
 ---
 

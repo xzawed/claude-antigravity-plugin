@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   checkpointManifestFields,
   createCheckpoint,
+  endPosixLeftovers,
   getGitInfo,
   listGitChangedFiles,
   listUntrackedFiles,
@@ -845,5 +846,96 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     } finally {
       delete process.env.AG_GIT_TIMEOUT_MS;
     }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'TC-U34d: on POSIX the time limit kills filter children left in git\'s isolated process group',
+    { timeout: 30_000 },
+    async () => {
+      initRepo(tmpRoot);
+      const pidFile = path.join(tmpRoot, '.git', 'filter.pid');
+      const filterScript = path.join(tmpRoot, '.git', 'stall-posix.sh');
+      fs.writeFileSync(
+        filterScript,
+        `#!/bin/sh\necho $$ > "${pidFile}"\nsleep 8\ncat\n`,
+        { mode: 0o755 },
+      );
+      git(tmpRoot, ['config', 'filter.slow.clean', filterScript]);
+      fs.writeFileSync(path.join(tmpRoot, '.gitattributes'), 'app.ts filter=slow\n', 'utf8');
+      git(tmpRoot, ['add', '.gitattributes']);
+      git(tmpRoot, ['commit', '-qm', 'add slow filter']);
+      fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2;\n', 'utf8');
+
+      process.env.AG_GIT_TIMEOUT_MS = '1000';
+      let info: ReturnType<typeof getGitInfo>;
+      try {
+        info = getGitInfo(tmpRoot);
+      } finally {
+        delete process.env.AG_GIT_TIMEOUT_MS;
+      }
+
+      expect(info.isGitRepo).toBe(false);
+      expect(info.error).toMatch(/Git did not answer within 1000 ms/);
+      expect(info.error).toMatch(/ended \d+ process/);
+
+      // The clean filter shell recorded its PID before sleeping; it must already be gone.
+      expect(fs.existsSync(pidFile)).toBe(true);
+      const filterPid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      expect(Number.isInteger(filterPid) && filterPid > 1).toBe(true);
+
+      let alive = true;
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(filterPid, 0);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException)?.code === 'ESRCH') {
+            alive = false;
+            break;
+          }
+          throw err;
+        }
+      }
+      expect(alive).toBe(false);
+    },
+  );
+
+  it('TC-U34e: endPosixLeftovers guards unsafe pgids, skips empty or self-containing groups, and SIGKILLs live groups', () => {
+    const calls: Array<{ pid: number; signal?: NodeJS.Signals | number }> = [];
+    const recordKill = (pid: number, signal?: NodeJS.Signals | number): boolean => {
+      calls.push({ pid, signal });
+      return true;
+    };
+
+    // Unsafe pgids never trigger kill
+    expect(endPosixLeftovers(0, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(1, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(-42, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(process.pid, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
+    // Group that includes the current MCP server process is never signaled
+    expect(endPosixLeftovers(42423, recordKill, () => ({ members: 2, includesSelf: true }))).toBe(0);
+    expect(calls).toEqual([]);
+
+    // Empty process group (ESRCH on probe) returns 0 without SIGKILL
+    const esrchKill = (pid: number, signal?: NodeJS.Signals | number): boolean => {
+      calls.push({ pid, signal });
+      const err = new Error('ESRCH') as NodeJS.ErrnoException;
+      err.code = 'ESRCH';
+      throw err;
+    };
+    expect(endPosixLeftovers(42424, esrchKill, () => ({ members: 0, includesSelf: false }))).toBe(0);
+    expect(calls).toEqual([{ pid: -42424, signal: 0 }]);
+
+    // Live process group with 2 initial members + 1 late spawn receives SIGKILL twice and reports 3
+    calls.length = 0;
+    let scanPass = 0;
+    const scanSeq = () => (scanPass++ === 0 ? { members: 2, includesSelf: false } : { members: 1, includesSelf: false });
+    expect(endPosixLeftovers(42425, recordKill, scanSeq)).toBe(3);
+    expect(calls).toEqual([
+      { pid: -42425, signal: 0 },
+      { pid: -42425, signal: 'SIGKILL' },
+      { pid: -42425, signal: 'SIGKILL' },
+    ]);
   });
 });
