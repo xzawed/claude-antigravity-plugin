@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { requireExecutable } from './exec-path.js';
 import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './types.js';
 
 function runGit(workspaceRoot: string, args: string[]): string {
-  return execFileSync('git', args, {
+  // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).
+  return execFileSync(requireExecutable('git'), args, {
     cwd: workspaceRoot,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],

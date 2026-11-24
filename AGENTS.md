@@ -35,6 +35,7 @@
 1. **보안 경계 준수 (`lockedPaths`)**
    - `api-worker.ts` 및 브릿지 파일 쓰기는 반드시 `path.resolve` + `realpath` 정규화 후 `lockedPaths` 범위 내인지 검증한다.
    - `.git/`, `.env*`, `.ag-bridge/config.json`에 대한 에이전트 쓰기는 어떠한 경우에도 차단한다.
+   - 프로그램은 `exec-path.ts`(`requireExecutable`·`resolveExecutable`·`windowsShell`)로 얻은 절대 경로로만 실행한다. 이름을 `spawn`/`execFileSync`에 그대로 넘기거나 `shell: true`를 쓰지 않는다 — `PATH`의 상대 항목이 워크스페이스를 가리킨다. 근거: [ARC-003 §6](docs/02-architecture/security-and-git-guard.md), 가드 `TC-S16`.
 2. **원자적 상태 갱신 (Atomic Bridge I/O)**
    - `.ag-bridge/manifest.json` 등 상태 파일은 임시 파일(`.tmp`)에 기록 후 `rename`으로 원자적 교체한다.
    - `.ag-bridge/`는 대상 워크스페이스에서 항상 git이 무시해야 하며 API 키는 로그/리포트에 절대 노출하지 않는다. git 저장소에서는 사용자 프로젝트의 추적 파일을 고치지 않도록 로컬 전용 `.git/info/exclude`에 등록하고(핸드오프 템플릿 경로 포함), 저장소가 아닐 때만 `.gitignore`에 등록한다. 이 경로는 SessionStart 훅이 모든 폴더에서 자동 실행하므로 **프로세스를 띄우지 않고**(`git` 실행 금지), **링크를 따라 쓰지 않는다**. 근거: [ADR-005](docs/06-adr/ADR-005-local-git-exclude.md).

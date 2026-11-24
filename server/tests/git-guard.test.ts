@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createCheckpoint, getGitInfo, rollbackCheckpoint } from '../src/git-guard.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
@@ -24,7 +24,56 @@ function initRepo(dir: string): void {
   git(dir, ['commit', '-m', 'Initial commit']);
 }
 
-describe('git-guard (TC-U07 ~ TC-U09)', () => {
+// Windows: the fake git is a Node binary named git.exe. It is linked from a private copy, never
+// from process.execPath: a link to the running image cannot be unlinked on Node 20 (EPERM).
+let fakeNodeDir: string | undefined;
+function fakeNodeBinary(): string {
+  if (!fakeNodeDir) {
+    fakeNodeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-fake-node-'));
+    fs.copyFileSync(process.execPath, path.join(fakeNodeDir, 'node.exe'));
+  }
+  return path.join(fakeNodeDir, 'node.exe');
+}
+
+/**
+ * Plant a fake `git` in `dir` that answers `git status …` with a porcelain header naming itself.
+ * Windows: a Node binary named git.exe runs `<cwd>/status` as its script.
+ */
+function plantFakeGit(dir: string): void {
+  if (process.platform === 'win32') {
+    try {
+      fs.linkSync(fakeNodeBinary(), path.join(dir, 'git.exe'));
+    } catch {
+      fs.copyFileSync(fakeNodeBinary(), path.join(dir, 'git.exe'));
+    }
+    fs.writeFileSync(path.join(dir, 'status'), "process.stdout.write('## planted-by-workspace\\n');\n");
+  } else {
+    fs.writeFileSync(path.join(dir, 'git'), "#!/bin/sh\necho '## planted-by-workspace'\n", { mode: 0o755 });
+  }
+}
+
+/**
+ * Run `fn` the way the MCP server runs in production — its cwd is the opened workspace — with
+ * PATH replaced by `makePath(original)`. Measured: a bare `git` then runs a planted one once PATH
+ * holds ".".
+ */
+function servedFrom<T>(workspace: string, makePath: (original: string) => string, fn: () => T): T {
+  const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const savedPath = process.env[key];
+  const savedCwd = process.cwd();
+  process.env[key] = makePath(savedPath ?? '');
+  process.chdir(workspace);
+  try {
+    return fn();
+  } finally {
+    process.chdir(savedCwd);
+    if (savedPath === undefined) delete process.env[key];
+    else process.env[key] = savedPath;
+  }
+}
+const dotFirst = (original: string): string => `.${path.delimiter}${original}`;
+
+describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
   let tmpRoot: string;
 
   beforeEach(() => {
@@ -33,6 +82,10 @@ describe('git-guard (TC-U07 ~ TC-U09)', () => {
 
   afterEach(() => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    if (fakeNodeDir) fs.rmSync(fakeNodeDir, { recursive: true, force: true });
   });
 
   it('TC-U07: creates clean checkpoint and rolls back modified + newly created files', () => {
@@ -112,6 +165,28 @@ describe('git-guard (TC-U07 ~ TC-U09)', () => {
     expect(res.warning).toContain('not a Git repository');
 
     expect(() => createCheckpoint(tmpRoot, 'task-nogit-2', 'required')).toThrow(AgPluginError);
+  });
+
+  it('TC-S14: a git the workspace ships never runs, even with "." on PATH (non-repo folder)', () => {
+    plantFakeGit(tmpRoot);
+    const info = servedFrom(tmpRoot, dotFirst, () => getGitInfo(tmpRoot));
+    expect(info).toEqual({ isGitRepo: false });
+  });
+
+  it('TC-S14b: in a repository that ships a git binary, Git Guard still reads the real branch', () => {
+    initRepo(tmpRoot);
+    const realBranch = git(tmpRoot, ['symbolic-ref', '--short', 'HEAD']); // before planting
+    plantFakeGit(tmpRoot);
+    const info = servedFrom(tmpRoot, dotFirst, () => getGitInfo(tmpRoot));
+    expect(info.isGitRepo).toBe(true);
+    expect(info.currentBranch).toBe(realBranch);
+  });
+
+  it('TC-S14c: with no absolute PATH entry holding git, Git Guard reports no repository instead of falling back to a bare name', () => {
+    initRepo(tmpRoot);
+    plantFakeGit(tmpRoot);
+    const info = servedFrom(tmpRoot, () => '.', () => getGitInfo(tmpRoot));
+    expect(info).toEqual({ isGitRepo: false });
   });
 
   it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {

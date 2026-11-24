@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.2.0` |
+| **버전** | `1.3.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -62,6 +62,11 @@
 | `TC-S09` | `bridge-fs.ts` | 워크스페이스의 `.git` 파일이 git 디렉터리가 아닌 곳을 `gitdir:`로 가리킴 | 그곳에 쓰지 않음(`.gitignore` 경로로 처리) | `NFR-001` |
 | `TC-S10` | `bridge-fs.ts` | `.git/info`가 저장소 밖을 가리키는 정션/심볼릭 링크 | 링크 대상에 아무것도 쓰지 않음 | `NFR-001` |
 | `TC-S11` | `bridge-fs.ts` | `.git/info/exclude`가 바깥 파일을 가리키는 심볼릭 링크 (심볼릭 링크 권한이 없는 Windows에서는 skip) | 링크 대상 바이트 동일 | `NFR-001` |
+| `TC-S12` | `exec-path.ts` | `PATH`에 `.`·`bin`·`C:tools`·`\Tools`·`node_modules\.bin`·POSIX 빈 항목이 있고 그 안에 같은 이름의 프로그램이 있음; 앞선 항목의 `git.cmd`; 프로그램 이름의 디렉터리·실행 비트 없는 파일(POSIX); POSIX `PATH` 미설정/빈 값 | 완전한 절대 경로 항목의 실행 가능한 `.com`/`.exe`(POSIX: 실행 비트) 파일만 반환, 없으면 `undefined`; 미설정이면 `/usr/bin:/bin`, 빈 값이면 `undefined` | `NFR-001` |
+| `TC-S13` | `detector.ts` | `PATH`의 상대 항목에 `agy`를 심어 둠 | 절대 경로 항목의 `agy`만 탐지 | `NFR-001` |
+| `TC-S14` ~ `TC-S14c` | `git-guard.ts` | 서버 cwd = 워크스페이스, 워크스페이스에 가짜 `git` + `PATH` 앞에 `.` (저장소 아님 / 저장소 / `PATH`가 `.`뿐) | 진짜 Git으로 판정(가짜 출력 0), `PATH`가 `.`뿐이면 저장소 없음으로 처리 — 이름으로 되돌아가지 않음 | `NFR-001` |
+| `TC-S15` | `exec-path.ts` / `subscription.ts` | `.cmd` 래퍼 셸: `ComSpec`이 절대/상대/없음, `SystemRoot`가 절대/상대 | 항상 절대 경로(`%ComSpec%` 또는 `%SystemRoot%\System32\cmd.exe`) | `NFR-001` |
+| `TC-S16` | `server/src/**` | 프로그램 이름 리터럴로 `spawn`/`execFile*` 호출, `command: '…'`, `shell: true`, `'cmd.exe'` 값 | 0건 | `NFR-001` |
 
 ---
 
