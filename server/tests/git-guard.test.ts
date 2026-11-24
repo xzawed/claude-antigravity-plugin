@@ -9,6 +9,7 @@ import {
   getGitInfo,
   listGitChangedFiles,
   listUntrackedFiles,
+  pruneRecoveryArtifacts,
   rollbackCheckpoint,
 } from '../src/git-guard.js';
 import { resolveExecutable } from '../src/exec-path.js';
@@ -263,6 +264,146 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(fs.readFileSync(path.join(tmpRoot, '.env'), 'utf8')).toBe('SECRET=1\n');
     expect(fs.existsSync(path.join(tmpRoot, 'dist', 'bundle.js'))).toBe(true);
     expect(res.removedUntrackedFiles).toEqual([]);
+  });
+
+  // Rollback keeps what it takes away (Claude, Grok, Antigravity, two rounds): the files it removes go
+  // to .ag-bridge/recovery/, the user's untracked files are snapshotted under a cap, and the state
+  // before reverting is recorded so the rollback itself can be undone.
+  const read = (rel: string): string => fs.readFileSync(path.join(tmpRoot, rel), 'utf8');
+
+  it('TC-S24: rollback moves the files the agent created into .ag-bridge/recovery instead of deleting them', () => {
+    withUserUntracked(false);
+    const cp = createCheckpoint(tmpRoot, 'task-q', 'best_effort');
+    fs.mkdirSync(path.join(tmpRoot, 'gen'), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, 'gen', 'agent.txt'), 'AGENT WORK\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-q', cp, true));
+    expect(res.removedUntrackedFiles).toEqual(['gen/agent.txt']);
+    expect(fs.existsSync(path.join(tmpRoot, 'gen', 'agent.txt'))).toBe(false);
+    expect(res.quarantineDir).toMatch(/^\.ag-bridge\/recovery\/task-q\/rollback-/);
+    expect(read(`${res.quarantineDir}/removed/gen/agent.txt`)).toBe('AGENT WORK\n');
+    expect(read('notes.txt')).toBe('USER NOTES\n');
+  });
+
+  it('TC-S24b: a file the agent created and then staged or committed goes to recovery too, not deleted by reset', () => {
+    withUserUntracked(false);
+    const cp = createCheckpoint(tmpRoot, 'task-q2', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'committed.ts'), 'COMMITTED\n', 'utf8');
+    git(tmpRoot, ['add', 'committed.ts']);
+    git(tmpRoot, ['commit', '-qm', 'agent']);
+    fs.writeFileSync(path.join(tmpRoot, 'staged.ts'), 'STAGED\n', 'utf8');
+    git(tmpRoot, ['add', 'staged.ts']);
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-q2', cp, true));
+    expect(res.removedUntrackedFiles).toEqual(['committed.ts', 'staged.ts']);
+    expect(read(`${res.quarantineDir}/removed/committed.ts`)).toBe('COMMITTED\n');
+    expect(read(`${res.quarantineDir}/removed/staged.ts`)).toBe('STAGED\n');
+    expect(fs.existsSync(path.join(tmpRoot, 'committed.ts'))).toBe(false);
+    expect(res.revertedTrackedFiles).toEqual([]);
+  });
+
+  it("TC-S24c: rollback restores the user's untracked files the agent edited or deleted, keeping the agent's version", () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'notes.txt'), 'USER NOTES\n', 'utf8');
+    fs.mkdirSync(path.join(tmpRoot, 'docs'));
+    fs.writeFileSync(path.join(tmpRoot, 'docs', 'draft.md'), 'USER DRAFT\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-s', 'best_effort');
+    expect(cp.untrackedSnapshotDir).toBe('.ag-bridge/recovery/task-s/untracked');
+    fs.writeFileSync(path.join(tmpRoot, 'notes.txt'), 'AGENT OVERWROTE\n', 'utf8');
+    fs.rmSync(path.join(tmpRoot, 'docs', 'draft.md'));
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-s', cp, true));
+    expect(read('notes.txt')).toBe('USER NOTES\n');
+    expect(read('docs/draft.md')).toBe('USER DRAFT\n');
+    expect(res.restoredUntrackedFiles).toEqual(['docs/draft.md', 'notes.txt']);
+    expect(read(`${res.quarantineDir}/replaced/notes.txt`)).toBe('AGENT OVERWROTE\n');
+  });
+
+  it('TC-S24f: restoring never writes through a link the agent put in place of a user folder', () => {
+    initRepo(tmpRoot);
+    fs.mkdirSync(path.join(tmpRoot, 'docs'));
+    fs.writeFileSync(path.join(tmpRoot, 'docs', 'draft.md'), 'USER DRAFT\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-link', 'best_effort');
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-outside-'));
+    try {
+      fs.rmSync(path.join(tmpRoot, 'docs'), { recursive: true });
+      fs.symlinkSync(outside, path.join(tmpRoot, 'docs'), 'junction'); // the agent's link out of the workspace
+
+      rollbackCheckpoint(tmpRoot, manifestFor('task-link', cp, true));
+      expect(fs.readdirSync(outside)).toEqual([]);
+      expect(fs.lstatSync(path.join(tmpRoot, 'docs')).isSymbolicLink()).toBe(false);
+      expect(read('docs/draft.md')).toBe('USER DRAFT\n');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('TC-S24d: untracked files over the snapshot cap (2,000 files or 50 MB) are not copied, and the checkpoint says so', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'big.bin'), Buffer.alloc(51 * 1024 * 1024));
+    const byBytes = createCheckpoint(tmpRoot, 'task-cap-mb', 'best_effort');
+    expect(byBytes.checkpointRef).toBeTruthy();
+    expect(byBytes.untrackedSnapshotDir).toBeUndefined();
+    expect(byBytes.warning).toMatch(/not snapshotted/);
+    expect(fs.existsSync(path.join(tmpRoot, '.ag-bridge', 'recovery', 'task-cap-mb', 'untracked'))).toBe(false);
+
+    fs.rmSync(path.join(tmpRoot, 'big.bin'));
+    fs.mkdirSync(path.join(tmpRoot, 'many'));
+    for (let i = 0; i <= 2000; i++) fs.writeFileSync(path.join(tmpRoot, 'many', `f${i}.txt`), 'x');
+    const byCount = createCheckpoint(tmpRoot, 'task-cap-n', 'best_effort');
+    expect(byCount.untrackedSnapshotDir).toBeUndefined();
+    expect(byCount.warning).toMatch(/not snapshotted/);
+  });
+
+  it('TC-S24e: before reverting, rollback records the agent\'s state so the rollback itself can be undone', () => {
+    initRepo(tmpRoot);
+    const cp = createCheckpoint(tmpRoot, 'task-p', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'lib.ts'), 'export const lib = 1; // agent, committed\n', 'utf8');
+    git(tmpRoot, ['add', 'lib.ts']);
+    git(tmpRoot, ['commit', '-qm', 'agent commit']);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999; // agent, uncommitted\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-p', cp, true));
+    expect(read('app.ts')).toBe('export const version = 1;\n');
+    expect(res.preRollbackRef).toBe('refs/ag-bridge/pre-rollback/task-p');
+    expect(res.preRollbackHead).toMatch(/^[0-9a-f]{40}$/);
+
+    // undo the rollback: back to the agent's commit, then its uncommitted edit
+    git(tmpRoot, ['reset', '--hard', res.preRollbackHead!]);
+    git(tmpRoot, ['stash', 'apply', res.preRollbackRef!]);
+    expect(read('lib.ts')).toBe('export const lib = 1; // agent, committed\n');
+    expect(read('app.ts')).toBe('export const version = 999; // agent, uncommitted\n');
+  });
+
+  it('TC-U38: recovery folders beyond the last 10 tasks, older than 7 days, or past the size cap are pruned with their refs', () => {
+    initRepo(tmpRoot);
+    const rec = path.join(tmpRoot, '.ag-bridge', 'recovery');
+    const now = Date.now();
+    const day = 24 * 3600 * 1000;
+    const make = (id: string, ageDays: number, bytes: number): void => {
+      const dir = path.join(rec, id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'f'), Buffer.alloc(bytes));
+      const t = new Date(now - ageDays * day);
+      fs.utimesSync(dir, t, t);
+    };
+    for (let i = 0; i < 12; i++) make(`t${i}`, i * 0.1, 10); // t0 newest … t11 oldest, all within 7 days
+    make('old', 8, 10);
+    const head = git(tmpRoot, ['rev-parse', 'HEAD']);
+    git(tmpRoot, ['update-ref', 'refs/ag-bridge/pre-rollback/t10', head]);
+
+    const policy = { maxTasks: 10, maxAgeMs: 7 * day, maxBytes: 250 * 1024 * 1024 };
+    const pruned = pruneRecoveryArtifacts(tmpRoot, 't11', policy, now);
+    expect([...pruned].sort()).toEqual(['old', 't10', 't9']); // t11 is the task at hand: always kept
+    expect(fs.readdirSync(rec).sort()).toEqual(['t0', 't1', 't11', 't2', 't3', 't4', 't5', 't6', 't7', 't8']);
+    expect(() => git(tmpRoot, ['rev-parse', '--verify', 'refs/ag-bridge/pre-rollback/t10'])).toThrow();
+
+    // size: newest first while the total stays within the cap
+    fs.rmSync(rec, { recursive: true, force: true });
+    make('a', 0.1, 60);
+    make('b', 0.2, 50);
+    make('c', 0.3, 50);
+    expect(pruneRecoveryArtifacts(tmpRoot, undefined, { ...policy, maxBytes: 120 }, now)).toEqual(['c']);
   });
 
   it("TC-U36: rollback reports the tracked files it reverted, not the user's untouched untracked files", () => {
