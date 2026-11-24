@@ -45,13 +45,23 @@ function fail(message) {
 function mcpHandshake(cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [distIndex], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const exited = new Promise((res) => child.once('exit', res));
+    // Settle only after the child has exited: Windows refuses to remove a directory that is
+    // still some process's working directory (EBUSY).
+    const settle = (fn, value) => {
+      clearTimeout(timer);
+      child.kill();
+      exited.then(() => fn(value));
+    };
     let stdoutBuf = '';
     let stderrBuf = '';
     const pending = new Map();
     const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`MCP server did not answer within 20 s. stderr:\n${stderrBuf}`));
+      settle(reject, new Error(`MCP server did not answer within 20 s. stderr:\n${stderrBuf}`));
     }, 20_000);
+    child.on('error', (err) => settle(reject, err));
+    // A server that dies early turns our next write into EPIPE; the 'exit' handler reports it.
+    child.stdin.on('error', () => {});
 
     const send = (msg) => child.stdin.write(`${JSON.stringify(msg)}\n`);
     const request = (id, method, params) =>
@@ -75,9 +85,7 @@ function mcpHandshake(cwd) {
           msg = JSON.parse(line);
         } catch {
           // stdout is reserved for JSON-RPC frames (AGENTS.md invariant 4)
-          clearTimeout(timer);
-          child.kill();
-          reject(new Error(`Non-JSON line on stdout: ${line.slice(0, 200)}`));
+          settle(reject, new Error(`Non-JSON line on stdout: ${line.slice(0, 200)}`));
           return;
         }
         const res = pending.get(msg.id);
@@ -89,8 +97,7 @@ function mcpHandshake(cwd) {
     });
     child.on('exit', (code) => {
       if (pending.size > 0) {
-        clearTimeout(timer);
-        reject(new Error(`MCP server exited early (code ${code}). stderr:\n${stderrBuf}`));
+        settle(reject, new Error(`MCP server exited early (code ${code}). stderr:\n${stderrBuf}`));
       }
     });
 
@@ -104,14 +111,11 @@ function mcpHandshake(cwd) {
       send({ jsonrpc: '2.0', method: 'notifications/initialized' });
       const list = await request(2, 'tools/list', {});
       if (list.error) throw new Error(`tools/list failed: ${JSON.stringify(list.error)}`);
-      clearTimeout(timer);
-      child.kill();
-      resolve({ serverInfo: init.result?.serverInfo, tools: (list.result?.tools ?? []).map((t) => t.name).sort() });
-    })().catch((err) => {
-      clearTimeout(timer);
-      child.kill();
-      reject(err);
-    });
+      settle(resolve, {
+        serverInfo: init.result?.serverInfo,
+        tools: (list.result?.tools ?? []).map((t) => t.name).sort(),
+      });
+    })().catch((err) => settle(reject, err));
   });
 }
 
@@ -133,7 +137,7 @@ async function main() {
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   } finally {
-    fs.rmSync(mcpCwd, { recursive: true, force: true });
+    fs.rmSync(mcpCwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ag smoke init '));
@@ -147,7 +151,7 @@ async function main() {
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));
   } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   console.log('[smoke-bundle] PASS: the committed bundle runs with no node_modules');
