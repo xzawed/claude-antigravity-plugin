@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.7.0` |
+| **버전** | `1.7.1` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-24` |
+| **최종 수정일** | `2026-11-25` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
 
 ---
@@ -13,7 +13,7 @@
 ## 1. MCP 서버 기본 규격 (`server/src/index.ts`)
 
 - **서버 이름:** `antigravity-delegate`
-- **버전:** `1.4.1`
+- **버전:** `1.5.0`
 - **트랜스포트:** `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`)
 - **로깅 규칙:** 모든 내부 진단 로그는 `console.error(...)` (`stderr`)로만 출력. `stdout`은 MCP JSON-RPC 프레임 전용.
 - **작업 디렉터리 해석:** 도구 입력에 `workspaceRoot`가 생략되면 `process.cwd()`를 사용한다.

@@ -488,7 +488,7 @@ function rollbackWarnings(res: ReturnType<typeof rollbackCheckpoint>): string[] 
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {
   const server = new McpServer({
     name: 'antigravity-delegate',
-    version: '1.4.1',
+    version: '1.5.0',
   });
 
   const sharedDelegateSchema = {

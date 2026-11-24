@@ -474,7 +474,7 @@ Recorded on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`). 
 ```text
 claude-antigravity-plugin/
 ├── assets/                        # Hero banner & 5 vector architecture/journey/command/benchmark diagrams
-├── .claude-plugin/                # plugin.json (v1.4.1) & marketplace.json
+├── .claude-plugin/                # plugin.json (v1.5.0) & marketplace.json
 ├── .mcp.json                      # Embedded Stdio MCP server definition
 ├── hooks/hooks.json               # SessionStart auto-initialization hook
 ├── skills/ag-delegate/SKILL.md    # Autonomous delegation & review skill
