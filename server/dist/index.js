@@ -61096,7 +61096,7 @@ function parseAgyAgentsOutput(raw) {
   }
   return agents;
 }
-var AGENT_PROBE_ANSWER = /unknown agent "[^"]*" \((?:available: (.*)|no custom agents are available)\)/;
+var AGENT_PROBE_ANSWER = /unknown agent "[^"]*" \((?:available: ([^()]*)|no custom agents are available)\)/;
 function parseAgyAgentProbe(output2) {
   const names = (list) => list === void 0 ? [] : list.split(", ").map((n) => n.trim()).filter((n) => n.length > 0);
   for (const line of output2.split(/\r?\n/)) {
@@ -61113,7 +61113,7 @@ function parseAgyAgentProbe(output2) {
     if (result.status !== "ERROR" || (result.num_turns ?? 0) !== 0 || (result.conversation_id ?? "") !== "") {
       return void 0;
     }
-    const m3 = AGENT_PROBE_ANSWER.exec(String(result.error ?? ""));
+    const m3 = new RegExp(`^${AGENT_PROBE_ANSWER.source}$`).exec(String(result.error ?? "").trim());
     return m3 ? names(m3[1]) : void 0;
   }
   const m2 = new RegExp(`^error: ${AGENT_PROBE_ANSWER.source}\\s*$`, "m").exec(output2);

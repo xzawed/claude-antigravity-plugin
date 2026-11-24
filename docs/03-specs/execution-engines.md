@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-002` |
-| **버전** | `1.4.0` |
+| **버전** | `1.5.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [시스템 아키텍처](../02-architecture/system-architecture.md), [MCP API 명세](./mcp-tools-api.md), [ADR-002](../06-adr/ADR-002-dual-execution-engine.md), [ADR-003](../06-adr/ADR-003-antigravity-cli-and-paths.md) |
@@ -98,7 +98,7 @@ export interface ExecutionEngine {
      - `agy agents`는 출력이 터미널이 아니면(파이프·파일) 아무것도 출력하지 않는다(실측 0바이트, `agy agent`도 같음).
      - 그래서 `list_ag_capabilities`는 워크스페이스를 cwd로 하여, 없는 이름으로 에이전트를 요청하는 탐침을 함께 돌린다. 인자는 `agy -p … --agent __ag_bridge_agent_probe_<무작위>__ --mode plan --output-format stream-json --print-timeout 10s`이다.
      - agy는 세션을 시작하기 전에 `unknown agent "…" (available: a, b)` 또는 `(no custom agents are available)`로 답하고 종료 코드 1로 끝난다. 실측으로 `conversation_id`는 비어 있었고, 토큰은 0이었으며, 워크스페이스 훅은 돌지 않았다.
-     - `agy agents`가 무엇이든 출력하면 그쪽을 쓴다. 세션이 시작된 응답(`num_turns` > 0, 대화 ID 있음, SUCCESS)은 목록으로 읽지 않는다. `ag_auth`의 상태 확인(모델만 필요)은 탐침을 돌리지 않는다. 쉼표+공백(`, `)이 든 에이전트 이름은 구분할 수 없다(`parseAgyAgentProbe`).
+     - `agy agents`가 무엇이든 출력하면 그쪽을 쓴다. 세션이 시작된 응답(`num_turns` > 0, 대화 ID 있음, SUCCESS)은 목록으로 읽지 않는다. `ag_auth`의 상태 확인(모델만 필요)은 탐침을 돌리지 않는다. 쉼표+공백(`, `)이 든 에이전트 이름은 구분할 수 없다. 답이 실측한 형식과 정확히 같을 때만 읽는다. 뒤에 덧붙은 문구나 괄호가 든 이름이 있으면 읽지 않고 경고한다. 욕심 많은 정규식이 `(available: a, b) (hint)`를 `["a", "b) (hint"]`로 읽었다는 구현 검토 레그 둘의 지적이다(`parseAgyAgentProbe`, `TC-U37d`).
    - **2차 (OS IPC / 창 포커스 폴백)** 및 **3차 (클립보드 + 데스크톱 알림 폴백):** CLI 미감지 또는 즉시 오류 종료 시 기존 폴백 체인 유지.
 4. **하이브리드 완료 감시 (`watchForCompletion`):**
    - `fs.watch(.ag-bridge/)` 이벤트 리스너 + `poll_interval_ms`(기본 `2000ms`) 주기 폴링 병행.
