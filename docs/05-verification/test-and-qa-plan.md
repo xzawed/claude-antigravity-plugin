@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.5.0` |
+| **버전** | `1.6.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -44,6 +44,7 @@
 | `TC-U08` | `git-guard.ts` | Dirty 트리(기존 수정 + 기존 untracked)에서 위임 → 롤백 | 위임 전 사용자 미커밋 수정 및 기존 untracked 파일 100% 보존 | `FR-005`, `FR-010` |
 | `TC-U09` | `git-guard.ts` | Git 저장소가 아닌 임시 폴더에서 `best_effort` 모드 실행 | 경고와 함께 `gitCheckpointRef: undefined`로 정상 진행 | `PLN-002` |
 | `TC-U10` | `cli-init.ts` | `--silent`로 최초 실행 후 `claude-handoff.md` 동기화 | 종료 코드 `0`, `.ag-bridge/config.json` 및 템플릿 생성 | `FR-001` |
+| `TC-U33` | `server/src/**` | 계층표에 없는 새 모듈, 윗 계층 import, 순환 import, `cli-init`이 `bridge-fs` 외 모듈 import | 0건 — 계층 규칙은 [ARC-001 §3](../02-architecture/system-architecture.md) | `ARC-001` |
 
 ---
 
