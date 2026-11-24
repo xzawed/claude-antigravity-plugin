@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.4.1` |
+| **버전** | `1.5.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -178,12 +178,15 @@ export interface RollbackToolOutput {
   ok: boolean;
   taskId: string;
   restoredCheckpointRef?: string;
-  revertedTrackedFiles: string[];
-  removedUntrackedFiles: string[];
+  revertedTrackedFiles: string[];  // 체크포인트와 달랐던 추적 파일 (git diff --no-renames <ref>, 에이전트 커밋 포함)
+  removedUntrackedFiles: string[]; // 기준선에 없던 untracked 파일 (위임 중 생긴 것)
+  warnings?: string[];             // 예: 기준선 없는 매니페스트라 untracked 파일을 하나도 지우지 않음
   errorCode?: AgErrorCode;
   errorMessage?: string;
 }
 ```
+
+- HEAD가 체크포인트 때와 다른 ref를 가리키면(에이전트의 브랜치 전환) 아무것도 바꾸지 않고 `GIT_CHECKPOINT_FAILED`로 거부한다. 메시지가 돌아갈 명령(`git switch <branch>`)을 알려 준다([ARC-003 §5.3](../02-architecture/security-and-git-guard.md)).
 
 ---
 

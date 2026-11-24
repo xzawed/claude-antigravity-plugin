@@ -154,6 +154,8 @@ export interface BridgeManifest {
   gitCheckpointRef?: string;
   gitCheckpointIsStash?: boolean;
   gitUntrackedBaseline?: string[];
+  /** `refs/heads/<branch>` (or `HEAD` when detached) at the checkpoint; rollback refuses elsewhere. */
+  gitCheckpointHeadRef?: string;
   artifacts: string[];
   changedFiles?: string[];
   metrics?: ExecutionMetrics;
