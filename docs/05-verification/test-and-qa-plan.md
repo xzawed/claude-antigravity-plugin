@@ -55,6 +55,7 @@
 | `TC-U42` | `artifacts.ts` | `.ag-bridge/artifacts/` 아래 공백 등 비표준 이름 폴더 존재 시 `list_ag_artifacts({})` 호출 | 비표준 폴더를 건너뛰고 유효한 작업 아티팩트 정상 반환 | `FR-008` |
 | `TC-U43`, `TC-U43b` | `check-version-sync.mjs` | 저장소 버전 선언 6곳(`plugin.json`·`package.json`·`package-lock.json`·`index.ts`·`mcp-tools-api.md`) 일치 여부 및 `--tag vX.Y.Z` 비교 | 모든 선언 일치 시 PASS, 한 곳이라도 드리프트하거나 태그가 어긋나면 FAIL (CI & `.github/workflows/release.yml`) | `NFR-007` |
 | `TC-U44` | `subscription.ts` · `api-worker.ts` | `formatStreamEventProgress`의 `init`/`step_update`/`result` 매핑(비밀 마스킹 포함) 및 API 워커 멀티턴 `onProgress` 콜백 수신 | 진행률이 단조 증가하며 API 키 패턴은 `[REDACTED]`로 마스킹되고 턴/도구 호출 요약이 정상 전달됨 | `SPC-001`, `NFR-002` |
+| `TC-U45` ~ `TC-U45c` | `git-guard.ts` · `jobs.ts` · `index.ts` | `createTaskWorktree` / `removeTaskWorktree` 수명 주기, 2개 `start_ag_task({ isolateWorktree: true })` 동시 병렬 실행, 동기 `delegate_to_antigravity({ isolateWorktree: true })` 후 `rollback_ag_task` 정리 | 두 병렬 작업이 `BRIDGE_BUSY` 없이 각자 worktree에서 완료되고 부모 작업 트리는 깨끗하게 유지되며, `rollback_ag_task`가 worktree와 `ag-task/*` 브랜치만 제거 | `ARC-003`, `PRD §3.2` |
 
 ---
 
@@ -88,6 +89,7 @@
 | `TC-S24` ~ `TC-S24j` | `git-guard.ts` | 에이전트가 만든 파일 / 만들어 스테이징·커밋한 파일이 있는 상태에서 롤백; 사용자 untracked 파일을 에이전트가 고치고 지움; 51MB 파일·2,001개로 상한 초과; 에이전트 커밋 + 미커밋 편집 후 롤백하고 되돌리기; 사용자 폴더 자리에 워크스페이스 밖으로 가는 정션; 매니페스트가 다른 작업의 스냅샷 폴더를 가리킴; 파일이 든 바깥 폴더로 가는 에이전트의 정션; 에이전트가 `git rm`한 경로에 다시 만든 파일; 보관 규칙으로 사본이 이미 정리됨 | 지우지 않고 `.ag-bridge/recovery/<task>/rollback-…/removed/`로 이동(`quarantineDir`), 손대지 않은 파일은 복원 목록에 없음; 스냅샷에서 되돌리고 에이전트 판은 `replaced/`; 복사 안 하고 체크포인트 경고; `reset --hard <preRollbackHead>` + `stash apply <preRollbackRef>`로 에이전트 작업 복귀; 밖에는 아무것도 쓰지 않고 실제 폴더로 복원; 그 폴더에서는 아무것도 복원하지 않음; 바깥 파일 그대로·`pathsBehindLinks`(Windows); 체크포인트 판으로 되돌리고 에이전트 판은 `replaced/`; `untrackedSnapshotMissing` | `NFR-001` |
 | `TC-S25` | `api-worker.ts` | Gemini API 호출 실패(`catch` 경로) 시 모델 텍스트·오류에 API 키 포함; `read_file`/`list_dir`에 `NaN` 숫자 인자 전달 | `.ag-bridge/report.md` 포함 모든 출력에서 비밀 `[REDACTED]`, `NaN` 인자는 안전한 기본값으로 보정 | `NFR-002` |
 | `TC-S26` | `cli-admin.ts` | `mcp_add` 실패 시 `--env`/`--header` 비밀값 포함; `.mcp.json` 동기화 항목에 CR/LF 제어문자·HTTP `headers`·실패 서버 포함 | `errorMessage`에서 `--env`/`--header` 값 `[REDACTED]`, 제어문자 항목 스킵, `headers` 정상 전달, 실패 서버 존재 시 `ok: false` 반환 | `NFR-002` |
+| `TC-S27` | `git-guard.ts` | `removeTaskWorktree`에 `.ag-bridge/worktrees/` 외부 경로·경로 탈출 경로 전달 및 변조된 매니페스트의 `main` 브랜치 삭제 시도 | 외부/탈출 경로는 `PATH_TRAVERSAL_BLOCKED` 거부, `ag-task/` 외 브랜치는 삭제 거부 및 경고 반환 | `NFR-001` |
 
 ---
 

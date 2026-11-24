@@ -60253,6 +60253,128 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     ...preRollbackRef ? { preRollbackRef } : {}
   };
 }
+var WORKTREE_BRANCH_PREFIX = "ag-task/";
+var worktreesRoot = (workspaceRoot) => path3.join(getBridgeDir(workspaceRoot), "worktrees");
+function normalizeForContainment(p) {
+  const resolved = path3.resolve(p);
+  let canonical = resolved;
+  try {
+    canonical = fs3.realpathSync.native(resolved);
+  } catch {
+  }
+  return process.platform === "win32" || process.platform === "darwin" ? canonical.toLowerCase() : canonical;
+}
+function isStrictlyInside(parentDir, candidatePath) {
+  const parent = normalizeForContainment(parentDir);
+  const candidate = normalizeForContainment(candidatePath);
+  const rel = path3.relative(parent, candidate);
+  return rel.length > 0 && !rel.startsWith("..") && !path3.isAbsolute(rel);
+}
+function createTaskWorktree(workspaceRoot, taskId) {
+  const safeId = assertSafeTaskId(taskId);
+  const info = getGitInfo(workspaceRoot);
+  if (!info.isGitRepo) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      info.error ? `Cannot create isolated worktree: ${info.error}` : "Git worktree isolation (`isolateWorktree: true`) requires a Git repository."
+    );
+  }
+  const headRes = tryRunGit(workspaceRoot, ["rev-parse", "--verify", "HEAD"]);
+  if (!headRes.ok || !headRes.stdout.trim()) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      "Cannot create isolated worktree: repository has no commits yet (HEAD does not exist)."
+    );
+  }
+  const baseCommit = headRes.stdout.trim();
+  const wtRoot = worktreesRoot(workspaceRoot);
+  fs3.mkdirSync(wtRoot, { recursive: true });
+  const worktreePath = path3.join(wtRoot, safeId);
+  const branchName = `${WORKTREE_BRANCH_PREFIX}${safeId}`;
+  const addRes = tryRunGit(workspaceRoot, ["worktree", "add", "-b", branchName, worktreePath, baseCommit]);
+  if (!addRes.ok) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      `Failed to create isolated git worktree at ${worktreePath}: ${addRes.stderr}`
+    );
+  }
+  return {
+    worktreePath,
+    branchName,
+    baseCommit
+  };
+}
+function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranch = true) {
+  const wtRoot = worktreesRoot(workspaceRoot);
+  const resolvedTarget = path3.resolve(worktreePath);
+  try {
+    if (fs3.lstatSync(wtRoot).isSymbolicLink()) {
+      throw new AgPluginError(
+        "PATH_TRAVERSAL_BLOCKED",
+        "Refusing to remove worktree: .ag-bridge/worktrees is a symbolic link."
+      );
+    }
+  } catch (err) {
+    if (err instanceof AgPluginError) throw err;
+  }
+  try {
+    if (fs3.lstatSync(resolvedTarget).isSymbolicLink()) {
+      throw new AgPluginError(
+        "PATH_TRAVERSAL_BLOCKED",
+        `Refusing to remove worktree: target "${worktreePath}" is a symbolic link.`
+      );
+    }
+  } catch (err) {
+    if (err instanceof AgPluginError) throw err;
+  }
+  if (!isStrictlyInside(wtRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Refusing to remove worktree outside .ag-bridge/worktrees/: "${worktreePath}".`
+    );
+  }
+  const warnings = [];
+  let removed = false;
+  const removeRes = tryRunGit(workspaceRoot, ["worktree", "remove", "--force", resolvedTarget]);
+  if (removeRes.ok) {
+    removed = true;
+  } else {
+    tryRunGit(workspaceRoot, ["worktree", "prune"]);
+    if (fs3.existsSync(resolvedTarget)) {
+      try {
+        fs3.rmSync(resolvedTarget, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        tryRunGit(workspaceRoot, ["worktree", "prune"]);
+        removed = !fs3.existsSync(resolvedTarget);
+      } catch (err) {
+        warnings.push(
+          `Could not fully remove worktree directory (${err instanceof Error ? err.message : String(err)}).`
+        );
+      }
+    } else {
+      removed = true;
+    }
+  }
+  let branchDeleted = false;
+  if (deleteBranch && branchName) {
+    if (!branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+      warnings.push(
+        `Refused to delete branch "${branchName}": only branches under "${WORKTREE_BRANCH_PREFIX}" may be deleted automatically.`
+      );
+    } else {
+      const delRes = tryRunGit(workspaceRoot, ["branch", "-D", branchName]);
+      if (delRes.ok) {
+        branchDeleted = true;
+      } else {
+        warnings.push(`Could not delete branch "${branchName}": ${delRes.stderr.trim() || "unknown error"}`);
+      }
+    }
+  }
+  return {
+    removed,
+    branchDeleted,
+    ...warnings.length > 0 ? { warning: warnings.join(" ") } : {}
+  };
+}
 
 // src/path-guard.ts
 import fs4 from "node:fs";
@@ -82164,7 +82286,8 @@ function disposeActiveJobs() {
   defaultJobManager.disposeAll();
 }
 function summarizeLiveJob(rec, includeDetails, includeLogTail) {
-  const diskManifest = readManifest(rec.workspaceRoot);
+  const execRoot = rec.executionRoot;
+  const diskManifest = readManifest(execRoot);
   const matchingDisk = diskManifest?.taskId === rec.taskId ? diskManifest : readArchivedManifest(rec.workspaceRoot, rec.taskId);
   const metrics = rec.result?.metrics ?? matchingDisk?.metrics;
   const elapsedSeconds = metrics?.durationSeconds ?? Math.round((Date.now() - rec.startedAtMs) / 1e3 * 100) / 100;
@@ -82179,17 +82302,19 @@ function summarizeLiveJob(rec, includeDetails, includeLogTail) {
     updatedAt: matchingDisk?.updatedAt ?? rec.updatedAt,
     elapsedSeconds,
     gitCheckpointRef: rec.gitCheckpointRef,
+    ...rec.worktreePath ? { worktreePath: rec.worktreePath } : {},
+    ...rec.worktreeBranch ? { worktreeBranch: rec.worktreeBranch } : {},
     conversationId: metrics?.conversationId,
     model: metrics?.model,
     metrics,
     changedFiles: includeDetails ? rec.result?.changedFiles ?? matchingDisk?.changedFiles : void 0,
-    artifacts: includeDetails ? rec.result?.artifacts ?? listTaskArtifacts(rec.workspaceRoot, rec.taskId) : void 0,
+    artifacts: includeDetails ? rec.result?.artifacts ?? listTaskArtifacts(execRoot, rec.taskId) : void 0,
     reportMarkdown: includeDetails ? rec.result?.reportMarkdown ? maskSecrets(rec.result.reportMarkdown) : diskManifest?.taskId === rec.taskId ? (() => {
-      const r2 = readReportMarkdown(rec.workspaceRoot);
+      const r2 = readReportMarkdown(execRoot);
       return r2 ? maskSecrets(r2) : void 0;
     })() : void 0 : void 0,
     structuredOutput: includeDetails ? rec.result?.structuredOutput : void 0,
-    logTail: includeLogTail ? readLogTail(rec.workspaceRoot, rec.taskId) : void 0,
+    logTail: includeLogTail ? readLogTail(execRoot, rec.taskId) : void 0,
     warnings: [...rec.warnings, ...rec.result?.warnings ?? []],
     errorCode: rec.errorCode ?? rec.result?.errorCode,
     errorMessage: rec.errorMessage ?? rec.result?.errorMessage
@@ -82216,6 +82341,8 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
     updatedAt: m2.updatedAt,
     elapsedSeconds,
     gitCheckpointRef: m2.gitCheckpointRef,
+    ...m2.worktreePath ? { worktreePath: m2.worktreePath } : {},
+    ...m2.worktreeBranch ? { worktreeBranch: m2.worktreeBranch } : {},
     conversationId: m2.metrics?.conversationId,
     model: m2.metrics?.model,
     metrics: m2.metrics,
@@ -82259,10 +82386,24 @@ async function handleStartAgTask(input2, deps = {}) {
   ensureBridgeDirs(workspaceRoot);
   ensureGitignoreEntry(workspaceRoot);
   const effectiveTimeoutSec = input2.timeoutSec ?? config2.subscription.timeout_sec;
-  const lockRes = acquireBridgeLock(workspaceRoot, effectiveTimeoutSec);
-  warnings.push(...lockRes.warnings);
   const taskId = generateTaskId();
-  const checkpoint = createCheckpoint(workspaceRoot, taskId, config2.git_guard);
+  let executionRoot = workspaceRoot;
+  let worktreePath;
+  let worktreeBranch;
+  if (input2.isolateWorktree) {
+    const wt = createTaskWorktree(workspaceRoot, taskId);
+    executionRoot = wt.worktreePath;
+    worktreePath = wt.worktreePath;
+    worktreeBranch = wt.branchName;
+    if (input2.lockedPaths && input2.lockedPaths.length > 0) {
+      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input2.lockedPaths);
+    }
+    ensureBridgeDirs(executionRoot);
+    ensureGitignoreEntry(executionRoot);
+  }
+  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
+  warnings.push(...lockRes.warnings);
+  const checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
   if (checkpoint.warning) {
     warnings.push(checkpoint.warning);
   }
@@ -82279,11 +82420,16 @@ async function handleStartAgTask(input2, deps = {}) {
     createdAt: now,
     updatedAt: now,
     ...checkpointManifestFields(checkpoint),
+    ...worktreePath ? { worktreePath } : {},
+    ...worktreeBranch ? { worktreeBranch } : {},
     artifacts: []
   };
-  writeManifest(workspaceRoot, manifest);
-  clearReportMarkdown(workspaceRoot);
-  writeDispatchMarkdown(workspaceRoot, {
+  writeManifest(executionRoot, manifest);
+  if (worktreePath) {
+    archiveManifest(workspaceRoot, manifest);
+  }
+  clearReportMarkdown(executionRoot);
+  writeDispatchMarkdown(executionRoot, {
     manifest,
     instructions: input2.instructions,
     acceptanceCriteria
@@ -82296,6 +82442,9 @@ async function handleStartAgTask(input2, deps = {}) {
     title: input2.title,
     mode: resolvedMode,
     workspaceRoot,
+    executionRoot,
+    worktreePath,
+    worktreeBranch,
     startedAt: now,
     startedAtMs: Date.now(),
     updatedAt: now,
@@ -82306,8 +82455,27 @@ async function handleStartAgTask(input2, deps = {}) {
     abortController,
     completionPromise: Promise.resolve()
   };
+  const syncParentWorktreeArchive = (finalStatus, execRes) => {
+    if (!worktreePath) return;
+    try {
+      const disk = readManifest(executionRoot);
+      archiveManifest(workspaceRoot, {
+        ...disk ?? manifest,
+        status: finalStatus,
+        worktreePath,
+        worktreeBranch,
+        changedFiles: execRes?.changedFiles ?? disk?.changedFiles,
+        artifacts: execRes?.artifacts ?? disk?.artifacts ?? [],
+        metrics: execRes?.metrics ?? disk?.metrics,
+        errorCode: record2.errorCode,
+        error: record2.errorMessage,
+        updatedAt: record2.updatedAt
+      });
+    } catch {
+    }
+  };
   record2.completionPromise = engine.execute({
-    workspaceRoot,
+    workspaceRoot: executionRoot,
     pluginRoot,
     manifest,
     config: config2,
@@ -82325,12 +82493,15 @@ async function handleStartAgTask(input2, deps = {}) {
       record2.status = "CANCELLED";
       record2.errorCode = "TASK_CANCELLED";
       record2.errorMessage = execRes.errorMessage ?? "Task was cancelled.";
+      syncParentWorktreeArchive("FAILED", execRes);
     } else if (execRes.status === "VERIFIED") {
       record2.status = "VERIFIED";
+      syncParentWorktreeArchive("VERIFIED", execRes);
     } else {
       record2.status = "FAILED";
       record2.errorCode = execRes.errorCode;
       record2.errorMessage = execRes.errorMessage ? maskSecrets(execRes.errorMessage) : void 0;
+      syncParentWorktreeArchive("FAILED", execRes);
     }
   }).catch((err) => {
     record2.active = false;
@@ -82339,9 +82510,9 @@ async function handleStartAgTask(input2, deps = {}) {
     record2.errorCode = abortController.signal.aborted ? "TASK_CANCELLED" : "INTERNAL_ERROR";
     record2.errorMessage = maskSecrets(err instanceof Error ? err.message : String(err));
     try {
-      const cur = readManifest(workspaceRoot);
+      const cur = readManifest(executionRoot);
       if (cur && cur.taskId === taskId && (cur.status === "DISPATCHED" || cur.status === "RUNNING")) {
-        writeManifest(workspaceRoot, {
+        writeManifest(executionRoot, {
           ...cur,
           status: "FAILED",
           errorCode: record2.errorCode,
@@ -82351,8 +82522,18 @@ async function handleStartAgTask(input2, deps = {}) {
       }
     } catch {
     }
+    syncParentWorktreeArchive("FAILED");
   });
   manager.register(record2);
+  const nextSteps = worktreePath ? [
+    `Isolated worktree created at \`${worktreePath}\` on branch \`${worktreeBranch}\` \u2014 launch additional \`isolateWorktree: true\` jobs in parallel without lock conflicts.`,
+    `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
+    `After completion, inspect/merge \`${worktreeBranch}\` into your branch or clean up the worktree via \`/ag-rollback ${taskId}\`.`
+  ] : [
+    `Continue other work in parallel while Antigravity executes \`${taskId}\`.`,
+    `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
+    `Cancel if needed: \`/ag-cancel ${taskId}\` (or \`cancel_ag_job({ jobId: "${taskId}" })\`).`
+  ];
   return {
     ok: true,
     jobId: taskId,
@@ -82360,12 +82541,10 @@ async function handleStartAgTask(input2, deps = {}) {
     mode: resolvedMode,
     status: "RUNNING",
     gitCheckpointRef: checkpoint.checkpointRef,
+    ...worktreePath ? { worktreePath } : {},
+    ...worktreeBranch ? { worktreeBranch } : {},
     warnings,
-    nextSteps: [
-      `Continue other work in parallel while Antigravity executes \`${taskId}\`.`,
-      `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
-      `Cancel if needed: \`/ag-cancel ${taskId}\` (or \`cancel_ag_job({ jobId: "${taskId}" })\`).`
-    ]
+    nextSteps
   };
 }
 async function handleGetAgJob(input2 = {}, deps = {}) {
@@ -82441,15 +82620,19 @@ async function handleCancelAgJob(input2 = {}, deps = {}) {
     new Promise((r2) => setTimeout(r2, 1500))
   ]);
   try {
-    const cur = readManifest(target.workspaceRoot);
+    const cur = readManifest(target.executionRoot);
     if (cur && cur.taskId === target.taskId && (cur.status === "DISPATCHED" || cur.status === "RUNNING")) {
-      writeManifest(target.workspaceRoot, {
+      const updated = {
         ...cur,
         status: "FAILED",
         errorCode: "TASK_CANCELLED",
         error: "Background job was cancelled by user request.",
         updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      });
+      };
+      writeManifest(target.executionRoot, updated);
+      if (target.worktreePath) {
+        archiveManifest(target.workspaceRoot, updated);
+      }
     }
   } catch {
   }
@@ -82458,8 +82641,12 @@ async function handleCancelAgJob(input2 = {}, deps = {}) {
     jobId: target.jobId,
     status: "CANCELLED",
     gitCheckpointRef: target.gitCheckpointRef,
+    ...target.worktreePath ? { worktreePath: target.worktreePath } : {},
+    ...target.worktreeBranch ? { worktreeBranch: target.worktreeBranch } : {},
     message: `Cancelled running Antigravity job \`${target.jobId}\` (${target.title}).`,
-    nextSteps: target.gitCheckpointRef ? [
+    nextSteps: target.worktreePath ? [
+      `Remove the isolated worktree (\`${target.worktreePath}\`) and branch \`${target.worktreeBranch}\` cleanly via \`/ag-rollback ${target.jobId}\`.`
+    ] : target.gitCheckpointRef ? [
       `If partial edits were written before cancellation, run \`/ag-rollback ${target.jobId}\` (checkpoint \`${target.gitCheckpointRef}\`) to restore your workspace cleanly.`
     ] : ["Check `git status` to review any partial changes made before cancellation."]
   };
@@ -83315,10 +83502,24 @@ async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
   ensureBridgeDirs(workspaceRoot);
   ensureGitignoreEntry(workspaceRoot);
   const effectiveTimeoutSec = input2.timeoutSec ?? config2.subscription.timeout_sec;
-  const lockRes = acquireBridgeLock(workspaceRoot, effectiveTimeoutSec);
-  warnings.push(...lockRes.warnings);
   const taskId = generateTaskId();
-  const checkpoint = createCheckpoint(workspaceRoot, taskId, config2.git_guard);
+  let executionRoot = workspaceRoot;
+  let worktreePath;
+  let worktreeBranch;
+  if (input2.isolateWorktree) {
+    const wt = createTaskWorktree(workspaceRoot, taskId);
+    executionRoot = wt.worktreePath;
+    worktreePath = wt.worktreePath;
+    worktreeBranch = wt.branchName;
+    if (input2.lockedPaths && input2.lockedPaths.length > 0) {
+      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input2.lockedPaths);
+    }
+    ensureBridgeDirs(executionRoot);
+    ensureGitignoreEntry(executionRoot);
+  }
+  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
+  warnings.push(...lockRes.warnings);
+  const checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
   if (checkpoint.warning) {
     warnings.push(checkpoint.warning);
   }
@@ -83335,18 +83536,23 @@ async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
     createdAt: now,
     updatedAt: now,
     ...checkpointManifestFields(checkpoint),
+    ...worktreePath ? { worktreePath } : {},
+    ...worktreeBranch ? { worktreeBranch } : {},
     artifacts: []
   };
-  writeManifest(workspaceRoot, manifest);
-  clearReportMarkdown(workspaceRoot);
-  writeDispatchMarkdown(workspaceRoot, {
+  writeManifest(executionRoot, manifest);
+  if (worktreePath) {
+    archiveManifest(workspaceRoot, manifest);
+  }
+  clearReportMarkdown(executionRoot);
+  writeDispatchMarkdown(executionRoot, {
     manifest,
     instructions: input2.instructions,
     acceptanceCriteria
   });
   const engine = resolvedMode === "subscription" ? deps.subscriptionEngine ?? new SubscriptionEngine() : deps.apiWorkerEngine ?? new ApiWorkerEngine();
   const execRes = await engine.execute({
-    workspaceRoot,
+    workspaceRoot: executionRoot,
     pluginRoot,
     manifest,
     config: config2,
@@ -83358,12 +83564,29 @@ async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
     abortSignal: runtimeOptions?.abortSignal,
     onProgress: runtimeOptions?.onProgress
   });
+  if (worktreePath) {
+    const disk = readManifest(executionRoot);
+    archiveManifest(workspaceRoot, {
+      ...disk ?? manifest,
+      status: execRes.status,
+      worktreePath,
+      worktreeBranch,
+      changedFiles: execRes.changedFiles,
+      artifacts: execRes.artifacts,
+      metrics: execRes.metrics ?? disk?.metrics,
+      errorCode: execRes.errorCode,
+      error: execRes.errorMessage ? maskSecrets(execRes.errorMessage) : void 0,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
   return {
     ok: execRes.status === "VERIFIED",
     taskId,
     mode: resolvedMode,
     status: execRes.status,
     gitCheckpointRef: checkpoint.checkpointRef,
+    ...worktreePath ? { worktreePath } : {},
+    ...worktreeBranch ? { worktreeBranch } : {},
     changedFiles: execRes.changedFiles,
     artifacts: execRes.artifacts,
     reportMarkdown: maskSecrets(execRes.reportMarkdown),
@@ -83392,6 +83615,24 @@ async function handleRollbackAgTask(input2) {
       "ROLLBACK_NO_CHECKPOINT",
       input2.taskId ? `No task manifest found for taskId "${input2.taskId}".` : "No active or recent delegation manifest found in .ag-bridge/manifest.json."
     );
+  }
+  if (targetManifest.worktreePath) {
+    const wtRes = removeTaskWorktree(
+      workspaceRoot,
+      targetManifest.worktreePath,
+      targetManifest.worktreeBranch,
+      true
+    );
+    return {
+      ok: true,
+      taskId: targetManifest.taskId,
+      restoredCheckpointRef: targetManifest.gitCheckpointRef,
+      revertedTrackedFiles: [],
+      removedUntrackedFiles: [],
+      worktreeRemoved: wtRes.removed,
+      worktreeBranchDeleted: wtRes.branchDeleted,
+      ...wtRes.warning ? { warnings: [wtRes.warning] } : {}
+    };
   }
   const rollbackRes = rollbackCheckpoint(workspaceRoot, targetManifest);
   if (currentManifest && currentManifest.taskId === targetManifest.taskId) {
@@ -83463,6 +83704,7 @@ function createAntigravityMcpServer(deps = {}) {
     disableSlashCommands: external_exports.boolean().optional(),
     settings: external_exports.string().min(1).optional(),
     rawPrompt: external_exports.boolean().optional(),
+    isolateWorktree: external_exports.boolean().optional(),
     workspaceRoot: external_exports.string().min(1).optional()
   };
   server.tool(

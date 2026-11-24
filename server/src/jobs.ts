@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   acquireBridgeLock,
+  archiveManifest,
   clearReportMarkdown,
   ensureBridgeDirs,
   ensureGitignoreEntry,
@@ -26,7 +27,7 @@ import {
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine, ExecutionResult } from './engines/base.js';
 import { SubscriptionEngine } from './engines/subscription.js';
-import { checkpointManifestFields, createCheckpoint } from './git-guard.js';
+import { checkpointManifestFields, createCheckpoint, createTaskWorktree } from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
   AgErrorCode,
@@ -57,6 +58,9 @@ interface LiveJobRecord {
   title: string;
   mode: ResolvedExecutionMode;
   workspaceRoot: string;
+  executionRoot: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
   startedAt: string;
   startedAtMs: number;
   updatedAt: string;
@@ -172,7 +176,8 @@ function summarizeLiveJob(
   includeDetails: boolean,
   includeLogTail: boolean,
 ): BackgroundJobSummary {
-  const diskManifest = readManifest(rec.workspaceRoot);
+  const execRoot = rec.executionRoot;
+  const diskManifest = readManifest(execRoot);
   const matchingDisk =
     diskManifest?.taskId === rec.taskId
       ? diskManifest
@@ -194,25 +199,27 @@ function summarizeLiveJob(
     updatedAt: matchingDisk?.updatedAt ?? rec.updatedAt,
     elapsedSeconds,
     gitCheckpointRef: rec.gitCheckpointRef,
+    ...(rec.worktreePath ? { worktreePath: rec.worktreePath } : {}),
+    ...(rec.worktreeBranch ? { worktreeBranch: rec.worktreeBranch } : {}),
     conversationId: metrics?.conversationId,
     model: metrics?.model,
     metrics,
     changedFiles: includeDetails ? rec.result?.changedFiles ?? matchingDisk?.changedFiles : undefined,
     artifacts: includeDetails
-      ? rec.result?.artifacts ?? listTaskArtifacts(rec.workspaceRoot, rec.taskId)
+      ? rec.result?.artifacts ?? listTaskArtifacts(execRoot, rec.taskId)
       : undefined,
     reportMarkdown: includeDetails
       ? rec.result?.reportMarkdown
         ? maskSecrets(rec.result.reportMarkdown)
         : diskManifest?.taskId === rec.taskId
           ? (() => {
-              const r = readReportMarkdown(rec.workspaceRoot);
+              const r = readReportMarkdown(execRoot);
               return r ? maskSecrets(r) : undefined;
             })()
           : undefined
       : undefined,
     structuredOutput: includeDetails ? rec.result?.structuredOutput : undefined,
-    logTail: includeLogTail ? readLogTail(rec.workspaceRoot, rec.taskId) : undefined,
+    logTail: includeLogTail ? readLogTail(execRoot, rec.taskId) : undefined,
     warnings: [...rec.warnings, ...(rec.result?.warnings ?? [])],
     errorCode: rec.errorCode ?? rec.result?.errorCode,
     errorMessage: rec.errorMessage ?? rec.result?.errorMessage,
@@ -252,6 +259,8 @@ function summarizeDiskManifest(
     updatedAt: m.updatedAt,
     elapsedSeconds,
     gitCheckpointRef: m.gitCheckpointRef,
+    ...(m.worktreePath ? { worktreePath: m.worktreePath } : {}),
+    ...(m.worktreeBranch ? { worktreeBranch: m.worktreeBranch } : {}),
     conversationId: m.metrics?.conversationId,
     model: m.metrics?.model,
     metrics: m.metrics,
@@ -309,11 +318,28 @@ export async function handleStartAgTask(
   ensureGitignoreEntry(workspaceRoot);
 
   const effectiveTimeoutSec = input.timeoutSec ?? config.subscription.timeout_sec;
-  const lockRes = acquireBridgeLock(workspaceRoot, effectiveTimeoutSec);
+  const taskId = generateTaskId();
+
+  let executionRoot = workspaceRoot;
+  let worktreePath: string | undefined;
+  let worktreeBranch: string | undefined;
+
+  if (input.isolateWorktree) {
+    const wt = createTaskWorktree(workspaceRoot, taskId);
+    executionRoot = wt.worktreePath;
+    worktreePath = wt.worktreePath;
+    worktreeBranch = wt.branchName;
+    if (input.lockedPaths && input.lockedPaths.length > 0) {
+      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input.lockedPaths);
+    }
+    ensureBridgeDirs(executionRoot);
+    ensureGitignoreEntry(executionRoot);
+  }
+
+  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
   warnings.push(...lockRes.warnings);
 
-  const taskId = generateTaskId();
-  const checkpoint = createCheckpoint(workspaceRoot, taskId, config.git_guard);
+  const checkpoint = createCheckpoint(executionRoot, taskId, config.git_guard);
   if (checkpoint.warning) {
     warnings.push(checkpoint.warning);
   }
@@ -335,12 +361,17 @@ export async function handleStartAgTask(
     createdAt: now,
     updatedAt: now,
     ...checkpointManifestFields(checkpoint),
+    ...(worktreePath ? { worktreePath } : {}),
+    ...(worktreeBranch ? { worktreeBranch } : {}),
     artifacts: [],
   };
 
-  writeManifest(workspaceRoot, manifest);
-  clearReportMarkdown(workspaceRoot);
-  writeDispatchMarkdown(workspaceRoot, {
+  writeManifest(executionRoot, manifest);
+  if (worktreePath) {
+    archiveManifest(workspaceRoot, manifest);
+  }
+  clearReportMarkdown(executionRoot);
+  writeDispatchMarkdown(executionRoot, {
     manifest,
     instructions: input.instructions,
     acceptanceCriteria,
@@ -358,6 +389,9 @@ export async function handleStartAgTask(
     title: input.title,
     mode: resolvedMode,
     workspaceRoot,
+    executionRoot,
+    worktreePath,
+    worktreeBranch,
     startedAt: now,
     startedAtMs: Date.now(),
     updatedAt: now,
@@ -369,9 +403,30 @@ export async function handleStartAgTask(
     completionPromise: Promise.resolve(),
   };
 
+  const syncParentWorktreeArchive = (finalStatus: 'VERIFIED' | 'FAILED', execRes?: ExecutionResult): void => {
+    if (!worktreePath) return;
+    try {
+      const disk = readManifest(executionRoot);
+      archiveManifest(workspaceRoot, {
+        ...(disk ?? manifest),
+        status: finalStatus,
+        worktreePath,
+        worktreeBranch,
+        changedFiles: execRes?.changedFiles ?? disk?.changedFiles,
+        artifacts: execRes?.artifacts ?? disk?.artifacts ?? [],
+        metrics: execRes?.metrics ?? disk?.metrics,
+        errorCode: record.errorCode,
+        error: record.errorMessage,
+        updatedAt: record.updatedAt,
+      });
+    } catch {
+      // ignore archive sync failure
+    }
+  };
+
   record.completionPromise = engine
     .execute({
-      workspaceRoot,
+      workspaceRoot: executionRoot,
       pluginRoot,
       manifest,
       config,
@@ -390,12 +445,15 @@ export async function handleStartAgTask(
         record.status = 'CANCELLED';
         record.errorCode = 'TASK_CANCELLED';
         record.errorMessage = execRes.errorMessage ?? 'Task was cancelled.';
+        syncParentWorktreeArchive('FAILED', execRes);
       } else if (execRes.status === 'VERIFIED') {
         record.status = 'VERIFIED';
+        syncParentWorktreeArchive('VERIFIED', execRes);
       } else {
         record.status = 'FAILED';
         record.errorCode = execRes.errorCode;
         record.errorMessage = execRes.errorMessage ? maskSecrets(execRes.errorMessage) : undefined;
+        syncParentWorktreeArchive('FAILED', execRes);
       }
     })
     .catch((err) => {
@@ -405,9 +463,9 @@ export async function handleStartAgTask(
       record.errorCode = abortController.signal.aborted ? 'TASK_CANCELLED' : 'INTERNAL_ERROR';
       record.errorMessage = maskSecrets(err instanceof Error ? err.message : String(err));
       try {
-        const cur = readManifest(workspaceRoot);
+        const cur = readManifest(executionRoot);
         if (cur && cur.taskId === taskId && (cur.status === 'DISPATCHED' || cur.status === 'RUNNING')) {
-          writeManifest(workspaceRoot, {
+          writeManifest(executionRoot, {
             ...cur,
             status: 'FAILED',
             errorCode: record.errorCode,
@@ -418,9 +476,22 @@ export async function handleStartAgTask(
       } catch {
         // ignore
       }
+      syncParentWorktreeArchive('FAILED');
     });
 
   manager.register(record);
+
+  const nextSteps = worktreePath
+    ? [
+        `Isolated worktree created at \`${worktreePath}\` on branch \`${worktreeBranch}\` — launch additional \`isolateWorktree: true\` jobs in parallel without lock conflicts.`,
+        `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
+        `After completion, inspect/merge \`${worktreeBranch}\` into your branch or clean up the worktree via \`/ag-rollback ${taskId}\`.`,
+      ]
+    : [
+        `Continue other work in parallel while Antigravity executes \`${taskId}\`.`,
+        `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
+        `Cancel if needed: \`/ag-cancel ${taskId}\` (or \`cancel_ag_job({ jobId: "${taskId}" })\`).`,
+      ];
 
   return {
     ok: true,
@@ -429,12 +500,10 @@ export async function handleStartAgTask(
     mode: resolvedMode,
     status: 'RUNNING',
     gitCheckpointRef: checkpoint.checkpointRef,
+    ...(worktreePath ? { worktreePath } : {}),
+    ...(worktreeBranch ? { worktreeBranch } : {}),
     warnings,
-    nextSteps: [
-      `Continue other work in parallel while Antigravity executes \`${taskId}\`.`,
-      `Check live progress or collect results: \`/ag-jobs ${taskId}\` (or \`get_ag_job({ jobId: "${taskId}" })\`).`,
-      `Cancel if needed: \`/ag-cancel ${taskId}\` (or \`cancel_ag_job({ jobId: "${taskId}" })\`).`,
-    ],
+    nextSteps,
   };
 }
 
@@ -538,15 +607,19 @@ export async function handleCancelAgJob(
   ]);
 
   try {
-    const cur = readManifest(target.workspaceRoot);
+    const cur = readManifest(target.executionRoot);
     if (cur && cur.taskId === target.taskId && (cur.status === 'DISPATCHED' || cur.status === 'RUNNING')) {
-      writeManifest(target.workspaceRoot, {
+      const updated: BridgeManifest = {
         ...cur,
         status: 'FAILED',
         errorCode: 'TASK_CANCELLED',
         error: 'Background job was cancelled by user request.',
         updatedAt: new Date().toISOString(),
-      });
+      };
+      writeManifest(target.executionRoot, updated);
+      if (target.worktreePath) {
+        archiveManifest(target.workspaceRoot, updated);
+      }
     }
   } catch {
     // ignore
@@ -557,11 +630,17 @@ export async function handleCancelAgJob(
     jobId: target.jobId,
     status: 'CANCELLED',
     gitCheckpointRef: target.gitCheckpointRef,
+    ...(target.worktreePath ? { worktreePath: target.worktreePath } : {}),
+    ...(target.worktreeBranch ? { worktreeBranch: target.worktreeBranch } : {}),
     message: `Cancelled running Antigravity job \`${target.jobId}\` (${target.title}).`,
-    nextSteps: target.gitCheckpointRef
+    nextSteps: target.worktreePath
       ? [
-          `If partial edits were written before cancellation, run \`/ag-rollback ${target.jobId}\` (checkpoint \`${target.gitCheckpointRef}\`) to restore your workspace cleanly.`,
+          `Remove the isolated worktree (\`${target.worktreePath}\`) and branch \`${target.worktreeBranch}\` cleanly via \`/ag-rollback ${target.jobId}\`.`,
         ]
-      : ['Check `git status` to review any partial changes made before cancellation.'],
+      : target.gitCheckpointRef
+        ? [
+            `If partial edits were written before cancellation, run \`/ag-rollback ${target.jobId}\` (checkpoint \`${target.gitCheckpointRef}\`) to restore your workspace cleanly.`,
+          ]
+        : ['Check `git status` to review any partial changes made before cancellation.'],
   };
 }

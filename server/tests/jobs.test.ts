@@ -14,6 +14,7 @@ import {
   handleGetAgJob,
   handleStartAgTask,
 } from '../src/jobs.js';
+import { handleRollbackAgTask } from '../src/index.js';
 import { DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
 function makeAgyDetectorDeps(): DetectorDeps {
@@ -377,5 +378,99 @@ describe('Async background jobs & power prompt parity (TC-U22 ~ TC-U26)', () => 
 
     releaseEngine();
     await new Promise((r) => setTimeout(r, 30));
+  });
+
+  it('TC-U45b: runs two concurrent isolateWorktree start_ag_task jobs in parallel without BRIDGE_BUSY', async () => {
+    const runGitCmd = (args: string[]) =>
+      execFileSync('git', args, { cwd: tmpRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+    runGitCmd(['init']);
+    runGitCmd(['config', 'user.email', 'par@example.com']);
+    runGitCmd(['config', 'user.name', 'Par User']);
+    runGitCmd(['config', 'core.autocrlf', 'false']);
+    fs.writeFileSync(path.join(tmpRoot, 'shared.ts'), 'export const base = 0;\n', 'utf8');
+    runGitCmd(['add', 'shared.ts']);
+    runGitCmd(['commit', '-m', 'init']);
+
+    let releaseBoth!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseBoth = r;
+    });
+    const seenRoots: string[] = [];
+
+    const mockEngine: ExecutionEngine = {
+      mode: 'subscription',
+      async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+        seenRoots.push(ctx.workspaceRoot);
+        await gate;
+        const markerFile = `${ctx.manifest.taskId}.txt`;
+        fs.writeFileSync(path.join(ctx.workspaceRoot, markerFile), ctx.manifest.title, 'utf8');
+        return {
+          status: 'VERIFIED',
+          reportMarkdown: `# Done ${ctx.manifest.title}`,
+          changedFiles: [markerFile],
+          artifacts: [],
+          warnings: [],
+        };
+      },
+    };
+
+    const manager = new BackgroundJobManager();
+    const job1 = await handleStartAgTask(
+      {
+        title: 'Parallel UI Task A',
+        instructions: 'Build card component in worktree A.',
+        isolateWorktree: true,
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: mockEngine, jobManager: manager },
+    );
+
+    const job2 = await handleStartAgTask(
+      {
+        title: 'Parallel UI Task B',
+        instructions: 'Build modal component in worktree B.',
+        isolateWorktree: true,
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: mockEngine, jobManager: manager },
+    );
+
+    expect(job1.ok).toBe(true);
+    expect(job2.ok).toBe(true);
+    expect(job1.worktreePath).toBeTruthy();
+    expect(job2.worktreePath).toBeTruthy();
+    expect(job1.worktreePath).not.toBe(job2.worktreePath);
+    expect(job1.worktreeBranch).toBe(`ag-task/${job1.taskId}`);
+    expect(job2.worktreeBranch).toBe(`ag-task/${job2.taskId}`);
+
+    const listing = await handleGetAgJob({ workspaceRoot: tmpRoot }, { jobManager: manager });
+    expect(listing.activeCount).toBe(2);
+
+    releaseBoth();
+    await new Promise((r) => setTimeout(r, 80));
+
+    const res1 = await handleGetAgJob({ jobId: job1.jobId, workspaceRoot: tmpRoot }, { jobManager: manager });
+    const res2 = await handleGetAgJob({ jobId: job2.jobId, workspaceRoot: tmpRoot }, { jobManager: manager });
+    expect(res1.job?.status).toBe('VERIFIED');
+    expect(res2.job?.status).toBe('VERIFIED');
+    expect(res1.job?.worktreePath).toBe(job1.worktreePath);
+    expect(res2.job?.worktreePath).toBe(job2.worktreePath);
+    expect(seenRoots).toEqual([job1.worktreePath, job2.worktreePath]);
+
+    // Parent workspace remains completely clean
+    expect(runGitCmd(['status', '--porcelain'])).toBe('');
+
+    // Clean up both worktrees via handleRollbackAgTask
+    const rb1 = await handleRollbackAgTask({ taskId: job1.taskId, workspaceRoot: tmpRoot });
+    const rb2 = await handleRollbackAgTask({ taskId: job2.taskId, workspaceRoot: tmpRoot });
+    expect(rb1.worktreeRemoved).toBe(true);
+    expect(rb1.worktreeBranchDeleted).toBe(true);
+    expect(rb2.worktreeRemoved).toBe(true);
+    expect(rb2.worktreeBranchDeleted).toBe(true);
+    expect(fs.existsSync(job1.worktreePath!)).toBe(false);
+    expect(fs.existsSync(job2.worktreePath!)).toBe(false);
   });
 });

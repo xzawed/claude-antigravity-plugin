@@ -32,6 +32,7 @@ import {
   handleDelegateToAntigravity,
   handleGetUsage,
   handleListCapabilities,
+  handleRollbackAgTask,
 } from '../src/index.js';
 import { AgPluginError, DEFAULT_BRIDGE_CONFIG } from '../src/types.js';
 
@@ -1265,5 +1266,72 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;
     }
+  });
+
+  it('TC-U45c: delegate_to_antigravity with isolateWorktree runs in isolated worktree and rollback_ag_task removes it cleanly', async () => {
+    const runGitCmd = (args: string[]) =>
+      execFileSync('git', args, { cwd: tmpRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+    runGitCmd(['init']);
+    runGitCmd(['config', 'user.email', 'wt@example.com']);
+    runGitCmd(['config', 'user.name', 'WT User']);
+    runGitCmd(['config', 'core.autocrlf', 'false']);
+    fs.writeFileSync(path.join(tmpRoot, 'main-file.ts'), 'export const v = 1;\n', 'utf8');
+    runGitCmd(['add', 'main-file.ts']);
+    runGitCmd(['commit', '-m', 'init']);
+
+    let executedInDir = '';
+    const subEngine = new SubscriptionEngine({
+      triggerFn: async (ctx) => {
+        executedInDir = ctx.workspaceRoot;
+        fs.writeFileSync(path.join(ctx.workspaceRoot, 'main-file.ts'), 'export const v = 2;\n', 'utf8');
+        writeReportMarkdown(ctx.workspaceRoot, '# Worktree report');
+        writeManifest(ctx.workspaceRoot, {
+          ...ctx.manifest,
+          status: 'VERIFIED',
+          changedFiles: ['main-file.ts'],
+          updatedAt: new Date().toISOString(),
+        });
+        return { methodUsed: 'custom' };
+      },
+    });
+
+    const del = await handleDelegateToAntigravity(
+      {
+        title: 'Isolated worktree sync delegation',
+        instructions: 'Edit main-file.ts inside an isolated worktree.',
+        lockedPaths: ['main-file.ts'],
+        modeOverride: 'subscription',
+        isolateWorktree: true,
+        workspaceRoot: tmpRoot,
+      },
+      {
+        pluginRoot,
+        subscriptionEngine: subEngine,
+        detectorDeps: {
+          platform: 'linux',
+          env: {},
+          homedir: '/home/tester',
+          existsSync: () => true,
+          findBinary: () => '/usr/bin/agy',
+        },
+      },
+    );
+
+    expect(del.ok).toBe(true);
+    expect(del.worktreePath).toBeTruthy();
+    expect(del.worktreeBranch).toBe(`ag-task/${del.taskId}`);
+    expect(executedInDir).toBe(del.worktreePath);
+    // Parent workspace must be untouched
+    expect(fs.readFileSync(path.join(tmpRoot, 'main-file.ts'), 'utf8')).toBe('export const v = 1;\n');
+    expect(fs.readFileSync(path.join(del.worktreePath!, 'main-file.ts'), 'utf8')).toBe('export const v = 2;\n');
+
+    // Rollback from parent workspace removes the isolated worktree + ag-task branch without touching main tree
+    const rb = await handleRollbackAgTask({ taskId: del.taskId, workspaceRoot: tmpRoot });
+    expect(rb.ok).toBe(true);
+    expect(rb.worktreeRemoved).toBe(true);
+    expect(rb.worktreeBranchDeleted).toBe(true);
+    expect(fs.existsSync(del.worktreePath!)).toBe(false);
+    expect(fs.readFileSync(path.join(tmpRoot, 'main-file.ts'), 'utf8')).toBe('export const v = 1;\n');
   });
 });

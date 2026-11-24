@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.13.0` |
+| **버전** | `1.14.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-25` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -197,6 +197,13 @@ flowchart TD
   - 한계:
     - Windows에서 재사용 PID 방지 조건과 두 번째 훑기는 테스트로 재현할 수 없다. 그 조건을 지운 변이가 살아남는다.
     - Windows 측정 트리는 두 단계(git → sh)다. MSYS의 `sleep`은 Windows 부모로 연결되지 않았다. 그래서 깊이 탐색과 두 번째 훑기 중 하나만 있어도 `TC-U34b`는 통과하고, 깊이 탐색을 지운 변이가 살아남는다. 둘 다 둔다.
+
+### 5.6 Git Worktree 격리 병렬 위임 (`createTaskWorktree`, `removeTaskWorktree`, `TC-U45`~`TC-U45c`, `TC-S27`)
+- `delegate_to_antigravity` 및 `start_ag_task`에 `isolateWorktree: true`를 넘기면, 부모 저장소의 `HEAD`로부터 `.ag-bridge/worktrees/<taskId>` 경로와 전용 브랜치 `ag-task/<taskId>`를 생성해 작업을 격리 실행한다.
+- **병렬 실행:** 각 worktree는 독립 `.ag-bridge/` 잠금을 가지므로 여러 `start_ag_task({ isolateWorktree: true })` 작업이 `BRIDGE_BUSY` 충돌 없이 동시에 실행되며, 부모 작업 트리는 전혀 변경되지 않는다. `.ag-bridge/`는 `.git/info/exclude`에 등록되어 부모 `git status`도 깨끗하게 유지된다.
+- **안전 롤백 및 보안 가드 (`TC-S27`):**
+  - worktree 작업에 대해 `rollback_ag_task({ taskId })`를 호출하면 부모 작업 트리를 건드리지 않고 `removeTaskWorktree`로 격리 worktree와 `ag-task/<taskId>` 브랜치만 제거한다.
+  - `removeTaskWorktree`는 `fs.realpathSync.native`·`lstatSync`로 대상 경로가 `.ag-bridge/worktrees/` 내부의 실제 디렉터리인지 검증(심볼릭 링크·경로 탈출 시 `PATH_TRAVERSAL_BLOCKED`)하고, `ag-task/` 접두사가 아닌 브랜치는 매니페스트가 가리키더라도 절대 삭제하지 않는다.
 
 ---
 

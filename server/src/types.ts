@@ -158,6 +158,10 @@ export interface BridgeManifest {
   gitCheckpointHeadRef?: string;
   /** `.ag-bridge/recovery/<taskId>/untracked` when the user's untracked files were copied aside at the checkpoint. */
   gitUntrackedSnapshotDir?: string;
+  /** Absolute path to the isolated git worktree when `isolateWorktree: true` was used. */
+  worktreePath?: string;
+  /** Dedicated `ag-task/<taskId>` branch name when `isolateWorktree: true` was used. */
+  worktreeBranch?: string;
   artifacts: string[];
   changedFiles?: string[];
   metrics?: ExecutionMetrics;
@@ -228,6 +232,7 @@ export interface DelegateToolInput extends AgyCliOptions {
   acceptanceCriteria?: string[];
   modeOverride?: ExecutionMode;
   timeoutSec?: number;
+  isolateWorktree?: boolean;
   workspaceRoot?: string;
 }
 
@@ -237,6 +242,8 @@ export interface DelegateToolOutput {
   mode: ResolvedExecutionMode;
   status: 'VERIFIED' | 'FAILED';
   gitCheckpointRef?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
   changedFiles: string[];
   artifacts: string[];
   reportMarkdown: string;
@@ -266,6 +273,10 @@ export interface RollbackToolOutput {
   preRollbackHead?: string;
   /** A ref holding the uncommitted tracked changes the rollback undid, when there were any. */
   preRollbackRef?: string;
+  /** True when rollback removed an isolated task worktree instead of resetting the main work tree. */
+  worktreeRemoved?: boolean;
+  /** True when rollback deleted the task's `ag-task/<taskId>` branch. */
+  worktreeBranchDeleted?: boolean;
   warnings?: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
@@ -376,6 +387,8 @@ export interface BackgroundJobSummary {
   updatedAt: string;
   elapsedSeconds: number;
   gitCheckpointRef?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
   conversationId?: string;
   model?: string;
   metrics?: ExecutionMetrics;
@@ -396,6 +409,8 @@ export interface StartJobToolOutput {
   mode: ResolvedExecutionMode;
   status: 'RUNNING';
   gitCheckpointRef?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
   warnings: string[];
   nextSteps: string[];
 }
@@ -426,6 +441,8 @@ export interface CancelJobToolOutput {
   jobId?: string;
   status: 'CANCELLED' | 'NOT_RUNNING';
   gitCheckpointRef?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
   message: string;
   nextSteps: string[];
   errorCode?: AgErrorCode;

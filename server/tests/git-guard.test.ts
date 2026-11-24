@@ -6,11 +6,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   checkpointManifestFields,
   createCheckpoint,
+  createTaskWorktree,
   endPosixLeftovers,
   getGitInfo,
   listGitChangedFiles,
   listUntrackedFiles,
   pruneRecoveryArtifacts,
+  removeTaskWorktree,
   rollbackCheckpoint,
 } from '../src/git-guard.js';
 import { resolveExecutable } from '../src/exec-path.js';
@@ -937,5 +939,44 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
       { pid: -42425, signal: 'SIGKILL' },
       { pid: -42425, signal: 'SIGKILL' },
     ]);
+  });
+
+  it('TC-U45: createTaskWorktree isolates edits on ag-task/<id> while keeping parent clean, and removeTaskWorktree cleans up', () => {
+    initRepo(tmpRoot);
+    const wt = createTaskWorktree(tmpRoot, 'ag-wt-1');
+    expect(wt.branchName).toBe('ag-task/ag-wt-1');
+    expect(fs.existsSync(path.join(wt.worktreePath, 'app.ts'))).toBe(true);
+
+    // Edit inside the isolated worktree must not dirty the parent workspace
+    fs.writeFileSync(path.join(wt.worktreePath, 'app.ts'), 'export const version = 777;\n', 'utf8');
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 1;\n');
+    expect(git(wt.worktreePath, ['symbolic-ref', '--short', 'HEAD'])).toBe('ag-task/ag-wt-1');
+
+    const rm = removeTaskWorktree(tmpRoot, wt.worktreePath, wt.branchName, true);
+    expect(rm.removed).toBe(true);
+    expect(rm.branchDeleted).toBe(true);
+    expect(fs.existsSync(wt.worktreePath)).toBe(false);
+    expect(git(tmpRoot, ['branch', '--list', wt.branchName])).toBe('');
+  });
+
+  it('TC-S27: removeTaskWorktree blocks paths outside .ag-bridge/worktrees/ and refuses deleting non-ag-task branches', () => {
+    initRepo(tmpRoot);
+    const mainBranch = git(tmpRoot, ['symbolic-ref', '--short', 'HEAD']);
+    const outsideDir = path.join(tmpRoot, 'important-dir');
+    fs.mkdirSync(outsideDir, { recursive: true });
+
+    expect(() => removeTaskWorktree(tmpRoot, outsideDir, 'ag-task/fake', true)).toThrow(AgPluginError);
+    expect(() => removeTaskWorktree(tmpRoot, path.join(tmpRoot, '.ag-bridge', 'worktrees', '..', 'history'), 'ag-task/fake', true)).toThrow(AgPluginError);
+    expect(fs.existsSync(outsideDir)).toBe(true);
+
+    // Tampered manifest naming the user's main branch must never delete it
+    const wt = createTaskWorktree(tmpRoot, 'ag-wt-branch-guard');
+    const rm = removeTaskWorktree(tmpRoot, wt.worktreePath, mainBranch, true);
+    expect(rm.removed).toBe(true);
+    expect(rm.branchDeleted).toBe(false);
+    expect(rm.warning).toContain('Refused to delete branch');
+    expect(git(tmpRoot, ['branch', '--list', mainBranch])).toContain(mainBranch);
+    // Clean up the actual task branch
+    git(tmpRoot, ['branch', '-D', wt.branchName]);
   });
 });
