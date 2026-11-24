@@ -474,7 +474,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 ```text
 claude-antigravity-plugin/
 ├── assets/                        # 히어로 배너 및 5종 벡터 도식(여정·커맨드지도·아키텍처·벤치마크·상태머신)
-├── .claude-plugin/                # plugin.json (v1.5.0) & marketplace.json
+├── .claude-plugin/                # plugin.json (v1.6.0) & marketplace.json
 ├── .mcp.json                      # 내장 Stdio MCP 서버 실행 정의
 ├── hooks/hooks.json               # SessionStart 자동 초기화 훅
 ├── skills/ag-delegate/SKILL.md    # 자율 위임 및 검수 스킬
