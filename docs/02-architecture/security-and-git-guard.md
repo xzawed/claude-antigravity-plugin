@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.4.0` |
+| **버전** | `1.5.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -16,7 +16,7 @@
 
 | 위협 ID | 위협 내용 | 영향 | 완화 계층 |
 | :--- | :--- | :--- | :--- |
-| `TH-01` | `../` Path Traversal 또는 Symlink를 이용한 워크스페이스 외부/허용 외 파일 덮어쓰기 | 백엔드 코어·시스템 파일 변조 | `path-guard.ts` |
+| `TH-01` | `../` Path Traversal, Symlink, Windows 경로 별칭(8.3 이름·대체 데이터 스트림·끝 점/공백)을 이용한 워크스페이스 외부/허용 외/금지 파일 접근 | 백엔드 코어·시스템 파일 변조, 비밀 노출 | `path-guard.ts` (§2.1, `TC-S01`~`TC-S03`, `TC-S21`~`TC-S21c`) |
 | `TH-02` | `.git/`, `.env`, `.ag-bridge/config.json` 등 민감 파일 변조 | 저장소 오염, 비밀 탈취, 설정 변조 | `path-guard.ts` 금지 목록 |
 | `TH-03` | API 워커 `run_command`를 통한 파괴적 명령(`rm -rf`, `git push --force`) 또는 셸 인젝션 | 데이터 손실, 원격 저장소 훼손 | `api-worker.ts` 명령 정책 |
 | `TH-04` | `GEMINI_API_KEY`가 로그, `report.md`, `manifest.json`에 노출 | API 키 유출 및 과금 피해 | 로그 마스킹 & git 무시 등록(`.git/info/exclude` / `.gitignore`) |
@@ -36,7 +36,13 @@
 1. **빈 경로 및 Null Byte 차단:** `targetPath`에 `\0`이 포함되거나 빈 문자열이면 즉시 거부.
 2. **절대 경로 정규화:** `resolvedTarget = path.resolve(workspaceRoot, targetPath)`.
 3. **워크스페이스 경계 검증:** `path.relative(workspaceRoot, resolvedTarget)`가 `..`로 시작하거나 절대 경로(`path.isAbsolute`)이면 즉시 거부 (`PATH_TRAVERSAL_BLOCKED`).
-4. **Symlink 탈출 검증:** 대상 파일(또는 가장 가까운 기존 상위 디렉터리)에 대해 `fs.realpathSync`를 수행하여 실제 물리 경로도 `workspaceRootReal` 내부인지 확인한다.
+4. **Symlink 탈출 검증과 별칭 정규화:** 워크스페이스 루트와 대상 파일(또는 가장 가까운 기존 상위 디렉터리)의 **OS 기준 실경로**(`fs.realpathSync.native`)를 구하고, 실제 물리 경로도 `workspaceRootReal` 내부인지 확인한다. 이후의 금지 목록·`lockedPaths` 판정은 모두 이 정규 경로로 하고, 실제 읽기·쓰기도 이 경로로 한다.
+   - **Windows 별칭:** 한 파일이 여러 철자로 열리기 때문에 문자열 검사로는 놓친다. 실측으로 확인한 우회는 다음과 같다(`TC-S21`~`TC-S21c`).
+     - JS `realpath`는 8.3 짧은 이름을 그대로 둔다. 그래서 `ENV~1`·`.env::$DATA`로 `.env`가 읽혔다.
+     - `src/NODE_M~1/x.js`로 `node_modules`에 쓸 수 있었다.
+     - `GIT~1`·`.git.`이 `lockedPaths`로 받아들여졌다.
+   - **대응:** OS 실경로는 8.3 이름을 긴 이름으로 펼친다. 경로 조각에 `:`(대체 데이터 스트림)가 있거나 조각이 점·공백으로 끝나면 Windows에서 즉시 거부한다.
+   - **알려진 한계:** 하드 링크는 어느 쪽 이름도 "실경로"라서 경로로는 가릴 수 없다. git은 하드 링크를 옮기지 않으므로, 압축본으로 받은 폴더에만 해당한다. 검사와 사용 사이에 다른 프로세스가 링크를 바꿔치기하는 경우(TOCTOU)도 범위 밖이다. 그런 프로세스가 이미 돌고 있다면 이 검사가 지킬 것이 없다.
 5. **절대 금지 경로(Denylist) 차단:** `lockedPaths`에 포함되었더라도 아래 경로는 무조건 거부한다(`PROTECTED_PATH_BLOCKED`):
    - `.git/**`
    - `.env`, `.env.*` (단, `.env.example` 읽기 전용은 허용 가능, 쓰기는 기본 차단)

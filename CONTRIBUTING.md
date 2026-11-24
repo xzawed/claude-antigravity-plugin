@@ -68,7 +68,7 @@ Direct commits and pushes to `main` are not permitted.
 
 Please read [AGENTS.md](./AGENTS.md) and [docs/00-standards/documentation-standard.md](./docs/00-standards/documentation-standard.md) before making architectural changes:
 
-1. **Path Security (`lockedPaths`):** Never bypass `path-guard.ts`. All write paths must pass `path.resolve` + `fs.realpathSync` canonicalization, and `.git/`, `.env*`, `node_modules/`, and `.ag-bridge/config.json` must remain strictly protected.
+1. **Path Security (`lockedPaths`):** Never bypass `path-guard.ts`. All write paths must pass `path.resolve` + `fs.realpathSync.native` canonicalization (the JS `fs.realpathSync` keeps Windows 8.3 short names such as `ENV~1` unexpanded), and `.git/`, `.env*`, `node_modules/`, and `.ag-bridge/config.json` must remain strictly protected.
 2. **Stdio MCP Protocol Safety:** `server/src/index.ts` reserves `stdout` exclusively for MCP JSON-RPC frames. All diagnostic logs must go to `stderr` (`console.error`).
 3. **Atomic Bridge I/O:** State files under `.ag-bridge/` (`manifest.json`, `config.json`) must be updated atomically via `.tmp` write + `rename`.
 4. **Cross-Platform Safety:** Use `path.join` / `path.resolve` (`path.win32` / `path.posix` when targeting a specific OS), quote `${CLAUDE_PLUGIN_ROOT}` in shell hooks, and prefer `spawn(..., { shell: false })` (with `buildCliSpawnSpec` for Windows `.cmd`/`.bat`).
