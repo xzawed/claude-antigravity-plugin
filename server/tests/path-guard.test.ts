@@ -111,25 +111,38 @@ describe('path-guard security (TC-S01 ~ TC-S03)', () => {
   // data stream (`::$DATA`). Measured on main: each got past the protected-path checks — ENV~1 and
   // .env::$DATA read the secret, src/NODE_M~1/x.js wrote into node_modules, GIT~1 became a
   // lockedPath that allowed GIT~1/hooks/pre-commit, and ".git." was accepted as a lockedPath.
-  const shortName = (p: string): string | undefined => {
-    const kind = fs.statSync(p).isDirectory() ? 'GetFolder' : 'GetFile';
-    const r = spawnSync(
-      'powershell.exe',
-      ['-NoProfile', '-Command', `(New-Object -ComObject Scripting.FileSystemObject).${kind}('${p}').ShortName`],
-      { encoding: 'utf8' },
-    );
-    const name = (r.stdout ?? '').trim();
-    return name && name.toLowerCase() !== path.basename(p).toLowerCase() ? name : undefined;
+  // One PowerShell for every name: a start costs seconds on the Windows CI runners (TC-S21 with
+  // three starts took 4.5 s, then 12 s against vitest's 5 s default; about 1.1 s locally).
+  const shortNames = (paths: string[]): Array<string | undefined> => {
+    const script = paths
+      .map((p, i) => {
+        const kind = fs.statSync(p).isDirectory() ? 'GetFolder' : 'GetFile';
+        return `'${i}|' + (New-Object -ComObject Scripting.FileSystemObject).${kind}('${p}').ShortName`;
+      })
+      .join('; ');
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' });
+    const byIndex = new Map<number, string>();
+    for (const line of (r.stdout ?? '').split(/\r?\n/)) {
+      const m = /^(\d+)\|(.*)$/.exec(line.trim());
+      if (m) byIndex.set(Number(m[1]), m[2]);
+    }
+    return paths.map((p, i) => {
+      const name = byIndex.get(i) ?? '';
+      return name && name.toLowerCase() !== path.basename(p).toLowerCase() ? name : undefined;
+    });
   };
 
   it.skipIf(process.platform !== 'win32')(
     'TC-S21: an 8.3 short name of .env, node_modules or .git is still protected (Windows)',
+    { timeout: 60_000 },
     (ctx) => {
       fs.mkdirSync(path.join(tmpRoot, '.git', 'hooks'), { recursive: true });
       fs.mkdirSync(path.join(tmpRoot, 'src', 'node_modules'), { recursive: true });
-      const envShort = shortName(path.join(tmpRoot, '.env'));
-      const gitShort = shortName(path.join(tmpRoot, '.git'));
-      const nmShort = shortName(path.join(tmpRoot, 'src', 'node_modules'));
+      const [envShort, gitShort, nmShort] = shortNames([
+        path.join(tmpRoot, '.env'),
+        path.join(tmpRoot, '.git'),
+        path.join(tmpRoot, 'src', 'node_modules'),
+      ]);
       if (!envShort || !gitShort || !nmShort) {
         ctx.skip(); // 8.3 names are disabled on this volume
         return;
