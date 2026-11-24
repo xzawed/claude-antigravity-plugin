@@ -87,19 +87,22 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
   });
 
   afterEach(async () => {
-    // A filter process that git started before the time limit cut git off (TC-U34) keeps the
-    // folder busy until it ends. rmSync's own maxRetries failed EBUSY at once on Windows CI, so wait here.
-    for (let attempt = 0; ; attempt++) {
+    // TC-U34 cuts git off, but where `git` is Git for Windows' launcher (cmd\git.exe, as on the CI
+    // runners) only the launcher dies: the real git runs on through its filter calls and keeps
+    // the folder busy (measured: still running after the cut, folder free after 7.5 s locally;
+    // over 10 s on Windows CI). rmSync's maxRetries did not wait, so wait here.
+    const deadline = Date.now() + 45_000;
+    for (;;) {
       try {
         fs.rmSync(tmpRoot, { recursive: true, force: true });
         return;
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code ?? '';
-        if (attempt >= 80 || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code)) throw err;
+        if (Date.now() > deadline || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code)) throw err;
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
     }
-  });
+  }, 60_000);
 
   afterAll(() => {
     if (fakeNodeDir) fs.rmSync(fakeNodeDir, { recursive: true, force: true });
