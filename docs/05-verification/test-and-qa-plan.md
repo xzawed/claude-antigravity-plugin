@@ -37,6 +37,7 @@
 | `TC-U04d` | `cli-init.ts` | 이전 버전이 `.gitignore`에 `.ag-bridge/`를 넣어 둔 저장소 | `.gitignore` 바이트 동일, 템플릿도 숨김(status 빈 출력) | `FR-001` |
 | `TC-U04e` | `cli-init.ts` | 저장소의 하위 디렉터리를 워크스페이스로 초기화 | 저장소 `info/exclude` 사용, 하위 `.gitignore` 미생성, status 빈 출력 | `FR-001` |
 | `TC-U04f` | `cli-init.ts` | 연결된 worktree에서 초기화 | 주 저장소와 공유하는 `info/exclude` 사용, status 빈 출력 | `FR-001` |
+| `TC-U04g` | `cli-init.ts` | 기존 `info/exclude`가 줄바꿈 없이 끝남 / CRLF | 기존 줄과 새 패턴이 각자 한 줄, status 빈 출력 | `FR-001` |
 | `TC-U05` | `bridge-fs.ts` | `RUNNING` 상태(미만료)에서 신규 위임 시도 | `BRIDGE_BUSY` 에러 반환 | `ARC-002` |
 | `TC-U06` | `bridge-fs.ts` | `RUNNING` 상태(`timeout_sec` 초과 Stale)에서 신규 위임 시도 | 기존 작업 `FAILED(STALE_TIMEOUT)` 아카이브 후 신규 작업 수락 | `ARC-002` |
 | `TC-U07` | `git-guard.ts` | Clean 트리에서 체크포인트 생성 → 파일 수정/생성 → 롤백 | 수정 파일 원복 + 신규 생성 파일 삭제, `git status` Clean | `FR-005`, `FR-010` |
