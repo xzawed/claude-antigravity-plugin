@@ -59209,29 +59209,124 @@ function ensureBridgeDirs(workspaceRoot) {
   fs.mkdirSync(getArtifactsDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getHistoryDir(workspaceRoot), { recursive: true });
 }
-function isGitignoreProtected(workspaceRoot) {
-  const gitignorePath = path.join(workspaceRoot, ".gitignore");
-  if (!fs.existsSync(gitignorePath)) {
-    return false;
+var GIT_EXCLUDE_HEADER = "# antigravity-delegate: local session artifacts (kept out of the tracked .gitignore)";
+var GIT_EXCLUDE_PATTERNS = [
+  `${BRIDGE_DIR_NAME}/`,
+  "**/.agent/workflows/claude-handoff.md",
+  "**/.agents/workflows/claude-handoff.md"
+];
+function readTrimmedLines(file2) {
+  if (!fs.existsSync(file2)) {
+    return [];
   }
-  const lines = fs.readFileSync(gitignorePath, "utf8").split(/\r?\n/).map((line) => line.trim());
+  return fs.readFileSync(file2, "utf8").split(/\r?\n/).map((line) => line.trim());
+}
+function hasBridgeEntry(lines) {
   return lines.some((line) => line === ".ag-bridge" || line === ".ag-bridge/" || line === "/.ag-bridge/");
 }
+function lstatOrNull(target) {
+  try {
+    return fs.lstatSync(target);
+  } catch {
+    return null;
+  }
+}
+function isGitDir(dir) {
+  return Boolean(lstatOrNull(dir)?.isDirectory()) && fs.existsSync(path.join(dir, "HEAD"));
+}
+function commonDirFromGitFile(dotGitFile) {
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGitFile, "utf8"));
+  if (!match) {
+    return null;
+  }
+  const gitDir = path.resolve(path.dirname(dotGitFile), match[1]);
+  if (!isGitDir(gitDir)) {
+    return null;
+  }
+  const commondirFile = path.join(gitDir, "commondir");
+  if (!fs.existsSync(commondirFile)) {
+    return gitDir;
+  }
+  const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, "utf8").trim());
+  return isGitDir(commonDir) ? commonDir : null;
+}
+function resolveGitExcludePath(workspaceRoot) {
+  const caseFold = (p) => process.platform === "win32" ? p.toLowerCase() : p;
+  const ceilings = (process.env.GIT_CEILING_DIRECTORIES ?? "").split(path.delimiter).filter(Boolean).map((dir) => caseFold(path.resolve(dir)));
+  let commonDir = null;
+  for (let dir = path.resolve(workspaceRoot); ; ) {
+    const dotGit = path.join(dir, ".git");
+    const stat3 = lstatOrNull(dotGit);
+    if (stat3) {
+      if (stat3.isDirectory()) {
+        commonDir = isGitDir(dotGit) ? dotGit : null;
+      } else if (stat3.isFile()) {
+        commonDir = commonDirFromGitFile(dotGit);
+      }
+      break;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || ceilings.includes(caseFold(parent))) {
+      break;
+    }
+    dir = parent;
+  }
+  if (!commonDir) {
+    return null;
+  }
+  const infoDir = path.join(commonDir, "info");
+  const infoStat = lstatOrNull(infoDir);
+  if (infoStat && !infoStat.isDirectory()) {
+    return null;
+  }
+  const excludePath = path.join(infoDir, "exclude");
+  const excludeStat = lstatOrNull(excludePath);
+  if (excludeStat && !excludeStat.isFile()) {
+    return null;
+  }
+  return excludePath;
+}
+function isGitignoreProtected(workspaceRoot) {
+  if (hasBridgeEntry(readTrimmedLines(path.join(workspaceRoot, ".gitignore")))) {
+    return true;
+  }
+  const excludePath = resolveGitExcludePath(workspaceRoot);
+  return excludePath !== null && hasBridgeEntry(readTrimmedLines(excludePath));
+}
 function ensureGitignoreEntry(workspaceRoot) {
+  const excludePath = resolveGitExcludePath(workspaceRoot);
+  if (excludePath) {
+    const lines = readTrimmedLines(excludePath);
+    const missing = GIT_EXCLUDE_PATTERNS.filter((pattern) => !lines.includes(pattern));
+    if (missing.length === 0) {
+      return { updated: false, protected: true, file: "git-info-exclude" };
+    }
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    const existing2 = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf8") : "";
+    const separator = existing2.length === 0 ? "" : existing2.endsWith("\n") ? "\n" : "\n\n";
+    const header = lines.includes(GIT_EXCLUDE_HEADER) ? [] : [GIT_EXCLUDE_HEADER];
+    fs.appendFileSync(excludePath, `${separator}${[...header, ...missing].join("\n")}
+`, "utf8");
+    return { updated: true, protected: true, file: "git-info-exclude" };
+  }
   if (isGitignoreProtected(workspaceRoot)) {
-    return { updated: false, protected: true };
+    return { updated: false, protected: true, file: "gitignore" };
   }
   const gitignorePath = path.join(workspaceRoot, ".gitignore");
   const block = "# Antigravity Claude Bridge (local session artifacts)\n.ag-bridge/\n";
+  const gitignoreStat = lstatOrNull(gitignorePath);
+  if (gitignoreStat && !gitignoreStat.isFile()) {
+    return { updated: false, protected: false, file: "gitignore" };
+  }
   if (!fs.existsSync(gitignorePath)) {
     fs.writeFileSync(gitignorePath, block, "utf8");
-    return { updated: true, protected: true };
+    return { updated: true, protected: true, file: "gitignore" };
   }
   const existing = fs.readFileSync(gitignorePath, "utf8");
   const needsLeadingNewline = existing.length > 0 && !existing.endsWith("\n");
   const addition = `${needsLeadingNewline ? "\n\n" : existing.length > 0 ? "\n" : ""}${block}`;
   fs.appendFileSync(gitignorePath, addition, "utf8");
-  return { updated: true, protected: true };
+  return { updated: true, protected: true, file: "gitignore" };
 }
 function readManifest(workspaceRoot) {
   return readJsonWithRetry(getManifestPath(workspaceRoot));
@@ -82440,7 +82535,7 @@ async function handleRollbackAgTask(input2) {
 function createAntigravityMcpServer(deps = {}) {
   const server = new McpServer({
     name: "antigravity-delegate",
-    version: "1.4.0"
+    version: "1.4.1"
   });
   const sharedDelegateSchema = {
     title: external_exports.string().min(3).max(120),

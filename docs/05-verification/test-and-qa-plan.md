@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.1.0` |
+| **버전** | `1.2.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -31,7 +31,13 @@
 | `TC-U01` | `detector.ts` | `mode: auto`, 로컬 `agy` 감지 + API 키 존재 | `resolvedMode === 'subscription'` 우선 선택 | `FR-002` |
 | `TC-U02` | `detector.ts` | `mode: auto`, 앱/CLI 미설치 + `GEMINI_API_KEY` 존재 | `resolvedMode === 'api'` 자동 폴백 | `FR-002` |
 | `TC-U03` | `detector.ts` | `mode: auto`, 둘 다 미존재 | `unavailable` 및 `NO_ANTIGRAVITY_PROVIDER` 가이드 반환 | `FR-002` |
-| `TC-U04` | `bridge-fs.ts` | `.gitignore` 초기화 2회 연속 호출 | `.ag-bridge/`가 정확히 1회만 등록됨 (Idempotent) | `FR-001` |
+| `TC-U04` | `bridge-fs.ts` | git 작업 트리 **밖**에서 2회 연속 호출 | `.gitignore`에 `.ag-bridge/`가 정확히 1회만 등록됨 (Idempotent) | `FR-001` |
+| `TC-U04b` | `bridge-fs.ts` | git 저장소에서 2회 연속 호출 | `.git/info/exclude`에 패턴 3종이 각 1회, `.gitignore` 미생성 ([ADR-005](../06-adr/ADR-005-local-git-exclude.md)) | `FR-001` |
+| `TC-U04c` | `cli-init.ts` | 커밋된 저장소(`.gitignore`·`.agents/` 보유)에서 초기화 | `git status --porcelain --untracked-files=all` 빈 출력, `.gitignore` 바이트 동일 | `FR-001` |
+| `TC-U04d` | `cli-init.ts` | 이전 버전이 `.gitignore`에 `.ag-bridge/`를 넣어 둔 저장소 | `.gitignore` 바이트 동일, 템플릿도 숨김(status 빈 출력) | `FR-001` |
+| `TC-U04e` | `cli-init.ts` | 저장소의 하위 디렉터리를 워크스페이스로 초기화 | 저장소 `info/exclude` 사용, 하위 `.gitignore` 미생성, status 빈 출력 | `FR-001` |
+| `TC-U04f` | `cli-init.ts` | 연결된 worktree에서 초기화 | 주 저장소와 공유하는 `info/exclude` 사용, status 빈 출력 | `FR-001` |
+| `TC-U04g` | `cli-init.ts` | 기존 `info/exclude`가 줄바꿈 없이 끝남 / CRLF | 기존 줄과 새 패턴이 각자 한 줄, status 빈 출력 | `FR-001` |
 | `TC-U05` | `bridge-fs.ts` | `RUNNING` 상태(미만료)에서 신규 위임 시도 | `BRIDGE_BUSY` 에러 반환 | `ARC-002` |
 | `TC-U06` | `bridge-fs.ts` | `RUNNING` 상태(`timeout_sec` 초과 Stale)에서 신규 위임 시도 | 기존 작업 `FAILED(STALE_TIMEOUT)` 아카이브 후 신규 작업 수락 | `ARC-002` |
 | `TC-U07` | `git-guard.ts` | Clean 트리에서 체크포인트 생성 → 파일 수정/생성 → 롤백 | 수정 파일 원복 + 신규 생성 파일 삭제, `git status` Clean | `FR-005`, `FR-010` |
@@ -52,6 +58,10 @@
 | `TC-S05` | `config.ts` / `index.ts` | 더미 `GEMINI_API_KEY` (`AIza` 패턴) 설정 후 오류 로그 및 `check_ag_environment` 검사 | 모든 출력/로그/리포트에서 원문 0건 노출 (`[REDACTED]`) | `NFR-002` |
 | `TC-S06` | `bridge-fs.ts` / `artifacts.ts` | `taskId: "../../.."` 또는 `"../config"`로 아티팩트/아카이브 조회 시도 | `PATH_TRAVERSAL_BLOCKED` 즉시 거부 | `NFR-001` |
 | `TC-S07` | `config.ts` / `cli-admin.ts` | `ya29.`/`4/0...`/`sk-`/`ghp_`/`Bearer` 토큰 마스킹 및 `mcp_add` CRLF 제어문자 주입 시도 | 모든 토큰 `[REDACTED]` 처리 및 제어문자 거부 | `NFR-002` |
+| `TC-S08` | `cli-init.ts` 번들 | SessionStart 훅이 워크스페이스에 심어 둔 `git` 실행 (PATH에 `.` 같은 상대 경로가 있으면 성립 — 실측) | `dist/cli-init.js`에 `child_process` 참조 0건 — 훅 경로는 프로그램을 실행하지 않음 | `NFR-001` |
+| `TC-S09` | `bridge-fs.ts` | 워크스페이스의 `.git` 파일이 git 디렉터리가 아닌 곳을 `gitdir:`로 가리킴 | 그곳에 쓰지 않음(`.gitignore` 경로로 처리) | `NFR-001` |
+| `TC-S10` | `bridge-fs.ts` | `.git/info`가 저장소 밖을 가리키는 정션/심볼릭 링크 | 링크 대상에 아무것도 쓰지 않음 | `NFR-001` |
+| `TC-S11` | `bridge-fs.ts` | `.git/info/exclude`가 바깥 파일을 가리키는 심볼릭 링크 (심볼릭 링크 권한이 없는 Windows에서는 skip) | 링크 대상 바이트 동일 | `NFR-001` |
 
 ---
 
@@ -75,7 +85,7 @@
 | :--- | :--- | :--- |
 | **G1. 컴파일 & 타입** | `cd server && npm run typecheck && npm run build` | 경고/에러 0건 |
 | **G2. 자동화 테스트** | `cd server && npm test` | `TC-U*`, `TC-S*`, `TC-I*` 100% 통과 |
-| **G3. Windows 경로 안전성** | 공백 포함 경로(`C:\Test Dir\plugin`)에서 `cli-init.js` 및 `index.js` 실행 | 정상 기동 및 종료 |
+| **G3. Windows 경로 안전성** | 공백 포함 경로(`C:\Test Dir\plugin`)에서 `cli-init.js` 및 `index.js` 실행, 그리고 `git init`한 공백 포함 경로에서 `cli-init.js` 실행 | 정상 기동 및 종료, git 저장소에서는 `.gitignore` 미생성 + `git status` 빈 출력 |
 | **G4. 매니페스트 정합성** | `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json` JSON 파싱 및 참조 경로 검증 | 모든 참조 파일 실제 존재 |
 | **G5. 무의존 번들 기동** | `npm ci` **전에** `node server/scripts/smoke-bundle.mjs` — 두 번들의 참조가 Node 내장 모듈뿐인지 정적 검사(`bundle-scan.mjs`, 단위 테스트 `bundle-scan.test.ts`), 이어 `NODE_PATH`를 지운 환경에서 `dist/index.js` MCP `initialize` + `tools/list`, 공백 포함 경로에서 `dist/cli-init.js` 실행 ([ADR-004](../06-adr/ADR-004-prebuilt-server-bundle.md)) | 비내장 참조 0(선택 모듈 3개 제외), 도구 12개 응답, `cli-init` exit 0 |
 | **G6. 번들 드리프트** | `npm run build` 뒤 `git diff --exit-code -- server/dist/index.js server/dist/cli-init.js` | 커밋된 번들 = 새 빌드 (diff 0) |

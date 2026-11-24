@@ -29,6 +29,6 @@ Inspect or update `.ag-bridge/config.json` in the current workspace.
 2. Validate values strictly before writing:
    - `skip-permissions true`: remind the user that `--dangerously-skip-permissions` auto-approves all `agy` tool requests and that Git Guard `rollback_ag_task` remains active for safety.
    - Never write raw API keys into `.ag-bridge/config.json`; advise setting `GEMINI_API_KEY` as an environment variable instead.
-3. Ensure `.ag-bridge/` exists and `.gitignore` contains `.ag-bridge/` before writing `.ag-bridge/config.json`.
+3. Ensure `.ag-bridge/` exists and is git-ignored (inside a git repository via the local `.git/info/exclude`, otherwise `.gitignore`) before writing `.ag-bridge/config.json`.
 4. Preserve all untouched keys in `.ag-bridge/config.json`.
 5. After saving, call `check_ag_environment({})` and display a before/after table confirming the updated configuration.

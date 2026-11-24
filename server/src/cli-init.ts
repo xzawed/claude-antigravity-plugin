@@ -4,6 +4,7 @@ import {
   ensureBridgeDirs,
   ensureDefaultConfig,
   ensureGitignoreEntry,
+  IgnoreFile,
   syncHandoffTemplate,
 } from './bridge-fs.js';
 
@@ -22,21 +23,24 @@ export function getDefaultPluginRoot(): string {
 
 export function runCliInit(options: CliInitOptions): {
   configCreated: boolean;
-  gitignoreUpdated: boolean;
+  /** An ignore entry was added — to `.git/info/exclude` in a git work tree, else `.gitignore`. */
+  ignoreUpdated: boolean;
+  ignoreFile: IgnoreFile;
   syncedTemplates: string[];
   skippedCustomTemplates: string[];
 } {
   const pluginRoot = options.pluginRoot ?? getDefaultPluginRoot();
   ensureBridgeDirs(options.workspaceRoot);
   const configRes = ensureDefaultConfig(options.workspaceRoot);
-  const gitignoreRes = ensureGitignoreEntry(options.workspaceRoot);
+  const ignoreRes = ensureGitignoreEntry(options.workspaceRoot);
   const templateRes = syncHandoffTemplate(options.workspaceRoot, pluginRoot, {
     force: options.forceTemplate,
   });
 
   return {
     configCreated: configRes.created,
-    gitignoreUpdated: gitignoreRes.updated,
+    ignoreUpdated: ignoreRes.updated,
+    ignoreFile: ignoreRes.file,
     syncedTemplates: templateRes.syncedPaths,
     skippedCustomTemplates: templateRes.skippedCustomPaths,
   };
@@ -72,7 +76,7 @@ if (isDirectExecution) {
     const result = runCliInit(opts);
     if (!opts.silent) {
       console.error(
-        `[antigravity-delegate] Initialized workspace ${opts.workspaceRoot} (configCreated=${result.configCreated}, gitignoreUpdated=${result.gitignoreUpdated}, templatesSynced=${result.syncedTemplates.length})`,
+        `[antigravity-delegate] Initialized workspace ${opts.workspaceRoot} (configCreated=${result.configCreated}, ignoreUpdated=${result.ignoreUpdated} in ${result.ignoreFile}, templatesSynced=${result.syncedTemplates.length})`,
       );
     }
     process.exit(0);
