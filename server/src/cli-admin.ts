@@ -85,6 +85,28 @@ export function defaultRunAdminCli(
   });
 }
 
+function formatRedactedCliArgs(args: string[]): string {
+  const redacted: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if ((arg === '--env' || arg === '--header') && i + 1 < args.length) {
+      redacted.push(arg);
+      const next = args[i + 1];
+      if (arg === '--env') {
+        const eqIdx = next.indexOf('=');
+        redacted.push(eqIdx > 0 ? `${next.slice(0, eqIdx)}=[REDACTED]` : '[REDACTED]');
+      } else {
+        const colonIdx = next.indexOf(':');
+        redacted.push(colonIdx > 0 ? `${next.slice(0, colonIdx)}: [REDACTED]` : '[REDACTED]');
+      }
+      i += 1;
+    } else {
+      redacted.push(arg);
+    }
+  }
+  return maskSecrets(redacted.join(' '));
+}
+
 function truncateLines(text: string, maxLines: number): string {
   const lines = text.split(/\r?\n/);
   if (lines.length <= maxLines) return text;
@@ -221,19 +243,37 @@ export async function handleAgCliAdmin(
         .filter(([, v]) => typeof v === 'string')
         .map(([k, v]) => `${k}=${v}`);
 
+      const headersObj =
+        def.headers && typeof def.headers === 'object' && !Array.isArray(def.headers)
+          ? (def.headers as Record<string, unknown>)
+          : {};
+      const headers = Object.entries(headersObj)
+        .filter(([, v]) => typeof v === 'string')
+        .map(([k, v]) => `${k}: ${v}`);
+
+      if (hasControlChars([commandOrUrl, ...args, ...envVars, ...headers])) {
+        syncedServers.push({
+          name,
+          status: 'skipped',
+          detail: 'Skipped: contains disallowed control characters (CR/LF/NUL).',
+        });
+        continue;
+      }
+
       const addArgs = buildMcpAddArgs({
         name,
         commandOrUrl,
         args,
         serverType: url ? 'http' : 'stdio',
         envVars,
+        headers,
       });
 
       if (dryRun) {
         syncedServers.push({
           name,
           status: 'planned',
-          detail: maskSecrets(`agy ${addArgs.join(' ')}`),
+          detail: `agy ${formatRedactedCliArgs(addArgs)}`,
         });
       } else {
         const res = await runCli(cliPath, addArgs, detection.platform, 20_000);
@@ -245,11 +285,12 @@ export async function handleAgCliAdmin(
       }
     }
 
+    const failedCount = syncedServers.filter((s) => s.status === 'failed').length;
     const summary = syncedServers
       .map((s) => `- ${s.name}: [${s.status}] ${s.detail}`)
       .join('\n');
     return {
-      ok: true,
+      ok: dryRun || failedCount === 0,
       action: input.action,
       cliPath,
       output: dryRun
@@ -257,6 +298,11 @@ export async function handleAgCliAdmin(
         : `Sync results from .mcp.json:\n${summary || '(No eligible MCP servers found.)'}`,
       syncedServers,
       warnings,
+      errorCode: !dryRun && failedCount > 0 ? 'CLI_ADMIN_FAILED' : undefined,
+      errorMessage:
+        !dryRun && failedCount > 0
+          ? `${failedCount} MCP server(s) failed to sync from .mcp.json.`
+          : undefined,
     };
   }
 
@@ -374,6 +420,6 @@ export async function handleAgCliAdmin(
     errorMessage:
       res.exitCode === 0
         ? undefined
-        : `\`agy ${cliArgs.join(' ')}\` exited with code ${res.exitCode}.`,
+        : `\`agy ${formatRedactedCliArgs(cliArgs)}\` exited with code ${res.exitCode}.`,
   };
 }

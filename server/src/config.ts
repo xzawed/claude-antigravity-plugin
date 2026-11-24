@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { resolveGitExcludePath } from './bridge-fs.js';
 import { isFullyQualifiedPath } from './exec-path.js';
-import { isTrackedFile } from './git-guard.js';
+import { checkTrackedFile } from './git-guard.js';
 import { isInsideWorkspace } from './path-guard.js';
 import {
   AgPluginError,
@@ -169,8 +170,14 @@ function whyConfigIsNotUsers(workspaceRoot: string): string | undefined {
       // missing: nothing to read through
     }
   }
-  if (isTrackedFile(workspaceRoot, ':(icase).ag-bridge')) {
+  const trackedState = checkTrackedFile(workspaceRoot, ':(icase).ag-bridge');
+  if (trackedState === 'tracked') {
     return 'the file is tracked by git, so the repository may have supplied it';
+  }
+  if (trackedState === 'unknown' && resolveGitExcludePath(workspaceRoot) !== null) {
+    // Fail-closed: a git work tree is present, but git could not confirm the config is untracked
+    // (e.g. dubious ownership, timeout, or git unavailable on PATH).
+    return 'git could not verify whether the file is tracked in this repository';
   }
   return undefined;
 }

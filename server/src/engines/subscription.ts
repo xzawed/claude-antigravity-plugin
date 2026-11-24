@@ -501,8 +501,13 @@ export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
 }
 
 function quoteForWindowsCmd(arg: string): string {
-  // Neutralize cmd.exe metacharacters inside double-quoted argument
-  const escaped = arg.replace(/"/g, '\\"').replace(/%/g, '%%');
+  // Neutralize cmd.exe metacharacters (including newlines that split commands even inside quotes)
+  // and preserve trailing backslashes before the closing double quote.
+  const sanitized = arg.replace(/[\r\n\0]+/g, ' ');
+  const escaped = sanitized
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\+)$/, '$1$1')
+    .replace(/%/g, '%%');
   return `"${escaped}"`;
 }
 
@@ -751,6 +756,7 @@ async function tryCliTrigger(
     };
 
     try {
+      const isWin = ctx.detection.platform === 'win32';
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: ctx.workspaceRoot,
         stdio: useStreamHeartbeat
@@ -758,7 +764,9 @@ async function tryCliTrigger(
           : logFd !== null
             ? ['ignore', logFd, logFd]
             : 'ignore',
-        detached: !useStreamHeartbeat,
+        // On POSIX, detached makes child a process-group leader so process.kill(-pid) reaps
+        // grandchildren too; we only unref() when not streaming stdout.
+        detached: !isWin || !useStreamHeartbeat,
         shell: false,
         windowsHide: spawnSpec.windowsHide,
         windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
@@ -827,7 +835,12 @@ async function tryCliTrigger(
         });
       }
 
+      const cleanupAbortListener = (): void => {
+        ctx.abortSignal?.removeEventListener('abort', killProcess);
+      };
+
       child.once('error', () => {
+        cleanupAbortListener();
         heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
@@ -835,11 +848,11 @@ async function tryCliTrigger(
         }
       });
 
-      child.once('exit', (code) => {
-        // Give stream 'end' event a tick to flush final result line before stopping
-        setImmediate(() => {
-          heartbeatHandle?.stop();
-        });
+      // Use 'close' (not 'exit') so stdout has fully flushed and emitted 'end' before
+      // heartbeatHandle.stop() detaches listeners — prevents losing the final result JSON line.
+      child.once('close', (code) => {
+        cleanupAbortListener();
+        heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
           resolve({

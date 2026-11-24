@@ -328,8 +328,8 @@ export interface AgAuthToolOutput {
 
 ### 2.10 Tool 10: `ag_session` (지속 멀티턴 `stream-json` 세션)
 `agy --input-format stream-json --output-format stream-json` 상주 프로세스를 관리한다(`action`: `start | send | list | close`).
-- `start`: Git Guard 체크포인트 생성 후 상주 워커를 띄우고, 선택적 `prompt`가 있으면 즉시 1턴 실행.
-- `send`: 살아있는 세션의 `stdin`에 `{"event":"user","message":{"content":"..."}}` NDJSON을 전송해 콜드 스타트 없이 후속 턴 실행 및 누적 캐시 히트(`cacheReadTokens`) 수집(동시 전송 시 `SESSION_BUSY` 보호).
+- `start`: Git Guard 체크포인트 생성 후 `.ag-bridge/history/`에 세션 체크포인트 매니페스트를 기록(`session.checkpointTaskId` 반환 → `rollback_ag_task({ taskId: checkpointTaskId })`로 원복 가능)하고 상주 워커를 띄우며, 선택적 `prompt`가 있으면 즉시 1턴 실행.
+- `send`: 살아있는 세션의 `stdin`에 `{"event":"user","message":{"content":"..."}}` NDJSON을 전송해 콜드 스타트 없이 후속 턴 실행 및 누적 캐시 히트(`cacheReadTokens`) 수집(동시 전송 시 `SESSION_BUSY` 보호, 턴 타임아웃 시 응답 어긋남 방지를 위해 자식 프로세스 종료 및 세션 정리).
 - `list` / `close`: 활성 세션 목록 조회 및 정상 종료(`stdin.end()` + 프로세스 정리).
 
 ### 2.11 Tool 11: `list_ag_artifacts` (아티팩트·스크린샷·로그 뷰어)

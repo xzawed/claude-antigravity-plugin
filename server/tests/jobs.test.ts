@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readManifest } from '../src/bridge-fs.js';
+import { readManifest, writeReportMarkdown } from '../src/bridge-fs.js';
 import { DetectorDeps } from '../src/detector.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from '../src/engines/base.js';
 import { attachStreamJsonHeartbeat, buildHandoffPrompt } from '../src/engines/subscription.js';
@@ -319,5 +319,63 @@ describe('Async background jobs & power prompt parity (TC-U22 ~ TC-U26)', () => 
     expect(handle.state.structuredOutput).toEqual({ verdict: 'approve', findings: [] });
     expect(handle.state.metrics.usage?.totalTokens).toBe(520);
     handle.stop();
+  });
+
+  it('TC-U39: start_ag_task clears stale report.md and get_ag_job masks secrets & isolates report per taskId', async () => {
+    // Task 1 left a stale report.md behind
+    writeReportMarkdown(tmpRoot, '# Stale Report from Task 1\nOld output.');
+
+    let releaseEngine!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseEngine = r;
+    });
+    const fakeSecret = ['AIza', 'SyLiveJobReportSecret1234567890abcd'].join('');
+
+    const mockEngine: ExecutionEngine = {
+      mode: 'subscription',
+      async execute(): Promise<ExecutionResult> {
+        await gate;
+        return {
+          status: 'VERIFIED',
+          reportMarkdown: '# Task 2 Final Report',
+          changedFiles: [],
+          artifacts: [],
+          warnings: [],
+        };
+      },
+    };
+
+    const started = await handleStartAgTask(
+      {
+        title: 'Second background task',
+        instructions: '/boost Fresh run',
+        workspaceRoot: tmpRoot,
+        modeOverride: 'subscription',
+      },
+      {
+        detectorDeps: makeAgyDetectorDeps(),
+        subscriptionEngine: mockEngine,
+        jobManager: manager,
+      },
+    );
+
+    // Stale Task 1 report must have been cleared on dispatch
+    const duringRun = await handleGetAgJob(
+      { jobId: started.jobId, workspaceRoot: tmpRoot },
+      { jobManager: manager },
+    );
+    expect(duringRun.job?.reportMarkdown).toBeUndefined();
+
+    // If Task 2 writes an interim report.md containing a secret, get_ag_job must mask it
+    writeReportMarkdown(tmpRoot, `# Interim\nkey=${fakeSecret}`);
+    const maskedRun = await handleGetAgJob(
+      { jobId: started.jobId, workspaceRoot: tmpRoot },
+      { jobManager: manager },
+    );
+    expect(maskedRun.job?.reportMarkdown).toContain('[REDACTED]');
+    expect(maskedRun.job?.reportMarkdown).not.toContain(fakeSecret);
+
+    releaseEngine();
+    await new Promise((r) => setTimeout(r, 30));
   });
 });

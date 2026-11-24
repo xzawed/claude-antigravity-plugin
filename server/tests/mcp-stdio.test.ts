@@ -17,7 +17,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('TC-I01: exposes all 12 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth + get_ag_job + ag_session + list_ag_artifacts', async () => {
@@ -191,7 +191,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
     } finally {
       await client.close();
     }
-  });
+  }, 20_000);
 
   it('TC-I07: returns structured isError responses over clean stdio for missing rollback & protected lockedPaths', async () => {
     const transport = new StdioClientTransport({

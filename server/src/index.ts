@@ -21,6 +21,7 @@ import {
 } from './sessions.js';
 import {
   acquireBridgeLock,
+  clearReportMarkdown,
   ensureBridgeDirs,
   ensureGitignoreEntry,
   generateTaskId,
@@ -372,6 +373,7 @@ export async function handleDelegateToAntigravity(
   };
 
   writeManifest(workspaceRoot, manifest);
+  clearReportMarkdown(workspaceRoot);
   writeDispatchMarkdown(workspaceRoot, {
     manifest,
     instructions: input.instructions,

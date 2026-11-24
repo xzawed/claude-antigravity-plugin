@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.15.0` |
+| **버전** | `1.16.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -45,11 +45,14 @@
 | `TC-U09` | `git-guard.ts` | Git 저장소가 아닌 임시 폴더에서 `best_effort` 모드 실행 | 경고와 함께 `gitCheckpointRef: undefined`로 정상 진행 | `PLN-002` |
 | `TC-U10` | `cli-init.ts` | `--silent`로 최초 실행 후 `claude-handoff.md` 동기화 | 종료 코드 `0`, `.ag-bridge/config.json` 및 템플릿 생성 | `FR-001` |
 | `TC-U33` | `server/src/**` | 계층표에 없는 새 모듈, 윗 계층 import, 순환 import, `cli-init`이 `bridge-fs` 외 모듈 import | 0건 — 계층 규칙은 [ARC-001 §3](../02-architecture/system-architecture.md) | `ARC-001` |
-| `TC-U34`, `TC-U34b` | `git-guard.ts` | 저장소의 clean 필터(`sleep 8; cat`)가 `git status`를 붙잡음, `AG_GIT_TIMEOUT_MS=1000`; Windows에서 PATH 앞에 Git for Windows 런처(`cmd\git.exe`)를 둔 같은 호출 | 15초 안에 끊기고(제한 없으면 30초 이상) `error`에 "1000 ms" 명시(저장소 아님으로 오인 안 함); 런처가 남긴 실제 git과 그 필터까지 끝냈다고 알리고("ended 2 processes" 이상), 폴더를 반환 2초 안에 지울 수 있음 | `ARC-003` |
+| `TC-U34` ~ `TC-U34c` | `git-guard.ts` | 저장소의 clean 필터(`sleep 8; cat`)가 `git status`를 붙잡음, `AG_GIT_TIMEOUT_MS=1000`; Windows에서 PATH 앞에 Git for Windows 런처(`cmd\git.exe`)를 둔 같은 호출; 타임아웃 중 `rollbackCheckpoint` 호출 | 15초 안에 끊기고(제한 없으면 30초 이상) `error`에 "1000 ms" 명시(저장소 아님으로 오인 안 함); 런처가 남긴 실제 git과 그 필터까지 끝냈다고 알리고("ended 2 processes" 이상), 폴더를 반환 2초 안에 지울 수 있음; 롤백도 타임아웃 원인을 그대로 보고 | `ARC-003` |
 | `TC-U35`, `TC-U35b` | `git-guard.ts` | 사용자의 `사용자 메모.txt`가 있는 상태에서 에이전트가 `에이전트결과.txt` 생성 후 롤백; 추적되는 `설정.json` 수정 | 에이전트 파일만 삭제·사용자 파일 보존, 변경 목록에 이름 그대로 표시(`-z`) | `ARC-003` |
 | `TC-U36`, `TC-U36b` | `git-guard.ts` | 사용자 untracked 파일이 있는 상태에서 에이전트가 `app.ts`만 수정 후 롤백; 에이전트가 `git mv lib.ts util.ts` 후 롤백 | `revertedTrackedFiles`가 정확히 `['app.ts']`(사용자 파일 제외); 이름 바꾸기는 옛 이름 `['lib.ts']`가 되돌림, 새 이름 `util.ts`는 `removedUntrackedFiles`(복구 폴더로 이동, 내용 보존) | `ARC-003` |
-| `TC-U38` | `git-guard.ts` | 복구 폴더 12개(7일 이내)+8일 된 것 1개, 지금 작업 = 가장 오래된 것; 크기 60·50·50바이트에 상한 120바이트 | 최근 10개(지금 작업 포함)만 남고 7일 넘은 것과 함께 정리, pre-rollback ref도 삭제; 크기는 오래된 것부터 정리 | `ARC-003` |
 | `TC-U37` ~ `TC-U37d` | `subscription.ts` · `index.ts` | 실측한 agy 응답(`available: alpha-agent, beta agent` / `no custom agents are available` / 텍스트 모드 stderr / 세션이 시작된 결과 / 뒤에 `(hint)`가 붙은 답·괄호가 든 이름); `agy agents`는 아무것도 출력하지 않고 탐침에는 실측 형식으로 답하는 가짜 agy; `list_ag_capabilities`에 워크스페이스 전달 | 이름 목록 그대로(공백 포함), 세션이 시작된 답·정확한 형식이 아닌 답은 목록 아님(추측하지 않음); 탐침은 워크스페이스 cwd·`--mode plan`·`--print-timeout`·무작위 이름으로 실행, `ag_auth` 경로에는 탐침 없음; `{ cwd: workspaceRoot, probeAgents: true }` | `SPC-002` |
+| `TC-U38` | `git-guard.ts` | 복구 폴더 12개(7일 이내)+8일 된 것 1개, 지금 작업 = 가장 오래된 것; 크기 60·50·50바이트에 상한 120바이트 | 최근 10개(지금 작업 포함)만 남고 7일 넘은 것과 함께 정리, pre-rollback ref도 삭제; 크기는 오래된 것부터 정리 | `ARC-003` |
+| `TC-U39`, `TC-U40` | `jobs.ts` · `index.ts` · `subscription.ts` | 이전 작업의 `.ag-bridge/report.md`가 남은 상태에서 2번째 `start_ag_task` / `delegate_to_antigravity` 실행; 실행 중 `get_ag_job`의 비밀 포함 임시 리포트 조회 | 디스패치 시 기존 `report.md` 삭제되어 2번째 작업의 새 응답이 정상 기록·반환, `get_ag_job`은 현재 작업 리포트만 마스킹하여 반환 | `ARC-002`, `NFR-002` |
+| `TC-U41` | `sessions.ts` · `index.ts` | Git 저장소에서 `ag_session start` 후 파일 수정 → `rollback_ag_task({ taskId: checkpointTaskId })`; 응답 없는 턴 타임아웃 | 세션 체크포인트가 `.ag-bridge/history/`에 기록되어 원복 가능, 턴 타임아웃 시 자식 프로세스 종료 및 세션 정리(응답 어긋남 방지) | `FR-005`, `ARC-002` |
+| `TC-U42` | `artifacts.ts` | `.ag-bridge/artifacts/` 아래 공백 등 비표준 이름 폴더 존재 시 `list_ag_artifacts({})` 호출 | 비표준 폴더를 건너뛰고 유효한 작업 아티팩트 정상 반환 | `FR-008` |
 
 ---
 
@@ -74,13 +77,15 @@
 | `TC-S15` | `exec-path.ts` / `subscription.ts` | `.cmd` 래퍼 셸: `ComSpec`이 절대/상대/없음, `SystemRoot`가 절대/상대 | 항상 절대 경로(`%ComSpec%` 또는 `%SystemRoot%\System32\cmd.exe`) | `NFR-001` |
 | `TC-S16` | `server/src/**` | 프로그램 이름 리터럴로 `spawn`/`execFile*` 호출, `command: '…'`, `shell: true`, `'cmd.exe'` 값, `git-guard.ts` 밖의 git 실행 | 0건 | `NFR-001` |
 | `TC-S17` ~ `TC-S17c` | `config.ts` / `path-guard.ts` | `app_path`가 상대 경로 / 워크스페이스 안 절대 경로 / 밖에서 안으로 이어지는 링크 / 안쪽 경로의 `\\?\` 표기(Windows) / 워크스페이스 밖 절대 경로 | 마지막 하나만 따름, 나머지는 `auto` + 무시 목록 | `NFR-001` |
-| `TC-S18` ~ `TC-S18f` | `config.ts` | 민감 키 10종(`agy_agent`·`agy_project` 포함)을 안전하지 않은 값으로 둔 설정이 git 추적(소문자 / 다른 대소문자 / 서브모듈) · 링크 경유 / 사용자 자신의 비추적 파일; 기본값을 조이는 값; 환경변수 opt-in | 저장소 쪽은 기본값으로 되돌리고 무시 목록에 기록, 사용자 파일·조이는 값·환경변수는 그대로 | `NFR-001` |
+| `TC-S18` ~ `TC-S18g` | `config.ts` | 민감 키 10종(`agy_agent`·`agy_project` 포함)을 안전하지 않은 값으로 둔 설정이 git 추적(소문자 / 다른 대소문자 / 서브모듈) · 링크 경유 · git 확인 불가(PATH 미존재 등) / 사용자 자신의 비추적 파일; 기본값을 조이는 값; 환경변수 opt-in | 저장소 쪽·확인 불가는 기본값으로 되돌리고 무시 목록에 기록(fail-closed), 사용자 파일·조이는 값·환경변수는 그대로 | `NFR-001` |
 | `TC-S19` ~ `TC-S19d` | `detector.ts` / `index.ts` / `jobs.ts` / `sessions.ts` | 추적되는 설정 파일이 민감 키를 품은 채 `check_ag_environment` · 위임 · `start_ag_task` · `ag_session` 호출 | 권고·경고에 무시한 키와 해결 방법(`git rm --cached …`) 표시, 엔진은 안전한 기본값으로 실행 | `NFR-001` |
 | `TC-S20` ~ `TC-S20c` | `git-guard.ts` | 저장소 `.git/config`의 `core.fsmonitor` 프로그램 · `.git/hooks/reference-transaction` 훅이 있는 저장소에서 상태 확인·체크포인트; 원격을 `ssh://`+`core.sshCommand`로 바꾼 부분 클론에서 없는 blob이 필요한 롤백 | 어느 것도 실행되지 않음(표식 파일 없음), 체크포인트 ref는 정상 생성, 지연 fetch가 필요한 롤백은 실패로 끝남 | `NFR-001` |
 | `TC-S21` ~ `TC-S21c` | `path-guard.ts` (Windows) | `.env`·`.git`·`node_modules`의 8.3 짧은 이름(`ENV~1`·`GIT~1`·`NODE_M~1`, 8.3이 꺼진 볼륨이면 건너뜀), `.env::$DATA`·`App.tsx:hidden`(대체 데이터 스트림), `.git.`·`.env `·`ui. `(끝 점/공백) | 모두 거부(`PROTECTED_PATH_BLOCKED` 또는 `PATH_TRAVERSAL_BLOCKED`), 일반 점 포함 이름(`App.test.tsx`)은 그대로 허용 | `NFR-001` |
 | `TC-S22` ~ `TC-S22c` | `git-guard.ts` | 기준선 없는 매니페스트로 롤백(사용자의 untracked 파일 존재); 저장소가 아닌 폴더에서 untracked 목록 요청; `core.ignorecase=false` 저장소에서 에이전트가 추적 파일 이름의 대소문자만 바꾼 뒤 롤백(Windows·macOS) | untracked 파일을 하나도 지우지 않고 `untrackedBaselineMissing`; 목록 실패는 `[]`가 아니라 `undefined`; 추적 파일은 롤백 뒤에도 남음 | `NFR-001` |
 | `TC-S23` ~ `TC-S23e` | `git-guard.ts` | 사용자의 untracked `notes.txt`가 있는 상태에서 에이전트가 `git add -A` + 커밋(깨끗한 체크포인트) / `git add -A`(더러운 체크포인트) 후 롤백; 더러운 체크포인트에서 에이전트가 같은 브랜치에 커밋 후 롤백; 에이전트가 사용자의 다른 브랜치 `dev`로 전환 후 롤백; `.gitignore` 대상(사용자의 `.env`, 작업 중 생긴 `dist/`)이 있는 상태에서 롤백 | `notes.txt` 내용 그대로·다시 untracked, HEAD는 체크포인트 커밋; 사용자 편집본이 충돌 표시 없이 복원; 아무것도 바꾸지 않고 `GIT_CHECKPOINT_FAILED`(두 ref와 `git switch <branch>` 안내), `dev` 끝 커밋 그대로; 무시 대상은 하나도 지우지 않음 | `NFR-001` |
 | `TC-S24` ~ `TC-S24j` | `git-guard.ts` | 에이전트가 만든 파일 / 만들어 스테이징·커밋한 파일이 있는 상태에서 롤백; 사용자 untracked 파일을 에이전트가 고치고 지움; 51MB 파일·2,001개로 상한 초과; 에이전트 커밋 + 미커밋 편집 후 롤백하고 되돌리기; 사용자 폴더 자리에 워크스페이스 밖으로 가는 정션; 매니페스트가 다른 작업의 스냅샷 폴더를 가리킴; 파일이 든 바깥 폴더로 가는 에이전트의 정션; 에이전트가 `git rm`한 경로에 다시 만든 파일; 보관 규칙으로 사본이 이미 정리됨 | 지우지 않고 `.ag-bridge/recovery/<task>/rollback-…/removed/`로 이동(`quarantineDir`), 손대지 않은 파일은 복원 목록에 없음; 스냅샷에서 되돌리고 에이전트 판은 `replaced/`; 복사 안 하고 체크포인트 경고; `reset --hard <preRollbackHead>` + `stash apply <preRollbackRef>`로 에이전트 작업 복귀; 밖에는 아무것도 쓰지 않고 실제 폴더로 복원; 그 폴더에서는 아무것도 복원하지 않음; 바깥 파일 그대로·`pathsBehindLinks`(Windows); 체크포인트 판으로 되돌리고 에이전트 판은 `replaced/`; `untrackedSnapshotMissing` | `NFR-001` |
+| `TC-S25` | `api-worker.ts` | Gemini API 호출 실패(`catch` 경로) 시 모델 텍스트·오류에 API 키 포함; `read_file`/`list_dir`에 `NaN` 숫자 인자 전달 | `.ag-bridge/report.md` 포함 모든 출력에서 비밀 `[REDACTED]`, `NaN` 인자는 안전한 기본값으로 보정 | `NFR-002` |
+| `TC-S26` | `cli-admin.ts` | `mcp_add` 실패 시 `--env`/`--header` 비밀값 포함; `.mcp.json` 동기화 항목에 CR/LF 제어문자·HTTP `headers`·실패 서버 포함 | `errorMessage`에서 `--env`/`--header` 값 `[REDACTED]`, 제어문자 항목 스킵, `headers` 정상 전달, 실패 서버 존재 시 `ok: false` 반환 | `NFR-002` |
 
 ---
 

@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   acquireBridgeLock,
+  clearReportMarkdown,
   ensureBridgeDirs,
   ensureGitignoreEntry,
   generateTaskId,
@@ -202,7 +204,12 @@ function summarizeLiveJob(
     reportMarkdown: includeDetails
       ? rec.result?.reportMarkdown
         ? maskSecrets(rec.result.reportMarkdown)
-        : readReportMarkdown(rec.workspaceRoot) ?? undefined
+        : diskManifest?.taskId === rec.taskId
+          ? (() => {
+              const r = readReportMarkdown(rec.workspaceRoot);
+              return r ? maskSecrets(r) : undefined;
+            })()
+          : undefined
       : undefined,
     structuredOutput: includeDetails ? rec.result?.structuredOutput : undefined,
     logTail: includeLogTail ? readLogTail(rec.workspaceRoot, rec.taskId) : undefined,
@@ -269,7 +276,8 @@ export async function handleStartAgTask(
   deps: JobDependencies = {},
 ): Promise<StartJobToolOutput> {
   const workspaceRoot = path.resolve(input.workspaceRoot ?? process.cwd());
-  const pluginRoot = deps.pluginRoot ?? path.resolve(import.meta.dirname, '..', '..');
+  const pluginRoot =
+    deps.pluginRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const manager = deps.jobManager ?? defaultJobManager;
   const warnings: string[] = [];
 
@@ -331,6 +339,7 @@ export async function handleStartAgTask(
   };
 
   writeManifest(workspaceRoot, manifest);
+  clearReportMarkdown(workspaceRoot);
   writeDispatchMarkdown(workspaceRoot, {
     manifest,
     instructions: input.instructions,
