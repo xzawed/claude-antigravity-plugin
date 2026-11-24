@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,25 @@ describe('Async background jobs & power prompt parity (TC-U22 ~ TC-U26)', () => 
   afterEach(() => {
     manager.disposeAll();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('TC-S19c: start_ag_task reports the settings it ignored from a config git tracks', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: tmpRoot, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, '.ag-bridge', 'config.json'), JSON.stringify({ subscription: { agy_sandbox: false } }));
+    execFileSync('git', ['add', '-f', '.ag-bridge/config.json'], { cwd: tmpRoot, stdio: 'ignore' });
+
+    const quickEngine: ExecutionEngine = {
+      mode: 'subscription',
+      async execute(): Promise<ExecutionResult> {
+        return { status: 'VERIFIED', reportMarkdown: '# Done', changedFiles: [], artifacts: [], warnings: [] };
+      },
+    };
+    const started = await handleStartAgTask(
+      { title: 'Trust check', instructions: 'Change nothing.', workspaceRoot: tmpRoot, modeOverride: 'subscription' },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: quickEngine, jobManager: manager },
+    );
+    expect(started.warnings.join('\n')).toContain('subscription.agy_sandbox');
   });
 
   it('TC-U22: start_ag_task returns immediately while engine runs in background and get_ag_job collects VERIFIED result + structuredOutput', async () => {
