@@ -7,11 +7,9 @@
 **Claude Code 안에서 복사·붙여넣기 없이 Google Antigravity의 모든 성능을 100% 끌어내는 공식 협업 플러그인**
 
 [![CI](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.1)
+[![Version](https://img.shields.io/github/v/release/xzawed/claude-antigravity-plugin?label=version&color=blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/latest)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#전체-커맨드--mcp-상세-레퍼런스)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#한눈에-보는-21개-슬래시-커맨드-지도)
-[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
-[![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#자동-안전장치--원클릭-되돌리기)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어 공식 가이드**
@@ -51,12 +49,14 @@ flowchart LR
 
 ---
 
-## 📊 한눈에 보는 핵심 지표 (`v1.4.0`)
+## 📊 한눈에 보는 핵심 지표
 
 | ⚡ 빠른 반응 속도 | 🧩 완벽한 기능 커버리지 | 🛡️ 자동화 품질 검증 | 🔒 빈틈없는 보안 |
 | :---: | :---: | :---: | :---: |
-| 환경 진단 **`149.9 ms`** | 슬래시 커맨드 **`21`종** | 테스트 **`57 / 57`** 통과 | 보안 취약점 **`0`건** |
-| 백그라운드 착수 **`397 ms`** | 내장 MCP Tool **`12`종** | 3개 OS CI **`7 / 7`** 통과 | 자동 Git 백업 · 비밀 자동 가림 |
+| 환경 진단 **`149.9 ms`** | 슬래시 커맨드 **`21`종** | 모든 PR에서 `vitest` 실행 | 프로그램은 절대 경로로만 실행 |
+| 백그라운드 착수 **`397 ms`** | 내장 MCP Tool **`12`종** | Ubuntu · macOS · Windows × Node 20/22 CI | 자동 Git 백업 · 비밀 자동 가림 |
+
+<sub>지연 시간은 기록된 실측값입니다([`VER-002`](./docs/05-verification/verification-report.md), [v1.4.0 릴리스 노트](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)). 커맨드·Tool 수는 CI가 원천과 대조합니다.</sub>
 
 ---
 
@@ -417,10 +417,10 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 
 ## 📈 실측 벤치마크
 
-실제 Windows 11 + Node.js `v24.14.1` + 라이브 `agy.exe` 환경 및 GitHub Actions 3-OS 매트릭스에서 실측 검증했습니다([상세 검증 리포트: `VER-002`](./docs/05-verification/verification-report.md)):
+실제 Windows 11 + Node.js `v24.14.1` + 라이브 `agy.exe` 환경에서 기록한 실측값입니다. 지연 시간 두 줄은 [`VER-002`](./docs/05-verification/verification-report.md), 라이브 `agy` 두 줄은 [v1.4.0 릴리스 노트](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)가 출처이고, 현재 테스트 상태는 위의 CI 배지가 보여 줍니다.
 
 <p align="center">
-  <img src="./assets/performance-benchmarks.svg" alt="실측 성능 벤치마크 및 품질 지표 (v1.4.0)" width="100%" />
+  <img src="./assets/performance-benchmarks.svg" alt="실측 성능 벤치마크 (기록된 측정값)" width="100%" />
 </p>
 
 | 측정 항목 | 목표 기준 | 실제 측정값 | 판정 |
@@ -429,8 +429,6 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | `cli-init.js --silent` (세션 시작 자동 초기화) | `< 300 ms` | 평균 **`90.3 ms`** | ✅ 통과 |
 | `start_ag_task` 비동기 백그라운드 착수 (실제 `agy`) | 즉시 반환 | **`397 ms`** (백그라운드 병렬 수행) | ✅ 통과 |
 | `ag_session` 2턴 지속 세션 (실제 `agy`) | 프롬프트 캐시 재사용 | 2턴 **`7,691` `cacheReadTokens`** 히트 | ✅ 통과 |
-| 자동화 테스트 스위트 (`vitest run`) | 핵심 경로 검증 | **`57 / 57` 테스트 통과 (9 스위트)** | ✅ 통과 |
-| 크로스플랫폼 CI (Ubuntu · macOS · Windows × Node 20/22) | 전체 통과 | **`7 / 7` 잡 전체 통과** | ✅ 통과 |
 
 ---
 
@@ -484,8 +482,8 @@ claude-antigravity-plugin/
 ├── server/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
 │   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, exec-path.ts, config.ts, detector.ts, engines/
-│   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 12-Tool Stdio MCP 검증 스크립트
-│   └── tests/                     # 9 스위트 / 57개 자동화 테스트
+│   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 Stdio MCP 검증 스크립트 (MCP Tool 12종)
+│   └── tests/                     # vitest 스위트 (`npm --prefix server test`)
 ├── README.md                      # 영문 공식 가이드
 ├── README.ko.md                   # 한글 공식 가이드 (현재 파일)
 └── docs/                          # 안티그래비티 개발 표준 문서 허브 (00~06)

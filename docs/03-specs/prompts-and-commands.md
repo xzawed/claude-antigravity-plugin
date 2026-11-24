@@ -79,7 +79,7 @@ description: >-
 
 ---
 
-## 3. 슬래시 커맨드 6종 설계 명세
+## 3. 핵심 슬래시 커맨드 설계 명세 (6개 — 전체 목록의 원천은 `commands/*.md`)
 
 ### 3.0 `commands/ag-login.md` (`/ag-login`)
 - **사용법:**

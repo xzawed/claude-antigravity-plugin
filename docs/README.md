@@ -22,7 +22,7 @@
 | **02. 아키텍처** | `ARC-001` | [system-architecture.md](./02-architecture/system-architecture.md) | 전체 아키텍처, 디렉터리 스캐폴딩, 모듈 의존성, 크로스플랫폼 전략 | `Approved` |
 | **02. 아키텍처** | `ARC-002` | [bridge-protocol.md](./02-architecture/bridge-protocol.md) | `.ag-bridge/` 파일 구조, 상태 머신, 원자적 I/O, 동시성/타임아웃 복구 | `Approved` |
 | **02. 아키텍처** | `ARC-003` | [security-and-git-guard.md](./02-architecture/security-and-git-guard.md) | `lockedPaths` 보안 검증, 셸 샌드박싱, 비밀정보 보호, Git 체크포인트/롤백 | `Approved` |
-| **03. 상세 명세** | `SPC-001` | [mcp-tools-api.md](./03-specs/mcp-tools-api.md) | MCP Tool 3종 입출력 스키마, 에러 코드 카탈로그, 환경변수/설정 우선순위 | `Approved` |
+| **03. 상세 명세** | `SPC-001` | [mcp-tools-api.md](./03-specs/mcp-tools-api.md) | MCP Tool 12종 입출력 스키마, 에러 코드 카탈로그, 환경변수/설정 우선순위 | `Approved` |
 | **03. 상세 명세** | `SPC-002` | [execution-engines.md](./03-specs/execution-engines.md) | `detector.ts`, `subscription.ts`, `api-worker.ts` 상세 로직 및 인터페이스 | `Approved` |
 | **03. 상세 명세** | `SPC-003` | [prompts-and-commands.md](./03-specs/prompts-and-commands.md) | `SKILL.md`, `/ag-delegate`, `/ag-config`, `/ag-status`, `claude-handoff.md` 명세 | `Approved` |
 | **04. 구현** | `IMP-001` | [implementation-plan.md](./04-implementation/implementation-plan.md) | Phase 1~4 마일스톤, WBS, 모듈별 완료 기준(DoD), 리스크 대응 | `Approved` |

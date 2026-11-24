@@ -7,11 +7,9 @@
 **Use 100% of Google Antigravity's Superpowers Right Inside Claude Code — With Zero Manual Copy-Paste**
 
 [![CI](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.1)
+[![Version](https://img.shields.io/github/v/release/xzawed/claude-antigravity-plugin?label=version&color=blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/latest)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#full-command--mcp-reference)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#visual-map-of-all-21-commands)
-[![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
-[![Security](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)](#built-in-safety-net)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
 🌐 **Language:** **English** · [한국어 공식 가이드 (README.ko.md)](./README.ko.md)
@@ -51,12 +49,14 @@ flowchart LR
 
 ---
 
-## 📊 At a Glance (`v1.4.0`)
+## 📊 At a Glance
 
 | ⚡ Fast Diagnostics | 🧩 Complete Coverage | 🛡️ Automated Quality | 🔒 Zero-Risk Security |
 | :---: | :---: | :---: | :---: |
-| **`149.9 ms`** env check | **`21`** Slash Commands | **`57 / 57`** tests passing | **`0`** npm vulnerabilities |
-| **`397 ms`** async job launch | **`12`** MCP Tools | **`7 / 7`** OS/Node CI jobs | Auto Git Guard + Path Guard |
+| **`149.9 ms`** env check | **`21`** Slash Commands | `vitest` suite on every PR | Programs launched by absolute path |
+| **`397 ms`** async job launch | **`12`** MCP Tools | Ubuntu · macOS · Windows × Node 20/22 CI | Auto Git Guard + Path Guard |
+
+<sub>Latencies are recorded measurements ([`VER-002`](./docs/05-verification/verification-report.md), [v1.4.0 release notes](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)). CI checks the command and tool counts against the source.</sub>
 
 ---
 
@@ -417,10 +417,10 @@ By default, the plugin runs safely (`agy_mode: "accept-edits"`, `agy_sandbox: tr
 
 ## 📈 Empirical Benchmarks
 
-Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) and across GitHub Actions 3-OS CI ([Full Report: `VER-002`](./docs/05-verification/verification-report.md)):
+Recorded on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`). The two latency rows come from [`VER-002`](./docs/05-verification/verification-report.md); the two live `agy` rows come from the [v1.4.0 release notes](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0). The CI badge above shows current test status.
 
 <p align="center">
-  <img src="./assets/performance-benchmarks.svg" alt="Empirical Performance Benchmarks and Quality Metrics (v1.4.0)" width="100%" />
+  <img src="./assets/performance-benchmarks.svg" alt="Empirical Performance Benchmarks (recorded measurements)" width="100%" />
 </p>
 
 | Metric | Target | Real-World Measurement | Status |
@@ -429,8 +429,6 @@ Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) a
 | `cli-init.js --silent` (`SessionStart` hook) | `< 300 ms` | **`90.3 ms` avg** | ✅ PASS |
 | `start_ag_task` non-blocking dispatch (Live `agy`) | Instant return | **`397 ms`** (while task runs in background) | ✅ PASS |
 | `ag_session` 2-turn persistent session (Live `agy`) | Cache reuse | Turn 2 **`7,691` `cacheReadTokens`** hit | ✅ PASS |
-| Automated Test Suite (`vitest run`) | Core paths | **`57 / 57` tests (9 suites)** | ✅ PASS |
-| Cross-Platform CI (Ubuntu · macOS · Windows × Node 20/22) | All green | **`7 / 7` jobs passing** | ✅ PASS |
 
 ---
 
@@ -484,8 +482,8 @@ claude-antigravity-plugin/
 ├── server/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
 │   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, exec-path.ts, config.ts, detector.ts, engines/
-│   ├── scripts/verify-plugin.mjs  # Live healthcheck & 12-tool Stdio MCP verifier
-│   └── tests/                     # 9 suites / 57 automated tests
+│   ├── scripts/verify-plugin.mjs  # Live healthcheck & Stdio MCP verifier (all 12 MCP tools)
+│   └── tests/                     # vitest suites (`npm --prefix server test`)
 ├── README.md                      # English guide (this file)
 ├── README.ko.md                   # Complete Korean guide
 └── docs/                          # Engineering standards & specs (00~06)

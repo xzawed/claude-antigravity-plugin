@@ -131,6 +131,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Doc counts match their sources (G7)
+        run: node server/scripts/check-doc-counts.mjs
+
       - name: Verify AGENTS.md size budget and relative markdown links
         run: |
           node -e '
