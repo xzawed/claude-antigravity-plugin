@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createCheckpoint, getGitInfo, rollbackCheckpoint } from '../src/git-guard.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
@@ -24,6 +24,17 @@ function initRepo(dir: string): void {
   git(dir, ['commit', '-m', 'Initial commit']);
 }
 
+// Windows: the fake git is a Node binary named git.exe. It is linked from a private copy, never
+// from process.execPath: a link to the running image cannot be unlinked on Node 20 (EPERM).
+let fakeNodeDir: string | undefined;
+function fakeNodeBinary(): string {
+  if (!fakeNodeDir) {
+    fakeNodeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-fake-node-'));
+    fs.copyFileSync(process.execPath, path.join(fakeNodeDir, 'node.exe'));
+  }
+  return path.join(fakeNodeDir, 'node.exe');
+}
+
 /**
  * Plant a fake `git` in `dir` that answers `git status …` with a porcelain header naming itself.
  * Windows: a Node binary named git.exe runs `<cwd>/status` as its script.
@@ -31,9 +42,9 @@ function initRepo(dir: string): void {
 function plantFakeGit(dir: string): void {
   if (process.platform === 'win32') {
     try {
-      fs.linkSync(process.execPath, path.join(dir, 'git.exe'));
+      fs.linkSync(fakeNodeBinary(), path.join(dir, 'git.exe'));
     } catch {
-      fs.copyFileSync(process.execPath, path.join(dir, 'git.exe'));
+      fs.copyFileSync(fakeNodeBinary(), path.join(dir, 'git.exe'));
     }
     fs.writeFileSync(path.join(dir, 'status'), "process.stdout.write('## planted-by-workspace\\n');\n");
   } else {
@@ -71,6 +82,10 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
 
   afterEach(() => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    if (fakeNodeDir) fs.rmSync(fakeNodeDir, { recursive: true, force: true });
   });
 
   it('TC-U07: creates clean checkpoint and rolls back modified + newly created files', () => {
