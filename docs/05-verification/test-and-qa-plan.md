@@ -74,7 +74,7 @@
 
 | ID | 시나리오 | 검증 방식 | 기대 결과 |
 | :--- | :--- | :--- | :--- |
-| `TC-I01` | **MCP Stdio 프로토콜 검증** | 자식 프로세스로 `server/dist/index.js` 실행 후 JSON-RPC `tools/list` 및 `check_ag_environment` 호출 | `stdout`이 순수 JSON-RPC 프레임만 포함, 3개 Tool 정상 노출 |
+| `TC-I01` | **MCP Stdio 프로토콜 검증** | 자식 프로세스로 `server/dist/index.js` 실행 후 JSON-RPC `tools/list` 및 `check_ag_environment` 호출 | `stdout`이 순수 JSON-RPC 프레임만 포함, MCP Tool 12종 정상 노출 |
 | `TC-I02` | **Subscription 전체 파이프라인 (Mock)** | `delegate_to_antigravity(modeOverride: "subscription")` 호출 중 백그라운드 모킹 타이머가 500ms 후 `RUNNING`, 1000ms 후 `report.md` 작성 및 `VERIFIED` 갱신 | `fs.watch`/폴링이 즉시 감지하고 `reportMarkdown`, `artifacts`, `changedFiles` 반환 |
 | `TC-I03` | **Subscription 타임아웃** | `timeout_sec: 2` 설정 후 상태 미변경 유지 | 2초 후 `FAILED(TASK_TIMEOUT)` 반환, 체크포인트 유지 |
 | `TC-I04` | **API Worker 전체 파이프라인 (Mock Gemini)** | `@google/genai` 모킹: Turn 1 `list_dir` → Turn 2 `write_file(locked)` → Turn 3 `write_file(out-of-scope 거부)` → Turn 4 `run_command("npx tsc --noEmit")` → Turn 5 최종 응답 | 허용 파일만 생성, 범위 외 쓰기 차단, `report.md` 생성 및 `VERIFIED` 반환 |
@@ -94,3 +94,4 @@
 | **G4. 매니페스트 정합성** | `.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json` JSON 파싱 및 참조 경로 검증 | 모든 참조 파일 실제 존재 |
 | **G5. 무의존 번들 기동** | `npm ci` **전에** `node server/scripts/smoke-bundle.mjs` — 두 번들의 참조가 Node 내장 모듈뿐인지 정적 검사(`bundle-scan.mjs`, 단위 테스트 `bundle-scan.test.ts`), 이어 `NODE_PATH`를 지운 환경에서 `dist/index.js` MCP `initialize` + `tools/list`, 공백 포함 경로에서 `dist/cli-init.js` 실행 ([ADR-004](../06-adr/ADR-004-prebuilt-server-bundle.md)) | 비내장 참조 0(선택 모듈 3개 제외), 도구 12개 응답, `cli-init` exit 0 |
 | **G6. 번들 드리프트** | `npm run build` 뒤 `git diff --exit-code -- server/dist/index.js server/dist/cli-init.js` | 커밋된 번들 = 새 빌드 (diff 0) |
+| **G7. 문서 수량** | `node server/scripts/check-doc-counts.mjs` — `.md`·`.svg`가 적은 슬래시 커맨드 수·MCP Tool 수를 `commands/*.md` 개수·`server/src/index.ts`의 `server.tool(` 등록 수와 대조 (날짜가 박힌 기록 3개 제외, 읽은 주장이 8개 미만이면 실패) | 불일치 0건 |

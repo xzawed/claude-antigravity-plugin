@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 430" width="1120" height="430" role="img" aria-label="Empirical Performance Benchmarks and Quality Metrics">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 430" width="1120" height="430" role="img" aria-label="Empirical Performance Benchmarks">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0B1120"/>
@@ -35,8 +35,8 @@
   <rect width="1120" height="430" rx="16" fill="url(#bg)" stroke="#1E293B" stroke-width="1.5"/>
 
   <!-- Header -->
-  <text x="32" y="42" class="title">Empirical Verification &amp; Quality Benchmarks</text>
-  <text x="32" y="64" class="subtitle">Measured on Windows 11 · Node.js v24.14.1 · Live Stdio MCP Client + GitHub Actions 3-OS Matrix (VER-002)</text>
+  <text x="32" y="42" class="title">Empirical Performance Benchmarks</text>
+  <text x="32" y="64" class="subtitle">Recorded on Windows 11 · Node.js v24.14.1 · live Stdio MCP client and agy.exe (VER-002 · v1.4.0 release notes)</text>
 
   <!-- Top KPI Cards (4 columns) -->
   <rect x="32" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
@@ -45,19 +45,19 @@
   <text x="52" y="166" class="kpi-sub">652.9ms → 149.9ms avg</text>
 
   <rect x="300" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="320" y="124" class="kpi-accent-b">57 / 57</text>
-  <text x="320" y="148" class="kpi-label">Automated TDD Tests Passing</text>
-  <text x="320" y="166" class="kpi-sub">9 suites · Unit + Auth + Jobs + E2E</text>
+  <text x="320" y="124" class="kpi-accent-b">397 ms</text>
+  <text x="320" y="148" class="kpi-label">Non-Blocking start_ag_task</text>
+  <text x="320" y="166" class="kpi-sub">returns while agy runs (v1.4.0)</text>
 
   <rect x="568" y="86" width="248" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="588" y="124" class="kpi-accent-p">7 / 7</text>
-  <text x="588" y="148" class="kpi-label">Cross-Platform CI Matrix</text>
-  <text x="588" y="166" class="kpi-sub">Ubuntu · macOS · Win (Node 20/22)</text>
+  <text x="588" y="124" class="kpi-accent-p">90.3 ms</text>
+  <text x="588" y="148" class="kpi-label">SessionStart Hook (cli-init)</text>
+  <text x="588" y="166" class="kpi-sub">avg of 5 · target &lt; 300 ms</text>
 
   <rect x="836" y="86" width="252" height="96" rx="12" fill="#131C31" stroke="#1E293B"/>
-  <text x="856" y="124" class="kpi-accent-g">0</text>
-  <text x="856" y="148" class="kpi-label">npm audit Vulnerabilities</text>
-  <text x="856" y="166" class="kpi-sub">vitest 5.1 · zod 4.6 · MCP 1.27</text>
+  <text x="856" y="124" class="kpi-accent-g">7,691</text>
+  <text x="856" y="148" class="kpi-label">Cache-Read Tokens, Turn 2</text>
+  <text x="856" y="166" class="kpi-sub">persistent ag_session (v1.4.0)</text>
 
   <!-- Latency Bar Chart Panel -->
   <rect x="32" y="204" width="1056" height="202" rx="12" fill="#131C31" stroke="#1E293B"/>
@@ -82,7 +82,7 @@
   <rect x="290" y="303" width="150" height="24" rx="6" fill="url(#barGreen)"/>
   <text x="450" y="320" class="bar-val">149.9 ms (PASS · 70% headroom)</text>
 
-  <!-- Row 3: cli-init --silent -->
+  <!-- Row 3: cli-init in silent mode -->
   <text x="52" y="362" class="bar-title">cli-init.js --silent (SessionStart)</text>
   <rect x="290" y="345" width="90" height="24" rx="6" fill="url(#barBlue)"/>
   <text x="390" y="362" class="bar-val">90.3 ms (PASS · 70% headroom)</text>
