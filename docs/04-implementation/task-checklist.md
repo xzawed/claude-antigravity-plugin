@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `IMP-002` |
-| **버전** | `1.5.0` |
+| **버전** | `1.6.0` |
 | **상태** | `Active` |
 | **최종 수정일** | `2026-11-25` |
 | **관련 문서** | [구현 마스터 플랜](./implementation-plan.md), [세션 인계서](./session-handoff.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -83,3 +83,4 @@
 | `2026-11-25` | POSIX git 타임아웃 하위 프로세스 정리 (`fix/posix-git-timeout-cleanup`) | `typecheck` + `build` + `smoke:bundle` + `check-doc-counts.mjs` + `npm test` (`TC-U34d`, `TC-U34e`) | `PASS` | POSIX에서 `setsid -- <git>`(Linux) / `perl setpgrp` + `exec`(macOS 폴백)으로 git을 독립 프로세스 그룹(`PGID = pid`)에서 실행하고, `ETIMEDOUT` 시 `endPosixLeftovers`가 자기 서버 PID 미포함 확인 후 `-pgid`에 `SIGKILL`(2차 훑기 포함) 전송; Windows 로컬 149 pass + 1 POSIX skip, Ubuntu·macOS CI에서 `TC-U34d` 실측 검증 |
 | `2026-11-25` | 실시간 MCP Progress Notification (`feat/mcp-progress-notifications`) | `typecheck` + `build` + `smoke:bundle` + `check-doc-counts.mjs` + `npm test` (`TC-U44`, `TC-I09`) | `PASS` | `ExecutionContext.onProgress` 추가, `SubscriptionEngine`(`stream-json` `init`/`step_update`/`result` → 마스킹 진행 이벤트) 및 `ApiWorkerEngine`(턴/도구 진행 이벤트) 연동, `delegate_to_antigravity`에서 `_meta.progressToken` 수신 시 `notifications/progress` 실시간 송출 및 `extra.signal` 취소 전파; **14 suites / 151 pass (+1 POSIX skip)**, 라이브 Stdio `TC-I09` 통과 |
 | `2026-11-25` | Git Worktree 격리 병렬 위임 (`feat/worktree-parallel-delegation`) | `typecheck` + `build` + `smoke:bundle` + `check-doc-counts.mjs` + `check-version-sync.mjs` + `npm test` (`TC-U45`~`TC-U45c`, `TC-S27`) | `PASS` | `git-guard.ts`에 `createTaskWorktree`/`removeTaskWorktree`(경로 탈출·심볼릭 링크·`ag-task/` 외 브랜치 삭제 차단) 구현, `delegate_to_antigravity` 및 `start_ag_task`에 `isolateWorktree: true` 격리 병렬 실행 지원(다중 병렬 `start_ag_task` `BRIDGE_BUSY` 없음), `rollback_ag_task` 시 부모 트리 미변경 상태로 worktree+브랜치 정리; **14 suites / 155 pass (+1 POSIX skip)** |
+| `2026-11-25` | `v1.6.0` 라이브 검증 및 릴리스 준비 (`chore/release-1.6.0`) | `typecheck` + `build` + `smoke:bundle` + `verify` + `check-version-sync.mjs --tag v1.6.0` + `check-doc-counts.mjs` + `npm test` | `PASS` | 버전 `1.5.0` → `1.6.0` 범프 및 번들 재빌드, `session-handoff.md` 현행화, 라이브 `npm run verify`(매니페스트 6종 · 공백 경로 `cli-init` · 라이브 Stdio 12종 MCP Tool · 로컬 `agy.exe` 감지) 통과, **14 suites / 155 pass (+1 POSIX skip)**, `v1.6.0` 태그로 자동 릴리스 CI 검증 |
