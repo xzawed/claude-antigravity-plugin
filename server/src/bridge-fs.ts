@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -123,21 +124,88 @@ export function ensureBridgeDirs(workspaceRoot: string): void {
   fs.mkdirSync(getHistoryDir(workspaceRoot), { recursive: true });
 }
 
-export function isGitignoreProtected(workspaceRoot: string): boolean {
-  const gitignorePath = path.join(workspaceRoot, '.gitignore');
-  if (!fs.existsSync(gitignorePath)) {
-    return false;
+/**
+ * Which file keeps `.ag-bridge/` out of git (ADR-005). Inside a git work tree it is the
+ * repository's local `.git/info/exclude`, so the plugin never edits a tracked file in the
+ * user's project; outside one there is nothing tracked to dirty, so `.gitignore` is used.
+ */
+export type IgnoreFile = 'git-info-exclude' | 'gitignore';
+
+export const GIT_EXCLUDE_HEADER =
+  '# antigravity-delegate: local session artifacts (kept out of the tracked .gitignore)';
+/** `.ag-bridge/` matches at any depth; the template paths need `**\/` because they contain a slash. */
+export const GIT_EXCLUDE_PATTERNS: readonly string[] = [
+  `${BRIDGE_DIR_NAME}/`,
+  '**/.agent/workflows/claude-handoff.md',
+  '**/.agents/workflows/claude-handoff.md',
+];
+
+function readTrimmedLines(file: string): string[] {
+  if (!fs.existsSync(file)) {
+    return [];
   }
-  const lines = fs
-    .readFileSync(gitignorePath, 'utf8')
+  return fs
+    .readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .map((line) => line.trim());
+}
+
+function hasBridgeEntry(lines: string[]): boolean {
   return lines.some((line) => line === '.ag-bridge' || line === '.ag-bridge/' || line === '/.ag-bridge/');
 }
 
-export function ensureGitignoreEntry(workspaceRoot: string): { updated: boolean; protected: boolean } {
+/**
+ * Absolute path of the repository's `info/exclude` for a workspace, or null when the workspace
+ * is not inside a git work tree (or git is unavailable). `git rev-parse --git-path` resolves
+ * subdirectories, linked worktrees and submodules to the right file.
+ */
+export function resolveGitExcludePath(workspaceRoot: string): string | null {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+      windowsHide: true,
+    }).trim();
+    return out ? path.resolve(workspaceRoot, out) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when git ignores `.ag-bridge/` through `.gitignore` or the repository's `info/exclude`. */
+export function isGitignoreProtected(workspaceRoot: string): boolean {
+  if (hasBridgeEntry(readTrimmedLines(path.join(workspaceRoot, '.gitignore')))) {
+    return true;
+  }
+  const excludePath = resolveGitExcludePath(workspaceRoot);
+  return excludePath !== null && hasBridgeEntry(readTrimmedLines(excludePath));
+}
+
+export function ensureGitignoreEntry(workspaceRoot: string): {
+  updated: boolean;
+  protected: boolean;
+  file: IgnoreFile;
+} {
+  const excludePath = resolveGitExcludePath(workspaceRoot);
+  if (excludePath) {
+    const lines = readTrimmedLines(excludePath);
+    const missing = GIT_EXCLUDE_PATTERNS.filter((pattern) => !lines.includes(pattern));
+    if (missing.length === 0) {
+      return { updated: false, protected: true, file: 'git-info-exclude' };
+    }
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : '';
+    const separator = existing.length === 0 ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
+    const header = lines.includes(GIT_EXCLUDE_HEADER) ? [] : [GIT_EXCLUDE_HEADER];
+    fs.appendFileSync(excludePath, `${separator}${[...header, ...missing].join('\n')}\n`, 'utf8');
+    return { updated: true, protected: true, file: 'git-info-exclude' };
+  }
+
+  // Not a git work tree: there is no tracked file to dirty, so keep the historical behaviour.
   if (isGitignoreProtected(workspaceRoot)) {
-    return { updated: false, protected: true };
+    return { updated: false, protected: true, file: 'gitignore' };
   }
 
   const gitignorePath = path.join(workspaceRoot, '.gitignore');
@@ -145,14 +213,14 @@ export function ensureGitignoreEntry(workspaceRoot: string): { updated: boolean;
 
   if (!fs.existsSync(gitignorePath)) {
     fs.writeFileSync(gitignorePath, block, 'utf8');
-    return { updated: true, protected: true };
+    return { updated: true, protected: true, file: 'gitignore' };
   }
 
   const existing = fs.readFileSync(gitignorePath, 'utf8');
   const needsLeadingNewline = existing.length > 0 && !existing.endsWith('\n');
   const addition = `${needsLeadingNewline ? '\n\n' : existing.length > 0 ? '\n' : ''}${block}`;
   fs.appendFileSync(gitignorePath, addition, 'utf8');
-  return { updated: true, protected: true };
+  return { updated: true, protected: true, file: 'gitignore' };
 }
 
 export function ensureDefaultConfig(workspaceRoot: string): { created: boolean; path: string } {
