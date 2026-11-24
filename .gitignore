@@ -2,8 +2,13 @@
 node_modules/
 server/node_modules/
 
-# Build output (run `cd server && npm run build` to regenerate)
-server/dist/
+# Build output — ignored EXCEPT the two self-contained bundles that .mcp.json and
+# hooks/hooks.json launch. Marketplace installs run no build, so these are committed:
+# rebuild with `npm --prefix server run build` and commit them with any src change
+# (CI fails on drift). See docs/06-adr/ADR-004-prebuilt-server-bundle.md.
+server/dist/*
+!server/dist/index.js
+!server/dist/cli-init.js
 
 # Local bridge session artifacts
 .ag-bridge/

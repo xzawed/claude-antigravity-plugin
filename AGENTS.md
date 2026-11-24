@@ -48,13 +48,17 @@
 6. **PR 단위 작업 원칙 (Git & PR Workflow — 필수)**
    - `main` 브랜치에 직접 커밋·푸시하지 않는다. 모든 기능·문서·버그 수정·리팩토링 작업은 반드시 전용 작업 브랜치(`feat/*`, `fix/*`, `docs/*`, `chore/*`)에서 수행하고 GitHub Pull Request(PR) 단위로 제출한다.
    - PR 생성 전 반드시 `npm --prefix server run typecheck`, `npm --prefix server run build`, `npm --prefix server test` 통과 여부를 검증하고 PR 본문에 변경 요약·검증 결과를 명시한다.
+7. **빌드 산출물 커밋 (Prebuilt Bundle)**
+   - 마켓플레이스 설치(`/plugin install`)는 저장소를 커밋된 그대로 복사할 뿐 `npm install`·`npm run build`를 돌리지 않는다. 그래서 `.mcp.json`·`hooks/hooks.json`이 실행하는 `server/dist/index.js`·`server/dist/cli-init.js`는 의존성까지 묶은 자체완결 번들로 **커밋한다**.
+   - `server/src/`를 바꾸면 재빌드한 두 파일을 같은 커밋에 넣는다. CI가 `node_modules` 없이 번들을 띄워 보고(G5), 새 빌드와 커밋본이 다르면 실패한다(G6). 근거: [ADR-004](docs/06-adr/ADR-004-prebuilt-server-bundle.md).
 
 ## 4. 표준 빌드 및 검증 명령 (구현 완료 후)
 
 ```bash
 cd server
-npm install
-npm run build        # TypeScript 컴파일 (tsc)
+npm ci
+npm run build        # esbuild 번들 → dist/index.js, dist/cli-init.js (커밋 대상)
 npm run typecheck    # npx tsc --noEmit
 npm test             # 단위 및 Mock MCP 통합 테스트
+npm run smoke:bundle # node_modules 없이 기동되는지 (CI는 npm ci 전에 실행)
 ```

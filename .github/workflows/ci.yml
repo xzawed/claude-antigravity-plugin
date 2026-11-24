@@ -34,14 +34,27 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
 
+      # Runs BEFORE `npm ci` on purpose: a marketplace install gets the committed tree with no
+      # node_modules, so nothing installed here may mask a dependency the bundle failed to inline.
+      - name: Committed bundle runs without node_modules (G5)
+        run: node server/scripts/smoke-bundle.mjs
+
       - name: Install dependencies
         run: npm --prefix server ci
 
       - name: TypeScript typecheck (G1)
         run: npm --prefix server run typecheck
 
-      - name: TypeScript build (G1)
+      - name: Bundle build (G1)
         run: npm --prefix server run build
+
+      - name: Committed bundle matches a fresh build (G6)
+        shell: bash
+        run: |
+          if ! git diff --exit-code --stat -- server/dist/index.js server/dist/cli-init.js; then
+            echo "::error::server/dist is stale. Run 'npm --prefix server run build' and commit server/dist/index.js and server/dist/cli-init.js."
+            exit 1
+          fi
 
       - name: Run automated test suite (G2)
         run: npm --prefix server test

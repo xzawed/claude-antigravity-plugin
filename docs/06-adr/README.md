@@ -19,6 +19,7 @@
 | [ADR-001](./ADR-001-file-based-ag-bridge.md) | 파일 기반 `.ag-bridge/` SSOT 프로토콜 채택 | `Accepted` | `2026-11-22` | 소켓/HTTP IPC 대신 파일 기반 브릿지를 채택하여 투명성·디버깅성·도구 독립성 확보 |
 | [ADR-002](./ADR-002-dual-execution-engine.md) | Subscription 우선 + Gemini API 폴백 듀얼 엔진 아키텍처 | `Accepted` | `2026-11-22` | 로컬 구독자 무과금·브라우저 검증과 비구독/헤드리스 환경 범용성을 단일 인터페이스로 통합 |
 | [ADR-003](./ADR-003-antigravity-cli-and-paths.md) | Antigravity CLI(`agy`/`antigravity`) 및 `.agent`/`.agents` 호환 전략 | `Accepted` | `2026-11-22` | 현행 Antigravity CLI(`agy`)·2.0 앱 환경과 원본 스펙(`.agent/workflows/`) 간 호환성 확보 |
+| [ADR-004](./ADR-004-prebuilt-server-bundle.md) | 미리 빌드된 자체완결 서버 번들을 저장소에 커밋 | `Accepted` | `2026-11-24` | 마켓플레이스 설치는 빌드를 돌리지 않으므로 esbuild 번들 두 개를 커밋하고 CI가 드리프트·무의존 기동을 검사 |
 
 ---
 

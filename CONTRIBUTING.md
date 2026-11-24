@@ -36,6 +36,8 @@ claude --plugin-dir "$PWD"
 
 After making edits, rebuild (`npm --prefix server run build`) and run `/reload-plugins` inside Claude Code.
 
+**Commit the rebuilt bundle.** `server/dist/index.js` and `server/dist/cli-init.js` are committed on purpose: a marketplace install copies the repository as-is and never runs `npm install` or `npm run build`. Put the regenerated files in the same commit as your `server/src/` change — CI fails when the committed bundle differs from a fresh build (G6), and it starts the committed bundle with no `node_modules` before installing anything (G5). See [ADR-004](./docs/06-adr/ADR-004-prebuilt-server-bundle.md).
+
 ---
 
 ## 3. Branching & Pull Request Workflow

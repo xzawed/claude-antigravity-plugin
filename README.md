@@ -112,7 +112,7 @@ Start `claude` and paste these two lines right inside Claude Code:
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-> 💡 **Direct from GitHub (no manual `git clone` needed):**
+> 💡 **Direct from GitHub (no `git clone`, no build):** the repository ships a prebuilt, self-contained server bundle (`server/dist/index.js`), so a marketplace install runs as-is:
 > `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`
 
 #### Option B — Instant Launch with `--plugin-dir` *(Great for Quick Testing)*
@@ -176,6 +176,15 @@ You'll see a clean status table confirming your active engine (`subscription` or
 Keeping both the plugin and Antigravity CLI up to date takes less than 30 seconds.
 
 ### 1. Update `claude-antigravity-plugin` to the Latest Version
+
+**Installed directly from GitHub** (`/plugin marketplace add xzawed/claude-antigravity-plugin`)? There is nothing to build — refresh the marketplace, update the plugin, then restart Claude Code:
+
+```bash
+claude plugin marketplace update claude-antigravity-plugin
+claude plugin update antigravity-delegate@claude-antigravity-plugin
+```
+
+**Installed from a local clone (Step 1)?** Pull and self-test the clone:
 
 **macOS / Linux:**
 
@@ -431,6 +440,7 @@ Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) a
 | :--- | :--- | :--- |
 | **`NO_ANTIGRAVITY_PROVIDER`** | Neither Antigravity (`agy`) nor `GEMINI_API_KEY` was found | Install `agy` and run `/ag-login`, **or** export `GEMINI_API_KEY` and run `/ag-status`. |
 | **Not logged in / 0 models returned** | `agy` is installed, but your Google account isn't signed in yet | Run `/ag-login` (or `/ag-login --manual` over SSH). |
+| **MCP server fails to connect: `Cannot find module …/server/dist/index.js`** | Installed from GitHub before v1.4.1, which did not ship the built server (marketplace installs run no build) | Update the plugin as shown in [How to Update](#-how-to-update-copy--paste) — v1.4.1+ ships a prebuilt bundle. |
 | **Plugin doesn't show new commands after updating** | `server/dist/` wasn't rebuilt or Claude Code hasn't reloaded plugins | Run the [Update block](#-how-to-update-copy--paste), then type `/reload-plugins` in Claude Code. |
 | **`BRIDGE_BUSY`** | Another delegation is currently `RUNNING` in this folder | Check `/ag-jobs` to monitor it, or stop it with `/ag-cancel`. |
 | **Windows path with spaces fails** | Folder path wasn't wrapped in quotes | Always wrap paths with spaces in quotes: `claude --plugin-dir "C:\My Plugins\claude-antigravity-plugin"`. |

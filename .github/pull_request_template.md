@@ -14,6 +14,7 @@
 
 ## Verification
 - [ ] `npm --prefix server run typecheck` (0 errors)
-- [ ] `npm --prefix server run build`
+- [ ] `npm --prefix server run build` — rebuilt `server/dist/index.js` · `cli-init.js` committed with any `server/src/` change (CI G6)
 - [ ] `npm --prefix server test`
+- [ ] `npm --prefix server run smoke:bundle` (committed bundle starts with no `node_modules`, CI G5)
 - [ ] 보안 경계(`lockedPaths`, 비밀정보 마스킹) 및 문서-코드 동기화 확인

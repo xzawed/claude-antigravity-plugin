@@ -9,10 +9,11 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify": "node scripts/verify-plugin.mjs",
+    "smoke:bundle": "node scripts/smoke-bundle.mjs",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
   },
   "dependencies": {
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.0",
     "vitest": "^5.1.1"
   }
