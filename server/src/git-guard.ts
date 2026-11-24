@@ -930,3 +930,176 @@ export function rollbackCheckpoint(
     ...(preRollbackRef ? { preRollbackRef } : {}),
   };
 }
+
+export const WORKTREE_BRANCH_PREFIX = 'ag-task/';
+
+export interface WorktreeInfo {
+  worktreePath: string;
+  branchName: string;
+  baseCommit: string;
+}
+
+export interface WorktreeRemoveResult {
+  removed: boolean;
+  branchDeleted: boolean;
+  warning?: string;
+}
+
+const worktreesRoot = (workspaceRoot: string): string => path.join(getBridgeDir(workspaceRoot), 'worktrees');
+
+function normalizeForContainment(p: string): string {
+  const resolved = path.resolve(p);
+  let canonical = resolved;
+  try {
+    canonical = fs.realpathSync.native(resolved);
+  } catch {
+    // Path may not exist yet; keep resolved form
+  }
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? canonical.toLowerCase()
+    : canonical;
+}
+
+function isStrictlyInside(parentDir: string, candidatePath: string): boolean {
+  const parent = normalizeForContainment(parentDir);
+  const candidate = normalizeForContainment(candidatePath);
+  const rel = path.relative(parent, candidate);
+  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * Create an isolated linked git worktree under `.ag-bridge/worktrees/<taskId>` on a dedicated
+ * `ag-task/<taskId>` branch created from `HEAD`. Because `.ag-bridge/` is excluded via
+ * `.git/info/exclude`, the parent work tree stays clean and multiple worktree tasks can run
+ * concurrently without `BRIDGE_BUSY` lock contention (ARC-003 §5.6, TC-U45).
+ */
+export function createTaskWorktree(workspaceRoot: string, taskId: string): WorktreeInfo {
+  const safeId = assertSafeTaskId(taskId);
+  const info = getGitInfo(workspaceRoot);
+  if (!info.isGitRepo) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      info.error
+        ? `Cannot create isolated worktree: ${info.error}`
+        : 'Git worktree isolation (`isolateWorktree: true`) requires a Git repository.',
+    );
+  }
+
+  const headRes = tryRunGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD']);
+  if (!headRes.ok || !headRes.stdout.trim()) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      'Cannot create isolated worktree: repository has no commits yet (HEAD does not exist).',
+    );
+  }
+  const baseCommit = headRes.stdout.trim();
+
+  const wtRoot = worktreesRoot(workspaceRoot);
+  fs.mkdirSync(wtRoot, { recursive: true });
+  const worktreePath = path.join(wtRoot, safeId);
+  const branchName = `${WORKTREE_BRANCH_PREFIX}${safeId}`;
+
+  const addRes = tryRunGit(workspaceRoot, ['worktree', 'add', '-b', branchName, worktreePath, baseCommit]);
+  if (!addRes.ok) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      `Failed to create isolated git worktree at ${worktreePath}: ${addRes.stderr}`,
+    );
+  }
+
+  return {
+    worktreePath,
+    branchName,
+    baseCommit,
+  };
+}
+
+/**
+ * Safely remove a previously created task worktree and optionally delete its `ag-task/<taskId>`
+ * branch. Refuses paths outside `.ag-bridge/worktrees/` or symlink escapes, and never deletes
+ * branches outside the `ag-task/` namespace (TC-S27).
+ */
+export function removeTaskWorktree(
+  workspaceRoot: string,
+  worktreePath: string,
+  branchName?: string,
+  deleteBranch = true,
+): WorktreeRemoveResult {
+  const wtRoot = worktreesRoot(workspaceRoot);
+  const resolvedTarget = path.resolve(worktreePath);
+
+  // Guard against symlinked .ag-bridge/worktrees or symlinked target directory
+  try {
+    if (fs.lstatSync(wtRoot).isSymbolicLink()) {
+      throw new AgPluginError(
+        'PATH_TRAVERSAL_BLOCKED',
+        'Refusing to remove worktree: .ag-bridge/worktrees is a symbolic link.',
+      );
+    }
+  } catch (err) {
+    if (err instanceof AgPluginError) throw err;
+  }
+  try {
+    if (fs.lstatSync(resolvedTarget).isSymbolicLink()) {
+      throw new AgPluginError(
+        'PATH_TRAVERSAL_BLOCKED',
+        `Refusing to remove worktree: target "${worktreePath}" is a symbolic link.`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof AgPluginError) throw err;
+  }
+
+  if (!isStrictlyInside(wtRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      'PATH_TRAVERSAL_BLOCKED',
+      `Refusing to remove worktree outside .ag-bridge/worktrees/: "${worktreePath}".`,
+    );
+  }
+
+  const warnings: string[] = [];
+  let removed = false;
+
+  const removeRes = tryRunGit(workspaceRoot, ['worktree', 'remove', '--force', resolvedTarget]);
+  if (removeRes.ok) {
+    removed = true;
+  } else {
+    // Worktree folder might already be gone or partially removed: prune metadata and remove folder
+    tryRunGit(workspaceRoot, ['worktree', 'prune']);
+    if (fs.existsSync(resolvedTarget)) {
+      try {
+        fs.rmSync(resolvedTarget, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        tryRunGit(workspaceRoot, ['worktree', 'prune']);
+        removed = !fs.existsSync(resolvedTarget);
+      } catch (err) {
+        warnings.push(
+          `Could not fully remove worktree directory (${err instanceof Error ? err.message : String(err)}).`,
+        );
+      }
+    } else {
+      removed = true;
+    }
+  }
+
+  let branchDeleted = false;
+  if (deleteBranch && branchName) {
+    if (!branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+      warnings.push(
+        `Refused to delete branch "${branchName}": only branches under "${WORKTREE_BRANCH_PREFIX}" may be deleted automatically.`,
+      );
+    } else {
+      const delRes = tryRunGit(workspaceRoot, ['branch', '-D', branchName]);
+      if (delRes.ok) {
+        branchDeleted = true;
+      } else {
+        warnings.push(`Could not delete branch "${branchName}": ${delRes.stderr.trim() || 'unknown error'}`);
+      }
+    }
+  }
+
+  return {
+    removed,
+    branchDeleted,
+    ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
+  };
+}

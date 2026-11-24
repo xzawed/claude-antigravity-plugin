@@ -21,6 +21,7 @@ import {
 } from './sessions.js';
 import {
   acquireBridgeLock,
+  archiveManifest,
   clearReportMarkdown,
   ensureBridgeDirs,
   ensureGitignoreEntry,
@@ -43,7 +44,14 @@ import {
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine, ProgressCallback } from './engines/base.js';
 import { AgyCapabilityQuery, queryAgyCapabilities, SubscriptionEngine } from './engines/subscription.js';
-import { checkpointManifestFields, createCheckpoint, getGitInfo, rollbackCheckpoint } from './git-guard.js';
+import {
+  checkpointManifestFields,
+  createCheckpoint,
+  createTaskWorktree,
+  getGitInfo,
+  removeTaskWorktree,
+  rollbackCheckpoint,
+} from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
   AgPluginError,
@@ -349,11 +357,28 @@ export async function handleDelegateToAntigravity(
   ensureGitignoreEntry(workspaceRoot);
 
   const effectiveTimeoutSec = input.timeoutSec ?? config.subscription.timeout_sec;
-  const lockRes = acquireBridgeLock(workspaceRoot, effectiveTimeoutSec);
+  const taskId = generateTaskId();
+
+  let executionRoot = workspaceRoot;
+  let worktreePath: string | undefined;
+  let worktreeBranch: string | undefined;
+
+  if (input.isolateWorktree) {
+    const wt = createTaskWorktree(workspaceRoot, taskId);
+    executionRoot = wt.worktreePath;
+    worktreePath = wt.worktreePath;
+    worktreeBranch = wt.branchName;
+    if (input.lockedPaths && input.lockedPaths.length > 0) {
+      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input.lockedPaths);
+    }
+    ensureBridgeDirs(executionRoot);
+    ensureGitignoreEntry(executionRoot);
+  }
+
+  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
   warnings.push(...lockRes.warnings);
 
-  const taskId = generateTaskId();
-  const checkpoint = createCheckpoint(workspaceRoot, taskId, config.git_guard);
+  const checkpoint = createCheckpoint(executionRoot, taskId, config.git_guard);
   if (checkpoint.warning) {
     warnings.push(checkpoint.warning);
   }
@@ -375,12 +400,17 @@ export async function handleDelegateToAntigravity(
     createdAt: now,
     updatedAt: now,
     ...checkpointManifestFields(checkpoint),
+    ...(worktreePath ? { worktreePath } : {}),
+    ...(worktreeBranch ? { worktreeBranch } : {}),
     artifacts: [],
   };
 
-  writeManifest(workspaceRoot, manifest);
-  clearReportMarkdown(workspaceRoot);
-  writeDispatchMarkdown(workspaceRoot, {
+  writeManifest(executionRoot, manifest);
+  if (worktreePath) {
+    archiveManifest(workspaceRoot, manifest);
+  }
+  clearReportMarkdown(executionRoot);
+  writeDispatchMarkdown(executionRoot, {
     manifest,
     instructions: input.instructions,
     acceptanceCriteria,
@@ -392,7 +422,7 @@ export async function handleDelegateToAntigravity(
       : (deps.apiWorkerEngine ?? new ApiWorkerEngine());
 
   const execRes = await engine.execute({
-    workspaceRoot,
+    workspaceRoot: executionRoot,
     pluginRoot,
     manifest,
     config,
@@ -405,12 +435,30 @@ export async function handleDelegateToAntigravity(
     onProgress: runtimeOptions?.onProgress,
   });
 
+  if (worktreePath) {
+    const disk = readManifest(executionRoot);
+    archiveManifest(workspaceRoot, {
+      ...(disk ?? manifest),
+      status: execRes.status,
+      worktreePath,
+      worktreeBranch,
+      changedFiles: execRes.changedFiles,
+      artifacts: execRes.artifacts,
+      metrics: execRes.metrics ?? disk?.metrics,
+      errorCode: execRes.errorCode,
+      error: execRes.errorMessage ? maskSecrets(execRes.errorMessage) : undefined,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   return {
     ok: execRes.status === 'VERIFIED',
     taskId,
     mode: resolvedMode,
     status: execRes.status,
     gitCheckpointRef: checkpoint.checkpointRef,
+    ...(worktreePath ? { worktreePath } : {}),
+    ...(worktreeBranch ? { worktreeBranch } : {}),
     changedFiles: execRes.changedFiles,
     artifacts: execRes.artifacts,
     reportMarkdown: maskSecrets(execRes.reportMarkdown),
@@ -446,6 +494,25 @@ export async function handleRollbackAgTask(
         ? `No task manifest found for taskId "${input.taskId}".`
         : 'No active or recent delegation manifest found in .ag-bridge/manifest.json.',
     );
+  }
+
+  if (targetManifest.worktreePath) {
+    const wtRes = removeTaskWorktree(
+      workspaceRoot,
+      targetManifest.worktreePath,
+      targetManifest.worktreeBranch,
+      true,
+    );
+    return {
+      ok: true,
+      taskId: targetManifest.taskId,
+      restoredCheckpointRef: targetManifest.gitCheckpointRef,
+      revertedTrackedFiles: [],
+      removedUntrackedFiles: [],
+      worktreeRemoved: wtRes.removed,
+      worktreeBranchDeleted: wtRes.branchDeleted,
+      ...(wtRes.warning ? { warnings: [wtRes.warning] } : {}),
+    };
   }
 
   const rollbackRes = rollbackCheckpoint(workspaceRoot, targetManifest);
@@ -523,6 +590,7 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     disableSlashCommands: z.boolean().optional(),
     settings: z.string().min(1).optional(),
     rawPrompt: z.boolean().optional(),
+    isolateWorktree: z.boolean().optional(),
     workspaceRoot: z.string().min(1).optional(),
   };
 

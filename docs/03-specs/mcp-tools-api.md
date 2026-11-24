@@ -67,6 +67,7 @@ Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 
 | `disableSlashCommands` | `boolean` | N | 슬래시 커맨드 비활성화 (`agy --disable-slash-commands`) |
 | `settings` | `string` | N | 추가 설정 파일 경로 또는 JSON (`agy --settings <val>`) |
 | `rawPrompt` | `boolean` | N | `true`일 때 `instructions`를 `/claude-handoff` 래핑 없이 `agy --print`에 원문 그대로 전달 (`/boost`, `/browser`, `/swarm`, `/goal` 등 네이티브 커맨드는 자동 감지) |
+| `isolateWorktree` | `boolean` | N | `true`일 때 `.ag-bridge/worktrees/<taskId>` + `ag-task/<taskId>` 브랜치에 격리 실행(다중 `start_ag_task` 병렬 실행 지원, `rollback_ag_task` 시 worktree·브랜치 정리) |
 | `workspaceRoot` | `string` | N | 대상 프로젝트 루트 경로 (기본값: `process.cwd()`) |
 
 #### Output Payload (JSON text content)
