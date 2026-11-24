@@ -21,8 +21,9 @@
 2. **두 파일만 커밋한다.** `.gitignore`는 `server/dist/*`를 제외하되 `!server/dist/index.js`·`!server/dist/cli-init.js`로 되살린다. `.gitattributes`가 LF를 고정하고 생성 파일로 표시한다.
 3. **타입 검사는 `tsc --noEmit`으로 분리한다.** esbuild는 타입을 검사하지 않으므로 `npm run typecheck`(G1)가 계속 그 역할을 한다.
 4. **CI가 두 가지를 막는다.**
-   - **G5:** `npm ci` *전에* `server/scripts/smoke-bundle.mjs`로 커밋된 번들을 띄워 MCP `initialize` + `tools/list`(12개)와 공백 포함 경로의 `cli-init`을 확인한다. `node_modules`가 없으니 번들이 빠뜨린 의존성을 아무것도 가려 주지 못한다.
+   - **G5:** `npm ci` *전에* `server/scripts/smoke-bundle.mjs`가 (1) 두 번들이 Node 내장 모듈만 참조하는지 정적으로 검사하고(`scripts/bundle-scan.mjs` — 0열 `import`, esbuild의 `__require("x")`, 리터럴 `import("x")`; ws·debug가 `try/catch`로 감싼 선택 모듈 3개만 허용), (2) `NODE_PATH`를 지운 환경에서 번들을 띄워 MCP `initialize` + `tools/list`(12개)와 공백 포함 경로의 `cli-init`을 확인한다. 기동만으로는 증명이 안 된다 — 배너의 `createRequire`가 만든 `require()`는 `NODE_PATH`와 Node 전역 폴더도 뒤지므로, 실행기 환경이 번들이 빠뜨린 의존성을 채워 줄 수 있다(ESM `import`는 `NODE_PATH`를 보지 않는다. 둘 다 2026-11-24 실측: `NODE_PATH`로 zod를 대 주면 정적 검사 없는 스모크는 통과했다).
    - **G6:** 빌드 뒤 `git diff --exit-code -- server/dist/index.js server/dist/cli-init.js` — 커밋된 번들이 새 빌드와 다르면 실패한다.
+5. **계산된 `import(<식>)`·`require(<식>)`는 빌드에서 막는다.** esbuild는 이런 호출을 번들하지 않고 남기면서 기본값으로는 경고조차 내지 않는다(실측). `build.mjs`가 `unsupported-dynamic-import`·`unsupported-require-call`을 오류로 올린다.
 
 ## 3. 검토한 대안 (Alternatives Considered)
 
