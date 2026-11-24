@@ -41,7 +41,7 @@ import {
 } from './detector.js';
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine } from './engines/base.js';
-import { queryAgyCapabilities, SubscriptionEngine } from './engines/subscription.js';
+import { AgyCapabilityQuery, queryAgyCapabilities, SubscriptionEngine } from './engines/subscription.js';
 import { checkpointManifestFields, createCheckpoint, getGitInfo, rollbackCheckpoint } from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
@@ -67,6 +67,7 @@ export interface ServerDependencies {
   queryCapabilitiesFn?: (
     cliPath: string,
     platform?: NodeJS.Platform,
+    query?: AgyCapabilityQuery,
   ) =>
     | Awaited<ReturnType<typeof queryAgyCapabilities>>
     | ReturnType<typeof queryAgyCapabilities>;
@@ -160,7 +161,11 @@ export async function handleListCapabilities(
 
   if (detection.subscription.detected && detection.subscription.cliBinary === 'agy' && detection.subscription.cliPath) {
     const queryFn = deps.queryCapabilitiesFn ?? queryAgyCapabilities;
-    const cap = await queryFn(detection.subscription.cliPath, detection.platform);
+    // In the workspace, so agy also names the agents it defines; probe when `agy agents` is silent.
+    const cap = await queryFn(detection.subscription.cliPath, detection.platform, {
+      cwd: workspaceRoot,
+      probeAgents: true,
+    });
     models = cap.models;
     agents = cap.agents;
     warnings.push(...cap.warnings);

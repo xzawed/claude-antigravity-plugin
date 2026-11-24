@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.5.0` |
+| **버전** | `1.6.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -191,7 +191,7 @@ export interface RollbackToolOutput {
 ---
 
 ### 2.4 Tool 4: `list_ag_capabilities`
-로컬 `agy` CLI에서 실시간으로 사용 가능한 모델 목록(`agy models`)과 에이전트 목록(`agy agents`)을 병렬 조회하고, 지원되는 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도(`effort`), 전체 CLI 플래그 및 현재 워크스페이스 기본값을 반환한다.
+로컬 `agy` CLI에서 실시간으로 사용 가능한 모델 목록(`agy models`)과 에이전트 목록을 병렬 조회하고(에이전트는 `workspaceRoot`에서 조회하므로 그 워크스페이스가 정의한 `.agents/agents/`도 포함한다. `agy agents`가 출력하지 않으면 없는 에이전트 이름으로 묻는 탐침을 쓴다 — [SPC-002](./execution-engines.md)), 지원되는 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도(`effort`), 전체 CLI 플래그 및 현재 워크스페이스 기본값을 반환한다.
 
 #### Input Schema
 | 필드 | 타입 | 필수 | 설명 |

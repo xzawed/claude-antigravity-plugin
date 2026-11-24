@@ -23,7 +23,7 @@ Use the `antigravity-delegate` MCP server to offload UI-heavy implementation, mu
 7. `list_ag_artifacts` — Inspect screenshots, logs, reports, and JSON artifacts under `.ag-bridge/artifacts/<taskId>/` with masked `report.md` and `agy-cli.log` previews.
 8. `ag_cli_admin` — Manage Antigravity CLI platform integrations safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`).
 9. `check_ag_environment` — Inspect detected mode, local `agy`/app path, active `agyConfig` (permissions/sandbox/model/effort), API key status (redacted), Git Guard state, and latest task usage.
-10. `list_ag_capabilities` — Dynamically discover all available `agy models`, `agy agents`, permission modes, effort levels, and supported CLI flags.
+10. `list_ag_capabilities` — Dynamically discover all available `agy` models and agents (including the workspace's own), permission modes, effort levels, and supported CLI flags.
 11. `get_ag_usage` — Inspect cumulative and per-task token usage (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`) and duration across current and archived delegations.
 12. `rollback_ag_task` — Losslessly restore the workspace to its exact pre-delegation Git checkpoint (`gitCheckpointRef`).
 

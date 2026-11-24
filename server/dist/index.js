@@ -28200,7 +28200,7 @@ var require_websocket = __commonJS({
     var net = __require("net");
     var querystring = __require("querystring");
     var tls = __require("tls");
-    var { randomBytes, createHash } = __require("crypto");
+    var { randomBytes: randomBytes2, createHash } = __require("crypto");
     var { Duplex, Readable: Readable2 } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -28754,7 +28754,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key = randomBytes(16).toString("base64");
+      const key = randomBytes2(16).toString("base64");
       const request = isSecure ? https2.request : http3.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -60647,6 +60647,7 @@ function assertResolvedMode(detection) {
 
 // src/engines/subscription.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs8 from "node:fs";
 import path8 from "node:path";
 var NATIVE_AGY_SLASH_RE = /^\/(boost|browser|swarm|goal|teamwork|grill-me|plan|btw|compact|codesearch|learn|schedule)\b/i;
@@ -61059,21 +61060,45 @@ function parseAgyAgentsOutput(raw) {
   }
   return agents;
 }
-async function queryAgyCapabilities(cliPath, platform = process.platform) {
+var AGENT_PROBE_ANSWER = /unknown agent "[^"]*" \((?:available: (.*)|no custom agents are available)\)/;
+function parseAgyAgentProbe(output2) {
+  const names = (list) => list === void 0 ? [] : list.split(", ").map((n) => n.trim()).filter((n) => n.length > 0);
+  for (const line of output2.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const result = event.result;
+    if (event.event !== "result" || !result) continue;
+    if (result.status !== "ERROR" || (result.num_turns ?? 0) !== 0 || (result.conversation_id ?? "") !== "") {
+      return void 0;
+    }
+    const m3 = AGENT_PROBE_ANSWER.exec(String(result.error ?? ""));
+    return m3 ? names(m3[1]) : void 0;
+  }
+  const m2 = new RegExp(`^error: ${AGENT_PROBE_ANSWER.source}\\s*$`, "m").exec(output2);
+  return m2 ? names(m2[1]) : void 0;
+}
+async function queryAgyCapabilities(cliPath, platform = process.platform, query = {}) {
   const warnings = [];
-  const runSub = (subArgs) => new Promise((resolve) => {
+  const runSub = (subArgs, expectFailure = false) => new Promise((resolve) => {
     const spec = buildCliSpawnSpec(cliPath, subArgs, platform);
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const finish = (out) => {
+    const finish = () => {
       if (!settled) {
         settled = true;
-        resolve(out);
+        resolve({ stdout, stderr });
       }
     };
     try {
       const child = spawn(spec.command, spec.args, {
+        cwd: query.cwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: spec.windowsHide,
@@ -61085,7 +61110,7 @@ async function queryAgyCapabilities(cliPath, platform = process.platform) {
           child.kill();
         } catch {
         }
-        finish(stdout);
+        finish();
       }, 15e3);
       child.stdout?.on("data", (chunk) => {
         stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -61096,27 +61121,54 @@ async function queryAgyCapabilities(cliPath, platform = process.platform) {
       child.once("error", (err) => {
         clearTimeout(timer);
         warnings.push(`Failed to query \`agy ${subArgs.join(" ")}\`: ${err.message}`);
-        finish("");
+        stdout = "";
+        stderr = "";
+        finish();
       });
       child.once("close", (code) => {
         clearTimeout(timer);
-        if (code !== 0 && code !== null) {
+        if (!expectFailure && code !== 0 && code !== null) {
           const errText = stderr.trim().split(/\r?\n/).slice(-2).join(" ");
           if (errText) {
             warnings.push(`\`agy ${subArgs.join(" ")}\` exited ${code}: ${maskSecrets(errText)}`);
           }
         }
-        finish(stdout);
+        finish();
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       warnings.push(`Failed to query \`agy ${subArgs.join(" ")}\`: ${msg}`);
-      finish("");
+      finish();
     }
   });
-  const [modelsRaw, agentsRaw] = await Promise.all([runSub(["models"]), runSub(["agents"])]);
-  const models = parseAgyModelsOutput(modelsRaw);
-  const agents = parseAgyAgentsOutput(agentsRaw);
+  const probeArgs = [
+    "-p",
+    "List the available agents.",
+    "--agent",
+    `__ag_bridge_agent_probe_${randomBytes(6).toString("hex")}__`,
+    "--mode",
+    "plan",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "10s"
+  ];
+  const [modelsOut, agentsOut, probeOut] = await Promise.all([
+    runSub(["models"]),
+    runSub(["agents"]),
+    query.probeAgents ? runSub(probeArgs, true) : Promise.resolve(void 0)
+  ]);
+  const models = parseAgyModelsOutput(modelsOut.stdout);
+  let agents = parseAgyAgentsOutput(agentsOut.stdout);
+  if (agents.length === 0 && probeOut) {
+    const probed = parseAgyAgentProbe(`${probeOut.stdout}
+${probeOut.stderr}`);
+    if (probed) {
+      agents = probed;
+    } else {
+      warnings.push("Could not read the agent list: `agy agents` printed nothing and agy did not name its agents when asked for an unknown one.");
+    }
+  }
   return { models, agents, warnings };
 }
 async function tryCliTrigger(ctx) {
@@ -82558,7 +82610,10 @@ async function handleListCapabilities(workspaceRootInput, deps = {}) {
   let agents = [];
   if (detection.subscription.detected && detection.subscription.cliBinary === "agy" && detection.subscription.cliPath) {
     const queryFn = deps.queryCapabilitiesFn ?? queryAgyCapabilities;
-    const cap = await queryFn(detection.subscription.cliPath, detection.platform);
+    const cap = await queryFn(detection.subscription.cliPath, detection.platform, {
+      cwd: workspaceRoot,
+      probeAgents: true
+    });
     models = cap.models;
     agents = cap.agents;
     warnings.push(...cap.warnings);
