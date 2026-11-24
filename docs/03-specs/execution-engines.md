@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-002` |
-| **버전** | `1.2.0` |
+| **버전** | `1.3.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [시스템 아키텍처](../02-architecture/system-architecture.md), [MCP API 명세](./mcp-tools-api.md), [ADR-002](../06-adr/ADR-002-dual-execution-engine.md), [ADR-003](../06-adr/ADR-003-antigravity-cli-and-paths.md) |
@@ -63,6 +63,7 @@ export interface ExecutionEngine {
 3. **환경변수 오버라이드 (`config.ts`):**
    - `AG_DEFAULT_MODE` (`auto` | `subscription` | `api`)
    - `AG_DANGEROUSLY_SKIP_PERMISSIONS` (`1` | `true` | `yes` | `0` | `false` | `no`)
+   - `AG_GIT_TIMEOUT_MS` (`git-guard.ts`): Git Guard가 git 명령 하나를 기다리는 상한(밀리초, 기본 `120000`) — 아주 큰 저장소에서 올린다([ARC-003 §5.4](../02-architecture/security-and-git-guard.md))
 4. **모드 결정 로직:**
    - `auto`: `subscription.detected` → `'subscription'`, else `api.configured` → `'api'`, else `'unavailable'` (`NO_ANTIGRAVITY_PROVIDER`).
    - `subscription`: 미감지 시 즉시 `SUBSCRIPTION_UNAVAILABLE`.

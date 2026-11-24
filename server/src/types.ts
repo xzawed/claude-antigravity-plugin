@@ -190,6 +190,8 @@ export interface GitStatusInfo {
   isGitRepo: boolean;
   currentBranch?: string;
   isDirty?: boolean;
+  /** Why git gave no answer when that is not "not a repository" (e.g. the time limit). */
+  error?: string;
 }
 
 export interface CheckEnvironmentOutput extends EnvironmentDetectionResult {
@@ -252,6 +254,7 @@ export interface RollbackToolOutput {
   restoredCheckpointRef?: string;
   revertedTrackedFiles: string[];
   removedUntrackedFiles: string[];
+  warnings?: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;
 }

@@ -452,6 +452,13 @@ export async function handleRollbackAgTask(
     restoredCheckpointRef: rollbackRes.restoredCheckpointRef,
     revertedTrackedFiles: rollbackRes.revertedTrackedFiles,
     removedUntrackedFiles: rollbackRes.removedUntrackedFiles,
+    ...(rollbackRes.untrackedBaselineMissing
+      ? {
+          warnings: [
+            'Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed.',
+          ],
+        }
+      : {}),
   };
 }
 
