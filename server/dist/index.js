@@ -59839,10 +59839,27 @@ function resolveRealPathOrNearestParent(targetPath) {
   const realExisting = fs4.realpathSync(current);
   return trailingSegments.length > 0 ? path4.join(realExisting, ...trailingSegments) : realExisting;
 }
+function nativeRealPathOrNearestParent(targetPath) {
+  let current = path4.resolve(targetPath);
+  const trailingSegments = [];
+  for (; ; ) {
+    try {
+      const real = fs4.realpathSync.native(current);
+      return trailingSegments.length > 0 ? path4.join(real, ...trailingSegments) : real;
+    } catch {
+      const parent = path4.dirname(current);
+      if (parent === current) {
+        return path4.resolve(targetPath);
+      }
+      trailingSegments.unshift(path4.basename(current));
+      current = parent;
+    }
+  }
+}
 function isInsideWorkspace(workspaceRoot, candidatePath) {
   return isInsideRoot(
-    resolveRealPathOrNearestParent(workspaceRoot),
-    resolveRealPathOrNearestParent(candidatePath)
+    nativeRealPathOrNearestParent(workspaceRoot),
+    nativeRealPathOrNearestParent(candidatePath)
   );
 }
 function isProtectedWritePath(posixRel) {
@@ -60124,7 +60141,7 @@ function whyConfigIsNotUsers(workspaceRoot) {
     } catch {
     }
   }
-  if (isTrackedFile(workspaceRoot, ":(icase).ag-bridge/config.json")) {
+  if (isTrackedFile(workspaceRoot, ":(icase).ag-bridge")) {
     return "the file is tracked by git, so the repository may have supplied it";
   }
   return void 0;

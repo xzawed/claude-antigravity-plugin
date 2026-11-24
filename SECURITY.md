@@ -36,12 +36,13 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S16`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S19d`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
    - Canonicalizes target paths with `path.resolve` + `fs.realpathSync` to block `../` traversal and symlink/junction escapes outside the workspace or `lockedPaths`.
    - Unconditionally blocks writes to `.git/**`, `.env`, `.env.*`, `node_modules/**`, and `.ag-bridge/config.json`, and blocks reads of `.env*`, `.ssh`, `*.pem`, `*.key`, and SSH private keys.
+   - A repository can commit its own `.ag-bridge/config.json`. Settings that pick a program or a secret, or weaken a safety default, are therefore taken only from the user's own untracked config. The list is `TRUST_SENSITIVE` in `server/src/config.ts`, with the reasons in [ARC-003 §7](./docs/02-architecture/security-and-git-guard.md). A config that git tracks (in any letter case) or that is reached through a link has them ignored, and `check_ag_environment` names each one. `app_path` must always be an absolute path outside the workspace (`TC-S17` ~ `TC-S19d`).
    - Strictly validates `taskId` (`assertSafeTaskId`) against `^[a-zA-Z0-9._-]{1,128}$` without `..` segments in `getArtifactsDir`, `readArchivedManifest`, and `archiveManifest` so `list_ag_artifacts`, `get_ag_job`, and `rollback_ag_task` cannot escape `.ag-bridge/`.
 2. **Restricted Verification Shell & Safe Subprocess Spawning (`server/src/engines/api-worker.ts`, `server/src/cli-admin.ts`, `server/src/engines/subscription.ts`):**
    - `run_command` validates commands against a strict build/typecheck/lint/test allowlist and rejects shell metacharacters and destructive binaries (`rm`, `git`, `curl`, `wget`, `powershell`, `bash`, `sudo`).

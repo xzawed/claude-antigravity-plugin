@@ -31,4 +31,5 @@ Inspect or update `.ag-bridge/config.json` in the current workspace.
    - Never write raw API keys into `.ag-bridge/config.json`; advise setting `GEMINI_API_KEY` as an environment variable instead.
 3. Ensure `.ag-bridge/` exists and is git-ignored (inside a git repository via the local `.git/info/exclude`, otherwise `.gitignore`) before writing `.ag-bridge/config.json`.
 4. Preserve all untouched keys in `.ag-bridge/config.json`.
+   - Security-sensitive values (`skip-permissions true`, `sandbox false`, `agy-mode auto`, a custom `app_path`, API key settings) take effect only from the user's own untracked config. If `check_ag_environment` lists them under ignored settings, the file is tracked by git or reached through a link. Tell the user to run `git rm --cached .ag-bridge/config.json`, or to pass the option per call. `app_path` must be an absolute path outside the project.
 5. After saving, call `check_ag_environment({})` and display a before/after table confirming the updated configuration.

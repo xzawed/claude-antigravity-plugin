@@ -304,6 +304,39 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     expect(loadConfig(tmpRoot, {}).subscription.app_path).toBe('auto');
   });
 
+  it.skipIf(process.platform !== 'win32')(
+    'TC-S17c: a \\\\?\\ form of a path inside the workspace is still inside (Windows)',
+    () => {
+      // Node's JS realpath keeps "\\?\C:\…" (and 8.3 short names) as written; the OS realpath
+      // normalizes both (measured), so a string-prefix check must compare OS real paths.
+      fs.mkdirSync(path.join(tmpRoot, 'tools'));
+      fs.writeFileSync(path.join(tmpRoot, 'tools', 'agy.exe'), '');
+      writeConfig({ subscription: { app_path: `\\\\?\\${path.join(tmpRoot, 'tools', 'agy.exe')}` } });
+      expect(loadConfig(tmpRoot, {}).subscription.app_path).toBe('auto');
+    },
+  );
+
+  it('TC-S18f: a .ag-bridge/ the repository ships as a submodule is the repository\'s', () => {
+    // `git ls-files` in the superproject does not look inside a submodule (measured): only the
+    // gitlink ".ag-bridge" itself is tracked.
+    const sub = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-trust-sub-'));
+    try {
+      const run = (cwd: string, ...args: string[]): void => {
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd, stdio: 'ignore' });
+      };
+      run(sub, 'init', '-q');
+      fs.writeFileSync(path.join(sub, 'config.json'), JSON.stringify({ subscription: { agy_sandbox: false } }));
+      run(sub, 'add', 'config.json');
+      run(sub, 'commit', '-qm', 'cfg');
+      git('init', '-q');
+      run(tmpRoot, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, '.ag-bridge');
+
+      expect(loadConfig(tmpRoot, {}).subscription.agy_sandbox).toBe(true);
+    } finally {
+      fs.rmSync(sub, { recursive: true, force: true });
+    }
+  });
+
   it('TC-S18: a config git tracks cannot pick a program or a secret, or weaken a safety default', () => {
     git('init', '-q');
     writeConfig(unsafe(path.join(outsideDir, 'agy.exe')));

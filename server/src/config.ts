@@ -148,9 +148,11 @@ const TRUST_SENSITIVE: Array<[TrustSection, string, (value: unknown) => boolean]
 
 /**
  * Why `.ag-bridge/config.json` may not be the user's own, or undefined when it is: the user's file
- * is a regular file under a real `.ag-bridge/` directory that git does not track. The pathspec is
- * case-insensitive because Windows and macOS read `.AG-BRIDGE/CONFIG.JSON` as this file (TC-S18d),
- * and a link could lead to a file git tracks under another name (TC-S18e).
+ * is a regular file under a real `.ag-bridge/` directory of which git tracks nothing. The pathspec
+ * names the directory so it also matches a submodule's gitlink (git does not list files inside a
+ * submodule, TC-S18f), and it is case-insensitive because Windows and macOS read
+ * `.AG-BRIDGE/CONFIG.JSON` as this file (TC-S18d). A link could lead to a file git tracks under
+ * another name (TC-S18e).
  */
 function whyConfigIsNotUsers(workspaceRoot: string): string | undefined {
   const dir = path.join(workspaceRoot, '.ag-bridge');
@@ -163,7 +165,7 @@ function whyConfigIsNotUsers(workspaceRoot: string): string | undefined {
       // missing: nothing to read through
     }
   }
-  if (isTrackedFile(workspaceRoot, ':(icase).ag-bridge/config.json')) {
+  if (isTrackedFile(workspaceRoot, ':(icase).ag-bridge')) {
     return 'the file is tracked by git, so the repository may have supplied it';
   }
   return undefined;
