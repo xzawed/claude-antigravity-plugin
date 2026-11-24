@@ -439,7 +439,7 @@ async function startManualLoginFlow(
         child.stdout?.off('data', onStdout);
         child.stderr?.off('data', onStderr);
         child.off('error', onError);
-        child.off('close', onClose);
+        child.off('close', onCloseWrapper);
         resolve(out);
       }
     };
@@ -560,12 +560,14 @@ async function startManualLoginFlow(
       });
     }, promptTimeoutMs);
 
+    const onCloseWrapper = (code: number | null): void => {
+      void onClose(code);
+    };
+
     child.stdout?.on('data', onStdout);
     child.stderr?.on('data', onStderr);
     child.once('error', onError);
-    child.once('close', (code) => {
-      void onClose(code);
-    });
+    child.once('close', onCloseWrapper);
   });
 }
 
@@ -629,7 +631,7 @@ async function runBrowserLoginFlow(
         child.stdout?.off('data', onStdout);
         child.stderr?.off('data', onStderr);
         child.off('error', onError);
-        child.off('close', onClose);
+        child.off('close', onCloseWrapper);
         resolve(out);
       }
     };
@@ -757,12 +759,14 @@ async function runBrowserLoginFlow(
       });
     }, timeoutSec * 1000);
 
+    const onCloseWrapper = (code: number | null): void => {
+      void onClose(code);
+    };
+
     child.stdout?.on('data', onStdout);
     child.stderr?.on('data', onStderr);
     child.once('error', onError);
-    child.once('close', (code) => {
-      void onClose(code);
-    });
+    child.once('close', onCloseWrapper);
   });
 }
 

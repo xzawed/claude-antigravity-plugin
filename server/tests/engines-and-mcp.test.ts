@@ -1052,4 +1052,124 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     expect(envRes.bridge.currentStatus).toBe('IDLE');
     expect(envRes.git.isGitRepo).toBe(false);
   });
+
+  it('TC-U40: second subscription delegation clears stale report.md so autoFinalize writes the new response', async () => {
+    // Seed a stale report.md from an earlier task
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, '.ag-bridge', 'report.md'), '# Old Task 1 Report\n', 'utf8');
+
+    const engine = new SubscriptionEngine({
+      triggerFn: async (ctx) => {
+        const stream = new PassThrough();
+        const hb = attachStreamJsonHeartbeat(stream, {
+          workspaceRoot: ctx.workspaceRoot,
+          taskId: ctx.manifest.taskId,
+          autoFinalizeOnResult: true,
+        });
+        setTimeout(() => {
+          stream.write(
+            `${JSON.stringify({
+              event: 'result',
+              result: {
+                conversation_id: 'conv-task-2',
+                status: 'SUCCESS',
+                response: 'Fresh response from Task 2',
+                duration_seconds: 1.5,
+                num_turns: 1,
+              },
+            })}\n`,
+          );
+          stream.end();
+        }, 20);
+        return { methodUsed: 'cli', streamState: hb.state, stopStream: hb.stop };
+      },
+    });
+
+    const res = await handleDelegateToAntigravity(
+      {
+        title: 'Task 2 after stale report',
+        instructions: '/boost Analyze new feature',
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      {
+        pluginRoot,
+        subscriptionEngine: engine,
+        detectorDeps: {
+          platform: 'linux',
+          env: {},
+          homedir: '/home/tester',
+          existsSync: (p) => p === '/usr/local/bin/agy',
+          findBinary: (b) => (b === 'agy' ? '/usr/local/bin/agy' : undefined),
+        },
+      },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.reportMarkdown).toContain('Fresh response from Task 2');
+    expect(res.reportMarkdown).not.toContain('Old Task 1 Report');
+  });
+
+  it('TC-S25: API worker masks secrets in catch-path report.md and guards NaN line/depth arguments', async () => {
+    fs.writeFileSync(path.join(tmpRoot, 'src', 'ui', 'sample.ts'), 'alpha\nbeta\ngamma\n', 'utf8');
+    const dummyKey = ['AIza', 'SyCatchMaskSecret1234567890abcdef'].join('');
+    let sawSampleContent = false;
+    let turn = 0;
+
+    const apiEngine = new ApiWorkerEngine({
+      retryBaseDelayMs: 1,
+      adapterFactory: () => ({
+        generateTurn: async ({ contents }) => {
+          turn += 1;
+          if (turn === 1) {
+            return {
+              text: `Leaked in model text: ${dummyKey}`,
+              functionCalls: [
+                { name: 'read_file', args: { path: 'src/ui/sample.ts', startLine: 'bad', endLine: 'bad' } },
+                { name: 'list_dir', args: { path: '.', maxDepth: 'not-a-number' } },
+              ],
+            };
+          }
+          if (JSON.stringify(contents).includes('alpha\\nbeta')) {
+            sawSampleContent = true;
+          }
+          throw new Error(`403 Forbidden for ${dummyKey}`);
+        },
+      }),
+    });
+
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = dummyKey;
+    try {
+      const res = await handleDelegateToAntigravity(
+        {
+          title: 'Catch-path secret masking & NaN guard',
+          instructions: 'Test error report masking and NaN args.',
+          lockedPaths: ['src/ui/'],
+          modeOverride: 'api',
+          workspaceRoot: tmpRoot,
+        },
+        {
+          pluginRoot,
+          apiWorkerEngine: apiEngine,
+          detectorDeps: {
+            platform: 'linux',
+            env: { GEMINI_API_KEY: dummyKey },
+            homedir: '/home/tester',
+            existsSync: () => false,
+            findBinary: () => undefined,
+          },
+        },
+      );
+
+      expect(res.ok).toBe(false);
+      expect(sawSampleContent).toBe(true);
+      const diskReport = fs.readFileSync(path.join(tmpRoot, '.ag-bridge', 'report.md'), 'utf8');
+      expect(diskReport).not.toContain(dummyKey);
+      expect(diskReport).toContain('[REDACTED]');
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+    }
+  });
 });

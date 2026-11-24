@@ -468,6 +468,7 @@ export interface AgSessionSummary {
   durationSeconds: number;
   usage?: TokenUsage;
   gitCheckpointRef?: string;
+  checkpointTaskId?: string;
   createdAt: string;
   lastActivityAt: string;
 }

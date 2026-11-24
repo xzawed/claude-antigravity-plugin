@@ -73,7 +73,8 @@ function endWindowsLeftovers(launcherPid: number, startedAt: Date, cutAt: Date):
     `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddMilliseconds(250)`,
     `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.Created -ge $from -and $_.Created -le $to })`,
     '$found = @()',
-    'while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created }) }',
+    '$seen = @{}',
+    'while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and -not $seen.ContainsKey($_.ProcessId) }) }',
     'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }',
     '$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })',
     'foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }',
@@ -104,7 +105,7 @@ function tryRunGit(
     const stdout = runGit(workspaceRoot, args, input);
     return { ok: true, stdout, stderr: '', timedOut: false, leftoversEnded: 0 };
   } catch (err) {
-    const stderr =
+    const rawStderr =
       err && typeof err === 'object' && 'stderr' in err
         ? String((err as { stderr?: unknown }).stderr ?? '')
         : err instanceof Error
@@ -113,18 +114,48 @@ function tryRunGit(
     const timedOut = Boolean(err && typeof err === 'object' && (err as { code?: unknown }).code === 'ETIMEDOUT');
     const pid = err && typeof err === 'object' ? (err as { pid?: unknown }).pid : undefined;
     const leftoversEnded =
-      timedOut && process.platform === 'win32' && typeof pid === 'number'
+      timedOut && process.platform === 'win32' && typeof pid === 'number' && Number.isInteger(pid) && pid > 0
         ? endWindowsLeftovers(pid, startedAt, new Date())
         : 0;
+    const cleanup =
+      leftoversEnded > 0
+        ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? '' : 'es'} it left running)`
+        : '';
+    const stderr =
+      timedOut && rawStderr.trim().length === 0
+        ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}`
+        : rawStderr;
     return { ok: false, stdout: '', stderr, timedOut, leftoversEnded };
   }
 }
 
 const isBridgePath = (p: string): boolean => p === '.ag-bridge' || p.startsWith('.ag-bridge/');
 
+/**
+ * Check whether git tracks a file matching `pathspec` (pathspec magic allowed).
+ * Uses `ls-files -z` (exit 0 with empty stdout = definite `'untracked'`, non-empty = `'tracked'`,
+ * non-zero exit / timeout / missing binary / non-repo = `'unknown'`), so callers do not depend on
+ * localized stderr strings and can fail-closed when a repository is present.
+ */
+export function checkTrackedFile(
+  workspaceRoot: string,
+  pathspec: string,
+): 'tracked' | 'untracked' | 'unknown' {
+  const res = tryRunGit(workspaceRoot, ['ls-files', '-z', '--', pathspec]);
+  if (!res.ok) {
+    return 'unknown';
+  }
+  return res.stdout.length > 0 ? 'tracked' : 'untracked';
+}
+
 /** Whether git tracks a file matching `pathspec` (pathspec magic allowed). False outside a repository. */
 export function isTrackedFile(workspaceRoot: string, pathspec: string): boolean {
-  return tryRunGit(workspaceRoot, ['ls-files', '--error-unmatch', '--', pathspec]).ok;
+  return checkTrackedFile(workspaceRoot, pathspec) === 'tracked';
+}
+
+/** Best-effort removal of a pinned checkpoint ref (e.g. if a persistent session fails to start). */
+export function deleteCheckpointRef(workspaceRoot: string, taskId: string): void {
+  tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/checkpoints/${taskId}`]);
 }
 
 export function getGitInfo(workspaceRoot: string): GitStatusInfo {
@@ -529,9 +560,10 @@ export function rollbackCheckpoint(
 
   const gitInfo = getGitInfo(workspaceRoot);
   if (!gitInfo.isGitRepo) {
+    const why = gitInfo.error ?? 'Workspace is not a Git repository';
     throw new AgPluginError(
       'ROLLBACK_NO_CHECKPOINT',
-      'Workspace is not a Git repository; cannot perform Git rollback.',
+      `${why}; cannot perform Git rollback.`,
     );
   }
 

@@ -97,14 +97,18 @@ export function handleListArtifacts(
   if (fs.existsSync(artifactsRoot)) {
     for (const dirent of fs.readdirSync(artifactsRoot, { withFileTypes: true })) {
       if (!dirent.isDirectory() || seenIds.has(dirent.name)) continue;
-      const files = collectArtifactFiles(workspaceRoot, dirent.name);
-      availableTasks.push({
-        taskId: dirent.name,
-        title: '(Artifact folder)',
-        status: 'IDLE',
-        artifactCount: files.length,
-        updatedAt: files[0]?.modifiedAt ?? new Date(0).toISOString(),
-      });
+      try {
+        const files = collectArtifactFiles(workspaceRoot, dirent.name);
+        availableTasks.push({
+          taskId: dirent.name,
+          title: '(Artifact folder)',
+          status: 'IDLE',
+          artifactCount: files.length,
+          updatedAt: files[0]?.modifiedAt ?? new Date(0).toISOString(),
+        });
+      } catch {
+        // Skip folders whose names are not valid taskIds (e.g. user-created folders with spaces)
+      }
     }
   }
 

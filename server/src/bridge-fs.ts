@@ -495,6 +495,15 @@ export function writeReportMarkdown(workspaceRoot: string, content: string): str
   return reportPath;
 }
 
+export function clearReportMarkdown(workspaceRoot: string): void {
+  const reportPath = getReportPath(workspaceRoot);
+  try {
+    fs.rmSync(reportPath, { force: true });
+  } catch {
+    // ignore cleanup error if already absent
+  }
+}
+
 export function listTaskArtifacts(workspaceRoot: string, taskId: string): string[] {
   const bridgeDir = getBridgeDir(workspaceRoot);
   const artifacts: string[] = [];

@@ -1,16 +1,17 @@
 import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { generateTaskId } from './bridge-fs.js';
+import { archiveManifest, generateTaskId } from './bridge-fs.js';
 import { describeIgnoredSettings, loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
 import { requireExecutable } from './exec-path.js';
 import { buildCliSpawnSpec } from './engines/subscription.js';
-import { createCheckpoint } from './git-guard.js';
+import { checkpointManifestFields, createCheckpoint, deleteCheckpointRef } from './git-guard.js';
 import {
   AgSessionSummary,
   AgSessionToolInput,
   AgSessionToolOutput,
+  BridgeManifest,
   ExecutionMetrics,
   TokenUsage,
 } from './types.js';
@@ -63,6 +64,7 @@ interface LivePersistentSession {
   durationSeconds: number;
   usage?: TokenUsage;
   gitCheckpointRef?: string;
+  checkpointTaskId?: string;
   createdAt: string;
   lastActivityAt: string;
   stdoutBuffer: string;
@@ -136,7 +138,9 @@ function defaultSessionSpawn(
     windowsVerbatimArguments?: boolean;
   },
 ): ChildProcess {
-  return spawn(command, args, options);
+  // On POSIX, detached makes child a process-group leader so killSessionProcess can reap
+  // grandchildren via process.kill(-child.pid, 'SIGTERM').
+  return spawn(command, args, { ...options, detached: process.platform !== 'win32' });
 }
 
 export function buildStreamSessionArgs(
@@ -330,6 +334,7 @@ export class PersistentSessionManager {
     platform: NodeJS.Platform,
     child: ChildProcess,
     gitCheckpointRef?: string,
+    checkpointTaskId?: string,
   ): LivePersistentSession {
     const sessionId = `ag-sess-${crypto.randomBytes(4).toString('hex')}`;
     const now = new Date().toISOString();
@@ -348,6 +353,7 @@ export class PersistentSessionManager {
       numTurns: 0,
       durationSeconds: 0,
       gitCheckpointRef,
+      checkpointTaskId,
       createdAt: now,
       lastActivityAt: now,
       stdoutBuffer: '',
@@ -436,6 +442,7 @@ export class PersistentSessionManager {
       durationSeconds: session.durationSeconds,
       usage: session.usage,
       gitCheckpointRef: session.gitCheckpointRef,
+      checkpointTaskId: session.checkpointTaskId,
       createdAt: session.createdAt,
       lastActivityAt: session.lastActivityAt,
     };
@@ -470,8 +477,16 @@ export class PersistentSessionManager {
       const timer = setTimeout(() => {
         session.currentTurn = undefined;
         session.busy = false;
-        this.bumpIdleTimer(session);
-        reject(new Error(`Session turn timed out after ${timeoutSec}s.`));
+        session.active = false;
+        clearTimeout(session.idleTimer);
+        this.sessions.delete(session.sessionId);
+        // Kill the child so a late result from the timed-out turn cannot desync a future turn.
+        killSessionProcess(session.child, session.platform);
+        reject(
+          new Error(
+            `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`,
+          ),
+        );
       }, Math.max(5, timeoutSec) * 1000);
 
       session.currentTurn = {
@@ -515,11 +530,23 @@ export class PersistentSessionManager {
       } catch {
         // ignore
       }
-      await Promise.race([
-        new Promise<void>((r) => session.child.once('close', () => r())),
-        new Promise<void>((r) => setTimeout(r, 800)),
-      ]);
-      killSessionProcess(session.child, session.platform);
+      let exited =
+        typeof session.child.exitCode === 'number' ||
+        typeof session.child.signalCode === 'string';
+      if (!exited) {
+        await Promise.race([
+          new Promise<void>((r) =>
+            session.child.once('close', () => {
+              exited = true;
+              r();
+            }),
+          ),
+          new Promise<void>((r) => setTimeout(r, 800)),
+        ]);
+      }
+      if (!exited) {
+        killSessionProcess(session.child, session.platform);
+      }
     }
 
     return summary;
@@ -694,6 +721,9 @@ export async function handleAgSession(
       windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
   } catch (err) {
+    if (checkpoint.isStashSnapshot) {
+      deleteCheckpointRef(workspaceRoot, checkpointTaskId);
+    }
     const msg = maskSecrets(err instanceof Error ? err.message : String(err));
     return {
       ok: false,
@@ -704,11 +734,37 @@ export async function handleAgSession(
     };
   }
 
+  let persistedCheckpointTaskId: string | undefined;
+  if (checkpoint.checkpointRef) {
+    // Archive a checkpoint manifest in .ag-bridge/history/ (without touching active manifest.json)
+    // so rollback_ag_task({ taskId: session.checkpointTaskId }) can restore changes made in this session.
+    const nowIso = new Date().toISOString();
+    const sessionManifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: checkpointTaskId,
+      title: 'Persistent Antigravity session checkpoint',
+      mode: 'subscription',
+      status: 'RUNNING',
+      lockedPaths: [],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      ...checkpointManifestFields(checkpoint),
+      artifacts: [],
+    };
+    try {
+      archiveManifest(workspaceRoot, sessionManifest);
+      persistedCheckpointTaskId = checkpointTaskId;
+    } catch {
+      // Best effort: session can still run even if history archive fails
+    }
+  }
+
   const session = manager.create(
     workspaceRoot,
     detection.platform,
     child,
     checkpoint.checkpointRef,
+    persistedCheckpointTaskId,
   );
 
   // If caller provided an initial prompt, execute Turn 1 immediately so session warms up & returns response

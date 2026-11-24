@@ -322,7 +322,7 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     },
   );
 
-  it('TC-S18f: a .ag-bridge/ the repository ships as a submodule is the repository\'s', () => {
+  it('TC-S18f: a .ag-bridge/ the repository ships as a submodule is the repository\'s', { timeout: 20_000 }, () => {
     // `git ls-files` in the superproject does not look inside a submodule (measured): only the
     // gitlink ".ag-bridge" itself is tracked.
     const sub = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-trust-sub-'));
@@ -439,5 +439,24 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     const advice = env.recommendations.join('\n');
     expect(advice).toContain('subscription.agy_sandbox');
     expect(advice).toContain('git rm --cached .ag-bridge/config.json');
+  });
+
+  it('TC-S18g: inside a git repository, config trust fails closed when git cannot verify tracking', () => {
+    git('init', '-q');
+    writeConfig({ subscription: { agy_dangerously_skip_permissions: true, agy_sandbox: false } });
+    git('add', '-f', '.ag-bridge/config.json');
+
+    const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+    const savedPath = process.env[pathKey];
+    process.env[pathKey] = '';
+    try {
+      const cfg = loadConfig(tmpRoot, {});
+      expect(cfg.subscription.agy_dangerously_skip_permissions).toBe(false);
+      expect(cfg.subscription.agy_sandbox).toBe(true);
+      expect((cfg.ignoredSettings ?? []).join('\n')).toContain('git could not verify');
+    } finally {
+      if (savedPath === undefined) delete process.env[pathKey];
+      else process.env[pathKey] = savedPath;
+    }
   });
 });

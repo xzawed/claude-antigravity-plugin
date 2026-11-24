@@ -212,17 +212,21 @@ describe('ag_auth & /ag-login flows (TC-U17 ~ TC-U21)', () => {
       }
     });
 
+    let capCalls = 0;
     const startPromise = handleAgAuth(
       { action: 'login', flow: 'manual', force: true, workspaceRoot: tmpRoot },
       {
         detectorDeps: makeAgyDetectorDeps({ DISPLAY: ':0' }),
         homeDir: tmpHome,
         sessionManager: manager,
-        queryCapabilitiesFn: async () => ({
-          models: [{ id: 'gemini-4-neon-high', label: 'Gemini 4 Neon' }],
-          agents: [],
-          warnings: [],
-        }),
+        queryCapabilitiesFn: async () => {
+          capCalls += 1;
+          return {
+            models: [{ id: 'gemini-4-neon-high', label: 'Gemini 4 Neon' }],
+            agents: [],
+            warnings: [],
+          };
+        },
         spawnFn: (_cmd, args, opts) => {
           expect(args).toEqual(['acp', '--login']);
           expect(opts.env.SSH_CONNECTION).toBeTruthy();
@@ -256,11 +260,14 @@ describe('ag_auth & /ag-login flows (TC-U17 ~ TC-U21)', () => {
         detectorDeps: makeAgyDetectorDeps({ DISPLAY: ':0' }),
         homeDir: tmpHome,
         sessionManager: manager,
-        queryCapabilitiesFn: async () => ({
-          models: [{ id: 'gemini-4-neon-high', label: 'Gemini 4 Neon' }],
-          agents: [],
-          warnings: [],
-        }),
+        queryCapabilitiesFn: async () => {
+          capCalls += 1;
+          return {
+            models: [{ id: 'gemini-4-neon-high', label: 'Gemini 4 Neon' }],
+            agents: [],
+            warnings: [],
+          };
+        },
       },
     );
     expect(completed.ok).toBe(true);
@@ -268,6 +275,9 @@ describe('ag_auth & /ag-login flows (TC-U17 ~ TC-U21)', () => {
     expect(completed.modelCount).toBe(1);
     expect(receivedStdin.trim()).toBe('4/0mock-auth-code');
     expect(manager.size()).toBe(0);
+    // Ensure startManualLoginFlow removed its close listener so complete only verifies once
+    await new Promise((r) => setTimeout(r, 20));
+    expect(capCalls).toBe(1);
 
     // Cancel flow kills pending child cleanly
     const cancelChild = createFakeChild();

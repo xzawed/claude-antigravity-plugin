@@ -821,4 +821,29 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     );
     expect(git(tmpRoot, ['diff', '--cached', '--name-only'])).toBe('app.ts');
   });
+
+  it('TC-U34c: rollbackCheckpoint surfaces timeout error instead of misreporting non-git workspace', { timeout: 60_000 }, () => {
+    stallingFilter();
+    const head = git(tmpRoot, ['rev-parse', 'HEAD']);
+    const manifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'task-rb-timeout',
+      title: 'Rollback timeout error check',
+      mode: 'api',
+      status: 'FAILED',
+      lockedPaths: ['app.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: head,
+      gitCheckpointIsStash: false,
+      gitUntrackedBaseline: [],
+      artifacts: [],
+    };
+    process.env.AG_GIT_TIMEOUT_MS = '1000';
+    try {
+      expect(() => rollbackCheckpoint(tmpRoot, manifest)).toThrow(/Git did not answer within 1000 ms/);
+    } finally {
+      delete process.env.AG_GIT_TIMEOUT_MS;
+    }
+  });
 });

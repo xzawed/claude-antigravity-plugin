@@ -764,8 +764,12 @@ export class ApiWorkerEngine implements ExecutionEngine {
               } else {
                 const raw = fs.readFileSync(absPath, 'utf8');
                 const lines = raw.split(/\r?\n/);
-                const start = Math.max(1, Number(call.args.startLine ?? 1));
-                const end = Math.min(lines.length, Number(call.args.endLine ?? lines.length));
+                const rawStart = Number(call.args.startLine ?? 1);
+                const rawEnd = Number(call.args.endLine ?? lines.length);
+                const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
+                const end = Number.isFinite(rawEnd)
+                  ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd)))
+                  : lines.length;
                 const sliced = lines.slice(start - 1, end).join('\n');
                 toolResult = {
                   path: filePath,
@@ -791,7 +795,8 @@ export class ApiWorkerEngine implements ExecutionEngine {
               toolResult = { ok: true, path: relWritten, bytesWritten: Buffer.byteLength(content, 'utf8') };
             } else if (call.name === 'list_dir') {
               const dirPath = String(call.args.path ?? '.');
-              const depth = Math.min(4, Math.max(1, Number(call.args.maxDepth ?? 2)));
+              const rawDepth = Number(call.args.maxDepth ?? 2);
+              const depth = Number.isFinite(rawDepth) ? Math.min(4, Math.max(1, Math.floor(rawDepth))) : 2;
               const entries = listWorkspaceDir(ctx.workspaceRoot, dirPath, depth);
               toolResult = { path: dirPath, entries };
             } else if (call.name === 'run_command') {
@@ -900,17 +905,20 @@ export class ApiWorkerEngine implements ExecutionEngine {
       const changedFiles = Array.from(
         new Set([...writtenFiles, ...listGitChangedFiles(ctx.workspaceRoot)]),
       ).sort();
-      const report = formatFinalReport({
-        taskId: ctx.manifest.taskId,
-        status: 'FAILED',
-        model,
-        summaryBody: lastModelText || 'Execution aborted due to an error.',
-        changedFiles,
-        blockedWrites,
-        commandsRun,
-        metrics,
-        errorMessage: safeMsg,
-      });
+      const report = maskSecrets(
+        formatFinalReport({
+          taskId: ctx.manifest.taskId,
+          status: 'FAILED',
+          model,
+          summaryBody: lastModelText || 'Execution aborted due to an error.',
+          changedFiles,
+          blockedWrites,
+          commandsRun,
+          metrics,
+          errorMessage: safeMsg,
+        }),
+        [apiKey],
+      );
       writeReportMarkdown(ctx.workspaceRoot, report);
 
       const failedManifest: BridgeManifest = {

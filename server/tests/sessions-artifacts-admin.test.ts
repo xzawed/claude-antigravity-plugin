@@ -9,6 +9,7 @@ import { handleListArtifacts } from '../src/artifacts.js';
 import { ensureBridgeDirs, getArtifactsDir, writeManifest, writeReportMarkdown } from '../src/bridge-fs.js';
 import { buildMcpAddArgs, handleAgCliAdmin } from '../src/cli-admin.js';
 import { DetectorDeps } from '../src/detector.js';
+import { handleRollbackAgTask } from '../src/index.js';
 import {
   buildStreamSessionArgs,
   handleAgSession,
@@ -364,5 +365,114 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
     expect(badHeader.ok).toBe(false);
     expect(badHeader.errorCode).toBe('CLI_ADMIN_FAILED');
     expect(badHeader.errorMessage).toContain('Control characters');
+  });
+
+  it('TC-S26: ag_cli_admin redacts env/header secrets on error, blocks control chars in .mcp.json sync, syncs headers, and reports failures', async () => {
+    const failAdd = await handleAgCliAdmin(
+      {
+        action: 'mcp_add',
+        name: 'private-api',
+        commandOrUrl: 'https://api.example.com/mcp',
+        serverType: 'http',
+        envVars: ['CUSTOM_SECRET=super-secret-value-999'],
+        headers: ['X-API-Key: my-private-header-token'],
+        workspaceRoot: tmpRoot,
+      },
+      {
+        detectorDeps: makeAgyDetectorDeps(),
+        runCliFn: async () => ({ exitCode: 1, stdout: '', stderr: 'failed' }),
+      },
+    );
+    expect(failAdd.ok).toBe(false);
+    expect(failAdd.errorMessage).not.toContain('super-secret-value-999');
+    expect(failAdd.errorMessage).not.toContain('my-private-header-token');
+    expect(failAdd.errorMessage).toContain('CUSTOM_SECRET=[REDACTED]');
+    expect(failAdd.errorMessage).toContain('X-API-Key: [REDACTED]');
+
+    // .mcp.json with headers + control-char injection + failing server
+    fs.writeFileSync(
+      path.join(tmpRoot, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          injected: { command: 'npx', args: ['ok\r\nwhoami'] },
+          remote: {
+            url: 'https://mcp.example.com',
+            headers: { 'X-Custom': 'secret-hdr-val' },
+          },
+        },
+      }),
+      'utf8',
+    );
+    const seenCalls: string[][] = [];
+    const syncRes = await handleAgCliAdmin(
+      { action: 'mcp_sync_from_claude', dryRun: false, workspaceRoot: tmpRoot },
+      {
+        detectorDeps: makeAgyDetectorDeps(),
+        runCliFn: async (_cli, args) => {
+          seenCalls.push(args);
+          return { exitCode: 1, stdout: '', stderr: 'boom' };
+        },
+      },
+    );
+    expect(syncRes.ok).toBe(false);
+    expect(syncRes.errorCode).toBe('CLI_ADMIN_FAILED');
+    expect(syncRes.syncedServers?.find((s) => s.name === 'injected')?.status).toBe('skipped');
+    expect(seenCalls).toHaveLength(1);
+    expect(seenCalls[0]).toContain('--header');
+    expect(seenCalls[0]).toContain('X-Custom: secret-hdr-val');
+  });
+
+  it('TC-U41: persistent session archives checkpoint for rollback_ag_task and closes child on turn timeout', async () => {
+    const git = (args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+        cwd: tmpRoot,
+        stdio: 'ignore',
+      });
+    git(['init', '-q']);
+    git(['config', 'core.autocrlf', 'false']);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const v = 1;\n', 'utf8');
+    git(['add', 'app.ts']);
+    git(['commit', '-qm', 'init']);
+
+    const hangingChild = createFakeStreamChild();
+    const started = await handleAgSession(
+      { action: 'start', workspaceRoot: tmpRoot },
+      {
+        detectorDeps: makeAgyDetectorDeps(),
+        sessionManager,
+        spawnFn: () => hangingChild as unknown as ChildProcess,
+      },
+    );
+    expect(started.ok).toBe(true);
+    expect(started.session?.checkpointTaskId).toBeTruthy();
+
+    // Simulate edits made during the session and verify rollback_ag_task restores them
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const v = 999;\n', 'utf8');
+    const rb = await handleRollbackAgTask({
+      taskId: started.session!.checkpointTaskId,
+      workspaceRoot: tmpRoot,
+    });
+    expect(rb.ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const v = 1;\n');
+
+    // Turn timeout closes the session and kills the child to prevent protocol desync
+    const live = sessionManager.get(started.sessionId);
+    expect(live).toBeDefined();
+    await expect(sessionManager.sendTurn(live!, 'hang forever', 0.01)).rejects.toThrow(/timed out/i);
+    expect(hangingChild.killed).toBe(true);
+    expect(sessionManager.get(started.sessionId)).toBeUndefined();
+  }, 15_000);
+
+  it('TC-U42: list_ag_artifacts skips non-taskId subdirectories instead of crashing', () => {
+    const artRoot = path.join(tmpRoot, '.ag-bridge', 'artifacts');
+    fs.mkdirSync(path.join(artRoot, 'my screenshots'), { recursive: true });
+    fs.writeFileSync(path.join(artRoot, 'my screenshots', 'note.txt'), 'hi', 'utf8');
+    fs.mkdirSync(path.join(artRoot, 'ag-valid-1'), { recursive: true });
+    fs.writeFileSync(path.join(artRoot, 'ag-valid-1', 'shot.png'), Buffer.from([0x89, 0x50]), 'utf8');
+
+    const res = handleListArtifacts({ workspaceRoot: tmpRoot });
+    expect(res.ok).toBe(true);
+    expect(res.taskId).toBe('ag-valid-1');
+    expect(res.artifacts.map((a) => a.name)).toEqual(['shot.png']);
   });
 });

@@ -29676,7 +29676,7 @@ var require_websocket_server = __commonJS({
 // src/index.ts
 import fs15 from "node:fs";
 import path15 from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -59471,6 +59471,13 @@ function writeReportMarkdown(workspaceRoot, content) {
   atomicWriteFile(reportPath, content);
   return reportPath;
 }
+function clearReportMarkdown(workspaceRoot) {
+  const reportPath = getReportPath(workspaceRoot);
+  try {
+    fs.rmSync(reportPath, { force: true });
+  } catch {
+  }
+}
 function listTaskArtifacts(workspaceRoot, taskId) {
   const bridgeDir = getBridgeDir(workspaceRoot);
   const artifacts = [];
@@ -59644,7 +59651,8 @@ function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
     `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddMilliseconds(250)`,
     `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.Created -ge $from -and $_.Created -le $to })`,
     "$found = @()",
-    "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created }) }",
+    "$seen = @{}",
+    "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and -not $seen.ContainsKey($_.ProcessId) }) }",
     "foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }",
     "$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })",
     "foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }",
@@ -59670,16 +59678,25 @@ function tryRunGit(workspaceRoot, args, input2) {
     const stdout = runGit(workspaceRoot, args, input2);
     return { ok: true, stdout, stderr: "", timedOut: false, leftoversEnded: 0 };
   } catch (err) {
-    const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
+    const rawStderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
     const timedOut = Boolean(err && typeof err === "object" && err.code === "ETIMEDOUT");
     const pid = err && typeof err === "object" ? err.pid : void 0;
-    const leftoversEnded = timedOut && process.platform === "win32" && typeof pid === "number" ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : 0;
+    const leftoversEnded = timedOut && process.platform === "win32" && typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : 0;
+    const cleanup = leftoversEnded > 0 ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? "" : "es"} it left running)` : "";
+    const stderr = timedOut && rawStderr.trim().length === 0 ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` : rawStderr;
     return { ok: false, stdout: "", stderr, timedOut, leftoversEnded };
   }
 }
 var isBridgePath = (p) => p === ".ag-bridge" || p.startsWith(".ag-bridge/");
-function isTrackedFile(workspaceRoot, pathspec) {
-  return tryRunGit(workspaceRoot, ["ls-files", "--error-unmatch", "--", pathspec]).ok;
+function checkTrackedFile(workspaceRoot, pathspec) {
+  const res = tryRunGit(workspaceRoot, ["ls-files", "-z", "--", pathspec]);
+  if (!res.ok) {
+    return "unknown";
+  }
+  return res.stdout.length > 0 ? "tracked" : "untracked";
+}
+function deleteCheckpointRef(workspaceRoot, taskId) {
+  tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${taskId}`]);
 }
 function getGitInfo(workspaceRoot) {
   const statusRes = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-b"]);
@@ -59956,9 +59973,10 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   }
   const gitInfo = getGitInfo(workspaceRoot);
   if (!gitInfo.isGitRepo) {
+    const why = gitInfo.error ?? "Workspace is not a Git repository";
     throw new AgPluginError(
       "ROLLBACK_NO_CHECKPOINT",
-      "Workspace is not a Git repository; cannot perform Git rollback."
+      `${why}; cannot perform Git rollback.`
     );
   }
   const ref = manifest.gitCheckpointRef;
@@ -60483,8 +60501,12 @@ function whyConfigIsNotUsers(workspaceRoot) {
     } catch {
     }
   }
-  if (isTrackedFile(workspaceRoot, ":(icase).ag-bridge")) {
+  const trackedState = checkTrackedFile(workspaceRoot, ":(icase).ag-bridge");
+  if (trackedState === "tracked") {
     return "the file is tracked by git, so the repository may have supplied it";
+  }
+  if (trackedState === "unknown" && resolveGitExcludePath(workspaceRoot) !== null) {
+    return "git could not verify whether the file is tracked in this repository";
   }
   return void 0;
 }
@@ -60624,14 +60646,17 @@ function handleListArtifacts(input2 = {}) {
   if (fs6.existsSync(artifactsRoot)) {
     for (const dirent of fs6.readdirSync(artifactsRoot, { withFileTypes: true })) {
       if (!dirent.isDirectory() || seenIds.has(dirent.name)) continue;
-      const files = collectArtifactFiles(workspaceRoot, dirent.name);
-      availableTasks.push({
-        taskId: dirent.name,
-        title: "(Artifact folder)",
-        status: "IDLE",
-        artifactCount: files.length,
-        updatedAt: files[0]?.modifiedAt ?? (/* @__PURE__ */ new Date(0)).toISOString()
-      });
+      try {
+        const files = collectArtifactFiles(workspaceRoot, dirent.name);
+        availableTasks.push({
+          taskId: dirent.name,
+          title: "(Artifact folder)",
+          status: "IDLE",
+          artifactCount: files.length,
+          updatedAt: files[0]?.modifiedAt ?? (/* @__PURE__ */ new Date(0)).toISOString()
+        });
+      } catch {
+      }
     }
   }
   const targetTaskId = input2.taskId ?? current?.taskId ?? availableTasks[0]?.taskId;
@@ -61253,7 +61278,8 @@ function buildCliInvocationArgs(ctx) {
   return ["run", "--workflow", "claude-handoff"];
 }
 function quoteForWindowsCmd(arg) {
-  const escaped = arg.replace(/"/g, '\\"').replace(/%/g, "%%");
+  const sanitized = arg.replace(/[\r\n\0]+/g, " ");
+  const escaped = sanitized.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1").replace(/%/g, "%%");
   return `"${escaped}"`;
 }
 function buildCliSpawnSpec(cliPath, args, platform = process.platform, env = process.env) {
@@ -61441,10 +61467,13 @@ async function tryCliTrigger(ctx) {
       }
     };
     try {
+      const isWin = ctx.detection.platform === "win32";
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: ctx.workspaceRoot,
         stdio: useStreamHeartbeat ? ["ignore", "pipe", "pipe"] : logFd !== null ? ["ignore", logFd, logFd] : "ignore",
-        detached: !useStreamHeartbeat,
+        // On POSIX, detached makes child a process-group leader so process.kill(-pid) reaps
+        // grandchildren too; we only unref() when not streaming stdout.
+        detached: !isWin || !useStreamHeartbeat,
         shell: false,
         windowsHide: spawnSpec.windowsHide,
         windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments
@@ -61504,17 +61533,20 @@ async function tryCliTrigger(ctx) {
           }
         });
       }
+      const cleanupAbortListener = () => {
+        ctx.abortSignal?.removeEventListener("abort", killProcess);
+      };
       child.once("error", () => {
+        cleanupAbortListener();
         heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
           resolve({ ok: false });
         }
       });
-      child.once("exit", (code) => {
-        setImmediate(() => {
-          heartbeatHandle?.stop();
-        });
+      child.once("close", (code) => {
+        cleanupAbortListener();
+        heartbeatHandle?.stop();
         if (!settled) {
           settled = true;
           resolve({
@@ -62128,7 +62160,7 @@ async function startManualLoginFlow(workspaceRoot, cliPath, cliBinary, platform,
         child.stdout?.off("data", onStdout);
         child.stderr?.off("data", onStderr);
         child.off("error", onError);
-        child.off("close", onClose);
+        child.off("close", onCloseWrapper);
         resolve(out);
       }
     };
@@ -62242,12 +62274,13 @@ ${stderr}`;
         errorMessage: `Timed out after ${promptTimeoutMs}ms waiting for OAuth URL.`
       });
     }, promptTimeoutMs);
+    const onCloseWrapper = (code) => {
+      void onClose(code);
+    };
     child.stdout?.on("data", onStdout);
     child.stderr?.on("data", onStderr);
     child.once("error", onError);
-    child.once("close", (code) => {
-      void onClose(code);
-    });
+    child.once("close", onCloseWrapper);
   });
 }
 async function runBrowserLoginFlow(workspaceRoot, cliPath, cliBinary, platform, env, timeoutSec, deps) {
@@ -62297,7 +62330,7 @@ async function runBrowserLoginFlow(workspaceRoot, cliPath, cliBinary, platform, 
         child.stdout?.off("data", onStdout);
         child.stderr?.off("data", onStderr);
         child.off("error", onError);
-        child.off("close", onClose);
+        child.off("close", onCloseWrapper);
         resolve(out);
       }
     };
@@ -62417,12 +62450,13 @@ ${stderr}`);
         errorMessage: `Browser login timed out after ${timeoutSec}s.`
       });
     }, timeoutSec * 1e3);
+    const onCloseWrapper = (code) => {
+      void onClose(code);
+    };
     child.stdout?.on("data", onStdout);
     child.stderr?.on("data", onStderr);
     child.once("error", onError);
-    child.once("close", (code) => {
-      void onClose(code);
-    });
+    child.once("close", onCloseWrapper);
   });
 }
 async function completeManualLoginFlow(code, sessionId, deps) {
@@ -62759,6 +62793,27 @@ Timed out after ${timeoutMs}ms.` });
     }
   });
 }
+function formatRedactedCliArgs(args) {
+  const redacted = [];
+  for (let i2 = 0; i2 < args.length; i2++) {
+    const arg = args[i2];
+    if ((arg === "--env" || arg === "--header") && i2 + 1 < args.length) {
+      redacted.push(arg);
+      const next = args[i2 + 1];
+      if (arg === "--env") {
+        const eqIdx = next.indexOf("=");
+        redacted.push(eqIdx > 0 ? `${next.slice(0, eqIdx)}=[REDACTED]` : "[REDACTED]");
+      } else {
+        const colonIdx = next.indexOf(":");
+        redacted.push(colonIdx > 0 ? `${next.slice(0, colonIdx)}: [REDACTED]` : "[REDACTED]");
+      }
+      i2 += 1;
+    } else {
+      redacted.push(arg);
+    }
+  }
+  return maskSecrets(redacted.join(" "));
+}
 function truncateLines(text, maxLines) {
   const lines = text.split(/\r?\n/);
   if (lines.length <= maxLines) return text;
@@ -62861,18 +62916,29 @@ async function handleAgCliAdmin(input2, deps = {}) {
       const args = Array.isArray(def.args) ? def.args.filter((a) => typeof a === "string") : [];
       const envObj = def.env && typeof def.env === "object" && !Array.isArray(def.env) ? def.env : {};
       const envVars = Object.entries(envObj).filter(([, v]) => typeof v === "string").map(([k, v]) => `${k}=${v}`);
+      const headersObj = def.headers && typeof def.headers === "object" && !Array.isArray(def.headers) ? def.headers : {};
+      const headers = Object.entries(headersObj).filter(([, v]) => typeof v === "string").map(([k, v]) => `${k}: ${v}`);
+      if (hasControlChars([commandOrUrl, ...args, ...envVars, ...headers])) {
+        syncedServers.push({
+          name,
+          status: "skipped",
+          detail: "Skipped: contains disallowed control characters (CR/LF/NUL)."
+        });
+        continue;
+      }
       const addArgs = buildMcpAddArgs({
         name,
         commandOrUrl,
         args,
         serverType: url2 ? "http" : "stdio",
-        envVars
+        envVars,
+        headers
       });
       if (dryRun) {
         syncedServers.push({
           name,
           status: "planned",
-          detail: maskSecrets(`agy ${addArgs.join(" ")}`)
+          detail: `agy ${formatRedactedCliArgs(addArgs)}`
         });
       } else {
         const res2 = await runCli(cliPath, addArgs, detection.platform, 2e4);
@@ -62883,16 +62949,19 @@ async function handleAgCliAdmin(input2, deps = {}) {
         });
       }
     }
+    const failedCount = syncedServers.filter((s2) => s2.status === "failed").length;
     const summary = syncedServers.map((s2) => `- ${s2.name}: [${s2.status}] ${s2.detail}`).join("\n");
     return {
-      ok: true,
+      ok: dryRun || failedCount === 0,
       action: input2.action,
       cliPath,
       output: dryRun ? `Dry-run sync plan from .mcp.json (re-run with dryRun=false to apply):
 ${summary || "(No eligible MCP servers found.)"}` : `Sync results from .mcp.json:
 ${summary || "(No eligible MCP servers found.)"}`,
       syncedServers,
-      warnings
+      warnings,
+      errorCode: !dryRun && failedCount > 0 ? "CLI_ADMIN_FAILED" : void 0,
+      errorMessage: !dryRun && failedCount > 0 ? `${failedCount} MCP server(s) failed to sync from .mcp.json.` : void 0
     };
   }
   let cliArgs = [];
@@ -63001,13 +63070,14 @@ ${summary || "(No eligible MCP servers found.)"}`,
     output: output2,
     warnings,
     errorCode: res.exitCode === 0 ? void 0 : "CLI_ADMIN_FAILED",
-    errorMessage: res.exitCode === 0 ? void 0 : `\`agy ${cliArgs.join(" ")}\` exited with code ${res.exitCode}.`
+    errorMessage: res.exitCode === 0 ? void 0 : `\`agy ${formatRedactedCliArgs(cliArgs)}\` exited with code ${res.exitCode}.`
   };
 }
 
 // src/jobs.ts
 import fs14 from "node:fs";
 import path13 from "node:path";
+import { fileURLToPath } from "node:url";
 
 // node_modules/@google/genai/dist/node/index.mjs
 var import_p_retry = __toESM(require_p_retry(), 1);
@@ -81659,8 +81729,10 @@ ${formatTokenUsageMarkdown(metrics2)}`;
               } else {
                 const raw = fs13.readFileSync(absPath, "utf8");
                 const lines = raw.split(/\r?\n/);
-                const start = Math.max(1, Number(call.args.startLine ?? 1));
-                const end = Math.min(lines.length, Number(call.args.endLine ?? lines.length));
+                const rawStart = Number(call.args.startLine ?? 1);
+                const rawEnd = Number(call.args.endLine ?? lines.length);
+                const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
+                const end = Number.isFinite(rawEnd) ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd))) : lines.length;
                 const sliced = lines.slice(start - 1, end).join("\n");
                 toolResult = {
                   path: filePath,
@@ -81683,7 +81755,8 @@ ${formatTokenUsageMarkdown(metrics2)}`;
               toolResult = { ok: true, path: relWritten, bytesWritten: Buffer.byteLength(content, "utf8") };
             } else if (call.name === "list_dir") {
               const dirPath = String(call.args.path ?? ".");
-              const depth = Math.min(4, Math.max(1, Number(call.args.maxDepth ?? 2)));
+              const rawDepth = Number(call.args.maxDepth ?? 2);
+              const depth = Number.isFinite(rawDepth) ? Math.min(4, Math.max(1, Math.floor(rawDepth))) : 2;
               const entries = listWorkspaceDir(ctx.workspaceRoot, dirPath, depth);
               toolResult = { path: dirPath, entries };
             } else if (call.name === "run_command") {
@@ -81779,17 +81852,20 @@ ${formatTokenUsageMarkdown(metrics2)}`;
       const changedFiles = Array.from(
         /* @__PURE__ */ new Set([...writtenFiles, ...listGitChangedFiles(ctx.workspaceRoot)])
       ).sort();
-      const report = formatFinalReport({
-        taskId: ctx.manifest.taskId,
-        status: "FAILED",
-        model,
-        summaryBody: lastModelText || "Execution aborted due to an error.",
-        changedFiles,
-        blockedWrites,
-        commandsRun,
-        metrics,
-        errorMessage: safeMsg
-      });
+      const report = maskSecrets(
+        formatFinalReport({
+          taskId: ctx.manifest.taskId,
+          status: "FAILED",
+          model,
+          summaryBody: lastModelText || "Execution aborted due to an error.",
+          changedFiles,
+          blockedWrites,
+          commandsRun,
+          metrics,
+          errorMessage: safeMsg
+        }),
+        [apiKey]
+      );
       writeReportMarkdown(ctx.workspaceRoot, report);
       const failedManifest = {
         ...runningManifest,
@@ -81921,7 +81997,10 @@ function summarizeLiveJob(rec, includeDetails, includeLogTail) {
     metrics,
     changedFiles: includeDetails ? rec.result?.changedFiles ?? matchingDisk?.changedFiles : void 0,
     artifacts: includeDetails ? rec.result?.artifacts ?? listTaskArtifacts(rec.workspaceRoot, rec.taskId) : void 0,
-    reportMarkdown: includeDetails ? rec.result?.reportMarkdown ? maskSecrets(rec.result.reportMarkdown) : readReportMarkdown(rec.workspaceRoot) ?? void 0 : void 0,
+    reportMarkdown: includeDetails ? rec.result?.reportMarkdown ? maskSecrets(rec.result.reportMarkdown) : diskManifest?.taskId === rec.taskId ? (() => {
+      const r2 = readReportMarkdown(rec.workspaceRoot);
+      return r2 ? maskSecrets(r2) : void 0;
+    })() : void 0 : void 0,
     structuredOutput: includeDetails ? rec.result?.structuredOutput : void 0,
     logTail: includeLogTail ? readLogTail(rec.workspaceRoot, rec.taskId) : void 0,
     warnings: [...rec.warnings, ...rec.result?.warnings ?? []],
@@ -81967,7 +82046,7 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
 }
 async function handleStartAgTask(input2, deps = {}) {
   const workspaceRoot = path13.resolve(input2.workspaceRoot ?? process.cwd());
-  const pluginRoot = deps.pluginRoot ?? path13.resolve(import.meta.dirname, "..", "..");
+  const pluginRoot = deps.pluginRoot ?? path13.resolve(path13.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const manager = deps.jobManager ?? defaultJobManager;
   const warnings = [];
   let normalizedLockedPaths = [];
@@ -82016,6 +82095,7 @@ async function handleStartAgTask(input2, deps = {}) {
     artifacts: []
   };
   writeManifest(workspaceRoot, manifest);
+  clearReportMarkdown(workspaceRoot);
   writeDispatchMarkdown(workspaceRoot, {
     manifest,
     instructions: input2.instructions,
@@ -82252,7 +82332,7 @@ function killSessionProcess(child, platform) {
   }
 }
 function defaultSessionSpawn(command, args, options) {
-  return spawn5(command, args, options);
+  return spawn5(command, args, { ...options, detached: process.platform !== "win32" });
 }
 function buildStreamSessionArgs(input2, config2) {
   const sub = config2.subscription;
@@ -82409,7 +82489,7 @@ var PersistentSessionManager = class {
       }
     }
   }
-  create(workspaceRoot, platform, child, gitCheckpointRef) {
+  create(workspaceRoot, platform, child, gitCheckpointRef, checkpointTaskId) {
     const sessionId = `ag-sess-${crypto4.randomBytes(4).toString("hex")}`;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const idleTimer = setTimeout(() => {
@@ -82426,6 +82506,7 @@ var PersistentSessionManager = class {
       numTurns: 0,
       durationSeconds: 0,
       gitCheckpointRef,
+      checkpointTaskId,
       createdAt: now,
       lastActivityAt: now,
       stdoutBuffer: "",
@@ -82507,6 +82588,7 @@ var PersistentSessionManager = class {
       durationSeconds: session.durationSeconds,
       usage: session.usage,
       gitCheckpointRef: session.gitCheckpointRef,
+      checkpointTaskId: session.checkpointTaskId,
       createdAt: session.createdAt,
       lastActivityAt: session.lastActivityAt
     };
@@ -82533,8 +82615,15 @@ var PersistentSessionManager = class {
       const timer = setTimeout(() => {
         session.currentTurn = void 0;
         session.busy = false;
-        this.bumpIdleTimer(session);
-        reject(new Error(`Session turn timed out after ${timeoutSec}s.`));
+        session.active = false;
+        clearTimeout(session.idleTimer);
+        this.sessions.delete(session.sessionId);
+        killSessionProcess(session.child, session.platform);
+        reject(
+          new Error(
+            `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`
+          )
+        );
       }, Math.max(5, timeoutSec) * 1e3);
       session.currentTurn = {
         resolve,
@@ -82572,11 +82661,21 @@ var PersistentSessionManager = class {
         session.child.stdin?.end();
       } catch {
       }
-      await Promise.race([
-        new Promise((r2) => session.child.once("close", () => r2())),
-        new Promise((r2) => setTimeout(r2, 800))
-      ]);
-      killSessionProcess(session.child, session.platform);
+      let exited = typeof session.child.exitCode === "number" || typeof session.child.signalCode === "string";
+      if (!exited) {
+        await Promise.race([
+          new Promise(
+            (r2) => session.child.once("close", () => {
+              exited = true;
+              r2();
+            })
+          ),
+          new Promise((r2) => setTimeout(r2, 800))
+        ]);
+      }
+      if (!exited) {
+        killSessionProcess(session.child, session.platform);
+      }
     }
     return summary;
   }
@@ -82721,6 +82820,9 @@ async function handleAgSession(input2, deps = {}) {
       windowsVerbatimArguments: spec.windowsVerbatimArguments
     });
   } catch (err) {
+    if (checkpoint.isStashSnapshot) {
+      deleteCheckpointRef(workspaceRoot, checkpointTaskId);
+    }
     const msg = maskSecrets(err instanceof Error ? err.message : String(err));
     return {
       ok: false,
@@ -82730,11 +82832,33 @@ async function handleAgSession(input2, deps = {}) {
       errorMessage: `Failed to start persistent agy session: ${msg}`
     };
   }
+  let persistedCheckpointTaskId;
+  if (checkpoint.checkpointRef) {
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const sessionManifest = {
+      schemaVersion: 1,
+      taskId: checkpointTaskId,
+      title: "Persistent Antigravity session checkpoint",
+      mode: "subscription",
+      status: "RUNNING",
+      lockedPaths: [],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      ...checkpointManifestFields(checkpoint),
+      artifacts: []
+    };
+    try {
+      archiveManifest(workspaceRoot, sessionManifest);
+      persistedCheckpointTaskId = checkpointTaskId;
+    } catch {
+    }
+  }
   const session = manager.create(
     workspaceRoot,
     detection.platform,
     child,
-    checkpoint.checkpointRef
+    checkpoint.checkpointRef,
+    persistedCheckpointTaskId
   );
   if (input2.prompt && input2.prompt.trim().length > 0) {
     try {
@@ -82780,7 +82904,7 @@ async function handleAgSession(input2, deps = {}) {
 
 // src/index.ts
 function getDefaultPluginRoot() {
-  const currentFile = fileURLToPath(import.meta.url);
+  const currentFile = fileURLToPath2(import.meta.url);
   return path15.resolve(path15.dirname(currentFile), "..", "..");
 }
 function toJsonToolResponse(payload, isError = false) {
@@ -83027,6 +83151,7 @@ async function handleDelegateToAntigravity(input2, deps = {}) {
     artifacts: []
   };
   writeManifest(workspaceRoot, manifest);
+  clearReportMarkdown(workspaceRoot);
   writeDispatchMarkdown(workspaceRoot, {
     manifest,
     instructions: input2.instructions,
@@ -83472,7 +83597,7 @@ function createAntigravityMcpServer(deps = {}) {
   );
   return server;
 }
-var isDirectExecution = process.argv[1] !== void 0 && path15.resolve(process.argv[1]) === path15.resolve(fileURLToPath(import.meta.url));
+var isDirectExecution = process.argv[1] !== void 0 && path15.resolve(process.argv[1]) === path15.resolve(fileURLToPath2(import.meta.url));
 if (isDirectExecution) {
   process.once("exit", () => {
     disposePendingAuthSessions();
