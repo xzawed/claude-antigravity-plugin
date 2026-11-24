@@ -813,6 +813,15 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
     expect(parseAgyAgentProbe('')).toBeUndefined();
   });
 
+  it('TC-U37d: an answer that is not exactly the measured one is not read as a list (no guessing)', () => {
+    // Both implementation-review legs: a greedy `(.*)` read "(available: a, b) (hint)" as ["a", "b) (hint"].
+    expect(parseAgyAgentProbe(probeResult('x', 'available: a, b) (hint'))).toBeUndefined();
+    expect(parseAgyAgentProbe('error: unknown agent "x" (available: a, b) (hint)\n')).toBeUndefined();
+    expect(parseAgyAgentProbe(probeResult('x', 'available: a, b') + '\n')).toEqual(['a', 'b']);
+    // a name with parentheses cannot be told from a trailing note either: not read (documented)
+    expect(parseAgyAgentProbe(probeResult('x', 'available: x (beta)'))).toBeUndefined();
+  });
+
   it('TC-U37b: when `agy agents` prints nothing, capabilities probe agy in the workspace for its agents', async () => {
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-fake-agy-'));
     const log = path.join(binDir, 'calls.jsonl');

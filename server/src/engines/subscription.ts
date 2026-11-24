@@ -561,7 +561,9 @@ export function parseAgyAgentsOutput(raw: string): string[] {
   return agents;
 }
 
-const AGENT_PROBE_ANSWER = /unknown agent "[^"]*" \((?:available: (.*)|no custom agents are available)\)/;
+// Exactly the measured answer, nothing after it, and no parenthesis inside the list: a greedy `(.*)`
+// read "(available: a, b) (hint)" as ["a", "b) (hint"] (both review legs). Anything else is not read.
+const AGENT_PROBE_ANSWER = /unknown agent "[^"]*" \((?:available: ([^()]*)|no custom agents are available)\)/;
 
 /**
  * The agents agy names when asked for one it does not have, or undefined when `output` is not that
@@ -587,7 +589,7 @@ export function parseAgyAgentProbe(output: string): string[] | undefined {
     if (result.status !== 'ERROR' || (result.num_turns ?? 0) !== 0 || (result.conversation_id ?? '') !== '') {
       return undefined;
     }
-    const m = AGENT_PROBE_ANSWER.exec(String(result.error ?? ''));
+    const m = new RegExp(`^${AGENT_PROBE_ANSWER.source}$`).exec(String(result.error ?? '').trim());
     return m ? names(m[1]) : undefined;
   }
   const m = new RegExp(`^error: ${AGENT_PROBE_ANSWER.source}\\s*$`, 'm').exec(output);
