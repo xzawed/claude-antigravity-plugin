@@ -1,0 +1,3 @@
+# Committed build output (see .gitignore and ADR-004): keep LF on every OS so a fresh
+# esbuild run compares byte-for-byte in CI's drift check, and collapse it in PR diffs.
+server/dist/*.js text eol=lf linguist-generated=true
