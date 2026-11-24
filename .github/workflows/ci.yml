@@ -134,6 +134,9 @@ jobs:
       - name: Doc counts match their sources (G7)
         run: node server/scripts/check-doc-counts.mjs
 
+      - name: Version declarations match across manifests, server, and spec
+        run: node server/scripts/check-version-sync.mjs
+
       - name: Verify AGENTS.md size budget and relative markdown links
         run: |
           node -e '

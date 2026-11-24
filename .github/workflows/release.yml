@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional tag to validate against (dry-run; does not publish a release)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Release Artifacts & Gates (G1-G7)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Verify version declarations & tag match
+        env:
+          TAG_TO_CHECK: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
+        run: |
+          if [ -n "$TAG_TO_CHECK" ]; then
+            node server/scripts/check-version-sync.mjs --tag "$TAG_TO_CHECK"
+          else
+            node server/scripts/check-version-sync.mjs
+          fi
+
+      # G5 must run before npm ci so node_modules cannot mask missing bundle dependencies.
+      - name: Committed bundle runs without node_modules (G5)
+        run: node server/scripts/smoke-bundle.mjs
+
+      - name: Install dependencies
+        run: npm --prefix server ci
+
+      - name: TypeScript typecheck & bundle build (G1)
+        run: |
+          npm --prefix server run typecheck
+          npm --prefix server run build
+
+      - name: Committed bundle matches fresh build (G6)
+        run: git diff --exit-code --stat -- server/dist/index.js server/dist/cli-init.js
+
+      - name: Run automated test suite (G2)
+        run: npm --prefix server test
+
+      - name: Doc counts match sources (G7)
+        run: node server/scripts/check-doc-counts.mjs
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping creation."
+            exit 0
+          fi
+
+          EXTRA_ARGS=()
+          if [[ "$TAG" == *-* ]]; then
+            EXTRA_ARGS+=(--prerelease)
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            "${EXTRA_ARGS[@]}"

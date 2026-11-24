@@ -53,6 +53,7 @@
 | `TC-U39`, `TC-U40` | `jobs.ts` · `index.ts` · `subscription.ts` | 이전 작업의 `.ag-bridge/report.md`가 남은 상태에서 2번째 `start_ag_task` / `delegate_to_antigravity` 실행; 실행 중 `get_ag_job`의 비밀 포함 임시 리포트 조회 | 디스패치 시 기존 `report.md` 삭제되어 2번째 작업의 새 응답이 정상 기록·반환, `get_ag_job`은 현재 작업 리포트만 마스킹하여 반환 | `ARC-002`, `NFR-002` |
 | `TC-U41` | `sessions.ts` · `index.ts` | Git 저장소에서 `ag_session start` 후 파일 수정 → `rollback_ag_task({ taskId: checkpointTaskId })`; 응답 없는 턴 타임아웃 | 세션 체크포인트가 `.ag-bridge/history/`에 기록되어 원복 가능, 턴 타임아웃 시 자식 프로세스 종료 및 세션 정리(응답 어긋남 방지) | `FR-005`, `ARC-002` |
 | `TC-U42` | `artifacts.ts` | `.ag-bridge/artifacts/` 아래 공백 등 비표준 이름 폴더 존재 시 `list_ag_artifacts({})` 호출 | 비표준 폴더를 건너뛰고 유효한 작업 아티팩트 정상 반환 | `FR-008` |
+| `TC-U43`, `TC-U43b` | `check-version-sync.mjs` | 저장소 버전 선언 6곳(`plugin.json`·`package.json`·`package-lock.json`·`index.ts`·`mcp-tools-api.md`) 일치 여부 및 `--tag vX.Y.Z` 비교 | 모든 선언 일치 시 PASS, 한 곳이라도 드리프트하거나 태그가 어긋나면 FAIL (CI & `.github/workflows/release.yml`) | `NFR-007` |
 
 ---
 
