@@ -9,18 +9,26 @@
  * `git archive` extraction.
  *
  *   1. server/dist/index.js and server/dist/cli-init.js exist
- *   2. the MCP server answers `initialize` + `tools/list` over stdio (12 tools)
- *   3. cli-init initializes a workspace whose path contains spaces
+ *   2. both bundles reference only Node built-ins (static scan — see bundle-scan.mjs for why
+ *      starting them is not enough on its own)
+ *   3. the MCP server answers `initialize` + `tools/list` over stdio (12 tools)
+ *   4. cli-init initializes a workspace whose path contains spaces
+ * Steps 3–4 run with NODE_PATH removed from the environment.
  */
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scanBundle } from './bundle-scan.mjs';
 
 const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distIndex = path.join(serverDir, 'dist', 'index.js');
 const distInit = path.join(serverDir, 'dist', 'cli-init.js');
+
+// A createRequire-based require() searches NODE_PATH; don't let it supply a missing dependency.
+const hermeticEnv = { ...process.env };
+delete hermeticEnv.NODE_PATH;
 
 const EXPECTED_TOOLS = [
   'ag_auth',
@@ -37,14 +45,19 @@ const EXPECTED_TOOLS = [
   'start_ag_task',
 ];
 
+// Sets the exit code instead of exiting, so `finally` blocks still remove temp directories.
 function fail(message) {
   console.error(`[smoke-bundle] FAIL: ${message}`);
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 function mcpHandshake(cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [distIndex], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [distIndex], {
+      cwd,
+      env: hermeticEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     const exited = new Promise((res) => child.once('exit', res));
     // Settle only after the child has exited: Windows refuses to remove a directory that is
     // still some process's working directory (EBUSY).
@@ -122,20 +135,28 @@ function mcpHandshake(cwd) {
 async function main() {
   for (const file of [distIndex, distInit]) {
     if (!fs.existsSync(file)) {
-      fail(`${path.relative(serverDir, file)} is not in the tree — marketplace installs would ship no runnable server`);
+      return fail(`${path.relative(serverDir, file)} is not in the tree — marketplace installs would ship no runnable server`);
     }
   }
-  console.log('[smoke-bundle] 1/3 OK: dist/index.js and dist/cli-init.js are present');
+  console.log('[smoke-bundle] 1/4 OK: dist/index.js and dist/cli-init.js are present');
+
+  for (const file of [distIndex, distInit]) {
+    const problems = scanBundle(fs.readFileSync(file, 'utf8'));
+    if (problems.length > 0) {
+      return fail(`${path.relative(serverDir, file)} is not self-contained: ${problems.join('; ')}`);
+    }
+  }
+  console.log('[smoke-bundle] 2/4 OK: both bundles reference only Node built-ins');
 
   const mcpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ag smoke mcp '));
   try {
     const { serverInfo, tools } = await mcpHandshake(mcpCwd);
     if (JSON.stringify(tools) !== JSON.stringify(EXPECTED_TOOLS)) {
-      fail(`unexpected MCP tool list: ${tools.join(', ')}`);
+      throw new Error(`unexpected MCP tool list: ${tools.join(', ')}`);
     }
-    console.log(`[smoke-bundle] 2/3 OK: ${serverInfo?.name ?? 'server'} ${serverInfo?.version ?? ''} answered tools/list (${tools.length} tools)`);
+    console.log(`[smoke-bundle] 3/4 OK: ${serverInfo?.name ?? 'server'} ${serverInfo?.version ?? ''} answered tools/list (${tools.length} tools)`);
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    return fail(err instanceof Error ? err.message : String(err));
   } finally {
     fs.rmSync(mcpCwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -143,13 +164,13 @@ async function main() {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ag smoke init '));
   try {
     // Without --silent, an initialization error exits non-zero instead of being swallowed.
-    execFileSync(process.execPath, [distInit, '--workspace', workspace], { stdio: 'inherit' });
+    execFileSync(process.execPath, [distInit, '--workspace', workspace], { stdio: 'inherit', env: hermeticEnv });
     for (const rel of ['.ag-bridge/config.json', '.agent/workflows/claude-handoff.md']) {
-      if (!fs.existsSync(path.join(workspace, rel))) fail(`cli-init did not create ${rel}`);
+      if (!fs.existsSync(path.join(workspace, rel))) throw new Error(`cli-init did not create ${rel}`);
     }
-    console.log('[smoke-bundle] 3/3 OK: cli-init initialized a workspace path containing spaces');
+    console.log('[smoke-bundle] 4/4 OK: cli-init initialized a workspace path containing spaces');
   } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
+    return fail(err instanceof Error ? err.message : String(err));
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

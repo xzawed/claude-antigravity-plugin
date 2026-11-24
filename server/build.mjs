@@ -28,6 +28,13 @@ await build({
   },
   legalComments: 'eof',
   logLevel: 'warning',
+  // esbuild silently leaves `import(<expr>)` / `require(<expr>)` unbundled (not even a
+  // warning by default — measured). Such a call would need node_modules at runtime, so fail
+  // the build instead. Literal externals are caught by scripts/bundle-scan.mjs (G5).
+  logOverride: {
+    'unsupported-dynamic-import': 'error',
+    'unsupported-require-call': 'error',
+  },
 });
 
 console.error('bundled -> dist/index.js, dist/cli-init.js');
