@@ -83248,7 +83248,7 @@ function rollbackWarnings(res) {
 function createAntigravityMcpServer(deps = {}) {
   const server = new McpServer({
     name: "antigravity-delegate",
-    version: "1.4.1"
+    version: "1.5.0"
   });
   const sharedDelegateSchema = {
     title: external_exports.string().min(3).max(120),

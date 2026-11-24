@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `IMP-002` |
-| **버전** | `1.0.0` |
-| **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **버전** | `1.5.0` |
+| **상태** | `Active` |
+| **최종 수정일** | `2026-11-25` |
 | **관련 문서** | [구현 마스터 플랜](./implementation-plan.md), [세션 인계서](./session-handoff.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
 
 > 구현 진행 시 각 항목을 `[x]`로 갱신하고, 완료 시점의 빌드/테스트 결과를 하단 실행 로그에 기록한다.
@@ -78,3 +78,4 @@
 | `2026-11-24` | 에이전트 탐침 답 정확 일치 (SPC-002) | `npm test` (`TC-U37d`) + 변이 2종 | `PASS` | 구현 검토 레그 둘(Grok·Antigravity)이 같이 지적: 고정 안 된 욕심 많은 `(.*)`가 `(available: a, b) (hint)`를 `["a", "b) (hint"]`로 읽음(RED 재현) → 끝 고정만으로는 `)`로 끝나는 덧붙임을 못 막아, 실측 형식과 정확히 같고 목록에 괄호가 없을 때만 읽음(아니면 경고·빈 목록); 실제 agy 결과 불변; 125 → 126 통과(1 skip, #38 병합 후 `main` 125) |
 | `2026-11-24` | 롤백 복구 (ARC-003 §5.5) | `npm test` (`TC-S24`~`TC-S24j`, `TC-U38`, `TC-U36b` 갱신, `TC-I06` 확장) + 변이 13종 | `PASS` | 세 AI 2라운드 결정(옮기기 + 상한 스냅샷 + 롤백 직전 기록, 2,000개·50MB, 10개/7일/250MB)을 실측 비용(복사 2,000×25KB 2.5초 vs git 객체 18.6초, 20,000개 복사 20초)으로 구현: 롤백이 치우는 것은 `.ag-bridge/recovery/<task>/rollback-<시각>/`로 이동, 에이전트가 추가·스테이징·커밋한 파일도 인덱스에서 빼 reset이 지우지 않게 함; 사용자 untracked 사본을 체크포인트 때 복사하고 고치거나 지운 것을 되돌림(에이전트 판은 `replaced/`); 정션을 따라 밖에 쓰지 않음·매니페스트가 가리키는 다른 폴더는 무시; `preRollbackHead`·`refs/ag-bridge/pre-rollback/<task>`로 롤백 되돌리기; 보관 규칙 정리; 구현 검토(Antigravity 대조군 통과)의 지적을 실측 후 반영 — 정션 대상 안의 바깥 파일을 롤백이 빼냄(`main`은 지움) → 링크 뒤 경로는 손대지 않고 보고, `git rm` 후 다시 만든 파일이 리셋에 덮어써짐 → 리셋 전 `replaced/`, 사본이 정리된 경우 경고(Grok은 참인 TC-S24f를 틀렸다고 해 해당 주장 기각); 변이 13종 모두 잡힘; 126 → 137 통과(1 skip, #39 병합 후 `main` 126) |
 | `2026-11-24` | 감사 결함 수정 및 보안 강화 (`fix/audit-bugs-and-hardening`) | `npm run typecheck` + `npm run build` + `smoke:bundle` + `check-doc-counts.mjs` + `npm test` (`TC-U34c`, `TC-U39`~`TC-U42`, `TC-S18g`, `TC-S25`, `TC-S26`) | `PASS` | 전수 감사 결함 일괄 수정: (1) 설정 신뢰 fail-closed(`git ls-files -z` 기반 로캘 독립 판정, 확인 불가 시 민감 키 무시, `TC-S18g`), (2) `cli-admin` `--env`/`--header` 비밀 마스킹·`.mcp.json` 제어문자 차단·HTTP `headers` 동기화·실패 보고(`TC-S26`), (3) API 워커 `catch` 경로 `report.md` 비밀 마스킹 및 `NaN` 숫자 인자 방어(`TC-S25`), (4) 디스패치 시 잔류 `report.md` 정리 및 `get_ag_job` 작업별 격리·마스킹(`TC-U39`, `TC-U40`), (5) `ag_session` 체크포인트 `.ag-bridge/history/` 아카이브(`checkpointTaskId`)·턴 타임아웃 시 프로세스 종료 및 세션 정리(`TC-U41`), (6) `list_ag_artifacts` 비표준 하위 폴더 스킵(`TC-U42`), (7) `rollbackCheckpoint` 타임아웃 원인 보존(`TC-U34c`)·`endWindowsLeftovers` 순환 방어·`auth` 리스너 정리·`subscription` Windows 인용/POSIX 프로세스 그룹/`close` 이벤트 보강; **13 suites / 146 tests PASS (0 fail)**, G1~G7 전부 통과 |
+| `2026-11-25` | `v1.5.0` 릴리스 준비 및 문서 현행화 (`chore/release-1.5.0`) | `npm run typecheck` + `npm run build` + `smoke:bundle` + `check-doc-counts.mjs` + `npm test` | `PASS` | 버전 `1.4.1` → `1.5.0` 범프(`plugin.json`, `server/package.json`, `server/package-lock.json`, `server/src/index.ts`, `mcp-tools-api.md`, `README*.md`), 번들 재빌드, `session-handoff.md` (`v1.0.0` → `v1.5.0`) 및 `task-checklist.md` 현행화; **13 suites / 146 tests PASS (0 fail)**, `smoke:bundle` (`antigravity-delegate 1.5.0`) · `doc-counts` 전부 통과 |

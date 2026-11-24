@@ -1,6 +1,6 @@
 {
   "name": "claude-antigravity-plugin-server",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "license": "Apache-2.0",
   "description": "Embedded MCP server and dual-engine bridge for claude-antigravity-plugin",
   "type": "module",
