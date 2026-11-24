@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.6.0` |
+| **버전** | `1.7.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -116,11 +116,27 @@ flowchart TD
 > `git stash create`는 임시 커밋 객체(dangling commit)를 생성하지만 **작업 트리를 변경하지 않고 `git stash list`에도 쌓이지 않는다.** 단, `git gc`에 의해 수거되지 않도록 `git update-ref refs/ag-bridge/checkpoints/<taskId> <hash>`로 로컬 ref를 핀 고정한다.
 
 ### 5.3 안전 롤백 전략 (`rollback(manifest)`)
+에이전트는 git을 직접 실행할 수 있다(`git add -A`, 커밋, 브랜치 전환). 롤백은 그런 뒤에도 위임 직전 상태로 돌아가야 한다. 아래 결함은 모두 이전 번들에서 실측했다(Grok 레그 지적 포함).
+
 1. `manifest.gitCheckpointRef` 유효성 확인 (없으면 `ROLLBACK_NO_CHECKPOINT` 반환).
-2. 추적 파일 복원:
+2. **브랜치 확인:**
+   - 체크포인트는 HEAD가 가리키던 ref(`refs/heads/<branch>`, 분리 상태면 `HEAD`)를 `gitCheckpointHeadRef`로 기록한다.
+   - 롤백 때 HEAD가 다른 곳을 가리키면 **아무것도 바꾸지 않고 거부**한다(`GIT_CHECKPOINT_FAILED`, 돌아갈 명령 `git switch <branch>` 안내).
+   - `reset --hard`는 지금 체크아웃된 브랜치를 옮긴다. 그래서 에이전트가 사용자의 `dev`로 옮겨 간 뒤 롤백하면, `dev`를 `main`의 커밋으로 옮겨 사용자 커밋을 브랜치에서 떼어냈다(`TC-S23d`).
+3. **사용자 파일을 인덱스에서 꺼낸다:**
+   - 기준선의 untracked 파일은 체크포인트 때 인덱스에 없었다. 그중 에이전트가 스테이징하거나 커밋한 것은 `git update-index -z --force-remove --stdin`으로 인덱스에서 뺀다.
+   - 그러지 않으면 `reset --hard`가 그 파일을 추적 파일로 보고 지웠다. 깨끗한 체크포인트, 깨끗한 체크포인트 + 커밋, 더러운 체크포인트 모두에서 실측했다(`TC-S23`, `TC-S23b`).
+4. **되돌릴 파일 보고:**
+   - `revertedTrackedFiles`는 `git diff --name-only -z --no-renames <ref>`로 계산한다. 추적 파일 가운데 체크포인트와 다른 것이며, 에이전트의 커밋도 포함한다.
+   - 이름 바꾸기는 두 이름 모두 보고한다(`TC-U36b`).
+   - 예전에는 `git status`에서 얻었다. 그래서 손대지 않은 사용자 untracked 파일을 "되돌림"으로 보고했고, 에이전트가 커밋한 파일은 빠뜨렸다(`TC-U36`).
+5. 추적 파일 복원:
    - **Clean 기준(`isStashSnapshot === false`):** `git reset --hard <ref>`.
-   - **Dirty 기준(`isStashSnapshot === true`):** `git reset --hard HEAD` 후 `git stash apply --index <ref>`(실패하면 `--index` 없이)로 위임 직전의 미커밋 상태까지 원복.
-3. 신규 Untracked 파일 정리:
+   - **Dirty 기준(`isStashSnapshot === true`):**
+     - 스냅샷이 만들어진 커밋(`<ref>^1`)으로 `git reset --hard`한 뒤 `git stash apply --index <ref>`(실패하면 `--index` 없이)를 실행한다.
+     - 스냅샷이 자기 기준 위에 적용되므로 병합이 없다. 예전처럼 현재 HEAD에 적용하면, 에이전트가 커밋한 뒤에는 충돌 표시를 남기고 실패했고 저장소의 merge driver도 실행했다(실측 ran=true → 이제 ran=false, `TC-S23c`).
+     - `gitCheckpointHeadRef`가 없는 이전 매니페스트는 기존대로 현재 HEAD로 되돌린다.
+6. 신규 Untracked 파일 정리:
    - 현재 untracked 파일 목록(`git ls-files -z --others --exclude-standard`)에서 `manifest.gitUntrackedBaseline`에 **없던 파일**만 선별 삭제한다. 위임 전부터 사용자가 갖고 있던 untracked 파일은 보존한다.
    - `-z`로 읽는다. 그러지 않으면 git이 한글 같은 비ASCII 이름을 `"\354\202\254…"`처럼 인용한다. 그래서 그 이름이 어떤 파일도 가리키지 못하고, 에이전트가 만든 `에이전트결과.txt`가 남았다(실측, `TC-U35`).
    - **기준선을 모르면 지우지 않는다.**
@@ -128,8 +144,12 @@ flowchart TD
      - 매니페스트에 기준선이 없으면(이전 버전) untracked 파일을 하나도 지우지 않고 경고한다(`TC-S22`).
      - 예전에는 "모름"을 "없음"으로 다뤘다. 그래서 체크포인트 때 목록이 실패하면 롤백이 모든 untracked 파일을 지울 수 있었다. 실측으로는 untracked 2만 개(경로 1.3MB)에서 이전 목록이 출력 한도(1MiB)를 넘겨 0개를 돌려줬다.
    - **Windows·macOS에서는 `-c core.ignorecase=true`로 센다.** 저장소 설정이 `core.ignorecase=false`(리눅스에서 가져온 저장소 등)이면, git은 디스크에서 대소문자만 바뀐 추적 파일(`Foo.txt` → `foo.txt`)을 untracked로 내놓는다. 그러면 롤백이 방금 복원한 추적 파일을 지웠다(Antigravity 레그 지적을 실측, `TC-S22c`).
-   - **알려진 한계:** 위임 도중 사용자가 같은 폴더에 새로 만든 untracked 파일도 기준선에 없으므로 롤백이 지운다. 삭제 대신 `.ag-bridge/` 아래로 옮겨 복구 가능하게 하는 것이 다음 개선 후보다.
-4. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제 및 복구된 파일 목록 반환.
+7. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제 및 복구된 파일 목록 반환.
+
+**알려진 한계 (실측):**
+- **untracked 파일의 내용은 스냅샷되지 않는다.** 기준선은 이름 목록일 뿐이다. 에이전트가 사용자의 untracked 파일을 고쳐 쓰면, 롤백은 그 파일을 남기지만 내용은 되돌리지 않는다.
+- **위임 도중 사용자가 한 일은 에이전트의 일과 구별되지 않는다.** 같은 폴더에 새로 만든 untracked 파일은 지워지고, 같은 브랜치에 한 커밋은 되감긴다(reflog에는 남는다).
+- 다음 개선 후보: 지우는 대신 `.ag-bridge/` 아래로 옮겨 복구 가능하게 하기, 기준선 파일 내용을 스냅샷하기(크기 상한 필요).
 
 ### 5.4 git 호출 시간 제한
 - `execFileSync`는 MCP 서버 전체를 멈춘다. 그런데 저장소의 clean 필터(LFS 때문에 켜 둔다, §8)는 `git status`를 얼마든지 붙잡을 수 있다. 실측(`TC-U34`)에서 16.6초 동안 붙잡았다.
@@ -214,5 +234,8 @@ flowchart TD
 
 **의도적으로 남긴 것:**
 - clean/smudge/process 필터는 켜 둔다. 체크포인트가 실제 내용(Git LFS)을 담아야 하기 때문이다.
-- 저장소의 merge driver(`.gitattributes`의 `merge=<name>`과 `merge.<name>.driver`)도 남는다. 실측으로는 체크포인트 이후 HEAD가 그대로면 롤백의 `stash apply`가 driver를 실행하지 않았고, HEAD가 움직여 같은 파일이 바뀐 경우에는 실행했다. 막으려면 속성 자체를 꺼야 하는데, 그러면 LFS 필터도 함께 꺼진다.
-- 두 경로 모두 저장소가 `.git/config`까지 가진 경우에만 열린다. 그런 폴더에서는 Claude Code 자신도 세션 시작 때 `git status`를 실행한다.
+- 저장소의 merge driver(`.gitattributes`의 `merge=<name>`과 `merge.<name>.driver`)는 설정으로는 끄지 않는다. 막으려면 속성 자체를 꺼야 하는데, 그러면 LFS 필터도 함께 꺼진다.
+  - 대신 롤백이 병합을 하지 않는다. 더러운 스냅샷은 자기 기준 커밋(`<ref>^1`) 위에 적용된다(§5.3).
+  - 실측: HEAD가 움직여 같은 파일이 바뀐 경우 이전 롤백은 driver를 실행했고(ran=true), 지금은 실행하지 않는다(ran=false).
+  - 기록된 브랜치가 없는 이전 매니페스트만 예전 경로(현재 HEAD 위에 적용)를 탄다.
+- 필터 경로는 저장소가 `.git/config`까지 가진 경우에만 열린다. 그런 폴더에서는 Claude Code 자신도 세션 시작 때 `git status`를 실행한다.
