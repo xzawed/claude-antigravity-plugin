@@ -175,12 +175,19 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       const parsed = JSON.parse(content[0].text ?? '{}') as {
         ok: boolean;
         removedUntrackedFiles: string[];
+        quarantineDir?: string;
+        preRollbackHead?: string;
+        preRollbackRef?: string;
       };
       expect(parsed.ok).toBe(true);
       expect(parsed.removedUntrackedFiles).toContain('temp-agent.ts');
       expect(fs.readFileSync(path.join(tmpRoot, 'index.ts'), 'utf8')).toBe('export const ok = true;\n');
       expect(fs.existsSync(path.join(tmpRoot, 'keep.txt'))).toBe(true);
       expect(fs.existsSync(path.join(tmpRoot, 'temp-agent.ts'))).toBe(false);
+      // the tool tells where the removed file went and how to undo the rollback (ARC-003 §5.5)
+      expect(fs.existsSync(path.join(tmpRoot, parsed.quarantineDir ?? '-', 'removed', 'temp-agent.ts'))).toBe(true);
+      expect(parsed.preRollbackHead).toMatch(/^[0-9a-f]{40}$/);
+      expect(parsed.preRollbackRef).toBe('refs/ag-bridge/pre-rollback/ag-e2e-rb-1');
     } finally {
       await client.close();
     }

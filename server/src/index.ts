@@ -455,14 +455,32 @@ export async function handleRollbackAgTask(
     restoredCheckpointRef: rollbackRes.restoredCheckpointRef,
     revertedTrackedFiles: rollbackRes.revertedTrackedFiles,
     removedUntrackedFiles: rollbackRes.removedUntrackedFiles,
-    ...(rollbackRes.untrackedBaselineMissing
-      ? {
-          warnings: [
-            'Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed.',
-          ],
-        }
-      : {}),
+    restoredUntrackedFiles: rollbackRes.restoredUntrackedFiles,
+    ...(rollbackRes.quarantineDir ? { quarantineDir: rollbackRes.quarantineDir } : {}),
+    preRollbackHead: rollbackRes.preRollbackHead,
+    ...(rollbackRes.preRollbackRef ? { preRollbackRef: rollbackRes.preRollbackRef } : {}),
+    ...(rollbackWarnings(rollbackRes).length > 0 ? { warnings: rollbackWarnings(rollbackRes) } : {}),
   };
+}
+
+function rollbackWarnings(res: ReturnType<typeof rollbackCheckpoint>): string[] {
+  const warnings: string[] = [];
+  if (res.untrackedBaselineMissing) {
+    warnings.push(
+      'Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed.',
+    );
+  }
+  if (res.untrackedSnapshotMissing) {
+    warnings.push(
+      "The checkpoint's copy of your untracked files is gone (recovery folders are kept for the last 10 tasks or 7 days), so files the agent edited or deleted were not put back.",
+    );
+  }
+  if (res.pathsBehindLinks.length > 0) {
+    warnings.push(
+      `Left alone because a link (a junction) lies on the way to them, which may lead outside the workspace: ${res.pathsBehindLinks.join(', ')}.`,
+    );
+  }
+  return warnings;
 }
 
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {

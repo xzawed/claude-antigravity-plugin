@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.10.0` |
+| **버전** | `1.11.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -123,33 +123,60 @@ flowchart TD
    - 체크포인트는 HEAD가 가리키던 ref(`refs/heads/<branch>`, 분리 상태면 `HEAD`)를 `gitCheckpointHeadRef`로 기록한다.
    - 롤백 때 HEAD가 다른 곳을 가리키면 **아무것도 바꾸지 않고 거부**한다(`GIT_CHECKPOINT_FAILED`, 돌아갈 명령 `git switch <branch>` 안내).
    - `reset --hard`는 지금 체크아웃된 브랜치를 옮긴다. 그래서 에이전트가 사용자의 `dev`로 옮겨 간 뒤 롤백하면, `dev`를 `main`의 커밋으로 옮겨 사용자 커밋을 브랜치에서 떼어냈다(`TC-S23d`).
-3. **사용자 파일을 인덱스에서 꺼낸다:**
-   - 기준선의 untracked 파일은 체크포인트 때 인덱스에 없었다. 그중 에이전트가 스테이징하거나 커밋한 것은 `git update-index -z --force-remove --stdin`으로 인덱스에서 뺀다.
-   - 그러지 않으면 `reset --hard`가 그 파일을 추적 파일로 보고 지웠다. 깨끗한 체크포인트, 깨끗한 체크포인트 + 커밋, 더러운 체크포인트 모두에서 실측했다(`TC-S23`, `TC-S23b`).
-4. **되돌릴 파일 보고:**
-   - `revertedTrackedFiles`는 `git diff --name-only -z --no-renames <ref>`로 계산한다. 추적 파일 가운데 체크포인트와 다른 것이며, 에이전트의 커밋도 포함한다.
-   - 이름 바꾸기는 두 이름 모두 보고한다(`TC-U36b`).
+3. **롤백 직전 상태를 기록한다(§5.5):** HEAD 커밋과, 미커밋 추적 변경이 있으면 그 `git stash create`를 `refs/ag-bridge/pre-rollback/<taskId>`에 남긴다. 기록하지 못하면 아무것도 바꾸지 않고 거부한다.
+4. **체크포인트 이후 인덱스에 들어온 것을 인덱스에서 꺼낸다:**
+   - 대상은 `git diff --cached --name-only -z --no-renames --diff-filter=A <ref>`로 고른다. 지금 인덱스에는 있지만 체크포인트에는 없는 것이다. 이것들을 `git update-index -z --force-remove --stdin`으로 인덱스에서 뺀다.
+   - 이 안에는 두 종류가 있다.
+     - 사용자의 untracked 파일 가운데 에이전트가 스테이징하거나 커밋한 것. `reset --hard`가 추적 파일로 보고 지웠다(깨끗한 체크포인트, 깨끗한 체크포인트 + 커밋, 더러운 체크포인트 모두 실측, `TC-S23`, `TC-S23b`).
+     - 에이전트가 만들어 스테이징하거나 커밋한 파일. `reset --hard`가 영영 지웠다. 이제는 작업 트리에 남아 6번에서 복구 폴더로 옮겨진다(`TC-S24b`).
+5. **되돌릴 파일 보고:**
+   - `revertedTrackedFiles`는 4번 다음에 `git diff --name-only -z --no-renames <ref>`로 계산한다. 추적 파일 가운데 체크포인트와 다른 것이며, 에이전트의 커밋도 포함한다.
+   - 에이전트가 추가한 파일은 여기 들지 않는다. 옮겨지므로 `removedUntrackedFiles`에 든다. 이름 바꾸기도 옛 이름은 되돌림이고, 새 이름은 제거(복구 폴더)다(`TC-U36b`). 추가된 경로가 인덱스를 떠나므로 이 diff에서는 이름 바꾸기 짝이 생기지 않는다.
    - 예전에는 `git status`에서 얻었다. 그래서 손대지 않은 사용자 untracked 파일을 "되돌림"으로 보고했고, 에이전트가 커밋한 파일은 빠뜨렸다(`TC-U36`).
-5. 추적 파일 복원:
+6. 추적 파일 복원:
    - **Clean 기준(`isStashSnapshot === false`):** `git reset --hard <ref>`.
    - **Dirty 기준(`isStashSnapshot === true`):**
      - 스냅샷이 만들어진 커밋(`<ref>^1`)으로 `git reset --hard`한 뒤 `git stash apply --index <ref>`(실패하면 `--index` 없이)를 실행한다.
      - 스냅샷이 자기 기준 위에 적용되므로 병합이 없다. 예전처럼 현재 HEAD에 적용하면, 에이전트가 커밋한 뒤에는 충돌 표시를 남기고 실패했고 저장소의 merge driver도 실행했다(실측 ran=true → 이제 ran=false, `TC-S23c`).
      - `gitCheckpointHeadRef`가 없는 이전 매니페스트는 기존대로 현재 HEAD로 되돌린다.
-6. 신규 Untracked 파일 정리:
-   - 현재 untracked 파일 목록(`git ls-files -z --others --exclude-standard`)에서 `manifest.gitUntrackedBaseline`에 **없던 파일**만 선별 삭제한다. 위임 전부터 사용자가 갖고 있던 untracked 파일은 보존한다.
+7. 신규 Untracked 파일 정리:
+   - 현재 untracked 파일 목록(`git ls-files -z --others --exclude-standard`)에서 `manifest.gitUntrackedBaseline`에 **없던 파일**만 골라 **복구 폴더로 옮긴다**(§5.5, 지우지 않는다). 위임 전부터 사용자가 갖고 있던 untracked 파일은 그대로 둔다. 에이전트가 그 내용을 고치거나 지웠으면 8번에서 되돌린다.
    - `-z`로 읽는다. 그러지 않으면 git이 한글 같은 비ASCII 이름을 `"\354\202\254…"`처럼 인용한다. 그래서 그 이름이 어떤 파일도 가리키지 못하고, 에이전트가 만든 `에이전트결과.txt`가 남았다(실측, `TC-U35`).
    - **기준선을 모르면 지우지 않는다.**
      - 목록을 얻지 못하면(오류·시간 초과·출력 초과) `listUntrackedFiles`는 "없음"(`[]`)이 아니라 "모름"(`undefined`)을 돌려준다(`TC-S22b`). 체크포인트 생성 때 모르면 체크포인트를 만들지 않는다.
      - 매니페스트에 기준선이 없으면(이전 버전) untracked 파일을 하나도 지우지 않고 경고한다(`TC-S22`).
      - 예전에는 "모름"을 "없음"으로 다뤘다. 그래서 체크포인트 때 목록이 실패하면 롤백이 모든 untracked 파일을 지울 수 있었다. 실측으로는 untracked 2만 개(경로 1.3MB)에서 이전 목록이 출력 한도(1MiB)를 넘겨 0개를 돌려줬다.
    - **Windows·macOS에서는 `-c core.ignorecase=true`로 센다.** 저장소 설정이 `core.ignorecase=false`(리눅스에서 가져온 저장소 등)이면, git은 디스크에서 대소문자만 바뀐 추적 파일(`Foo.txt` → `foo.txt`)을 untracked로 내놓는다. 그러면 롤백이 방금 복원한 추적 파일을 지웠다(Antigravity 레그 지적을 실측, `TC-S22c`).
-7. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제 및 복구된 파일 목록 반환.
+8. **스냅샷에서 사용자 untracked 파일을 되돌린다(§5.5):** 에이전트가 고치거나 지운 것을 체크포인트 때의 사본으로 되돌린다. 에이전트의 판은 `replaced/`로 옮긴다.
+9. 정리 완료 후 `refs/ag-bridge/checkpoints/<taskId>`를 지우고, 보관 규칙으로 오래된 복구 폴더를 정리한 뒤 결과를 반환한다.
 
 **알려진 한계 (실측):**
-- **untracked 파일의 내용은 스냅샷되지 않는다.** 기준선은 이름 목록일 뿐이다. 에이전트가 사용자의 untracked 파일을 고쳐 쓰거나 지우면, 롤백은 그 내용을 되돌리지 못한다(Antigravity 레그도 같은 결론).
-- **위임 도중 사용자가 한 일은 에이전트의 일과 구별되지 않는다.** 같은 폴더에 새로 만든 untracked 파일은 지워지고, 같은 브랜치에 한 커밋은 되감긴다(reflog에는 남는다).
-- 다음 개선 후보: 지우는 대신 `.ag-bridge/` 아래로 옮겨 복구 가능하게 하기, 기준선 파일 내용을 스냅샷하기(크기 상한 필요).
+- **위임 도중 사용자가 한 일은 에이전트의 일과 구별되지 않는다.** 같은 폴더에 새로 만든 untracked 파일은 복구 폴더로 옮겨지고, 같은 브랜치에 한 커밋은 되감긴다(reflog와 `preRollbackHead`에 남는다).
+- 상한(2,000개·50MB)을 넘는 untracked 파일은 스냅샷되지 않는다. 그때는 에이전트가 고친 내용을 되돌리지 못하고, 체크포인트 결과가 그렇게 경고한다(§5.5).
+
+### 5.5 롤백 복구 (`TC-S24` ~ `TC-S24g`, `TC-U38`)
+롤백이 치운 것과 되돌린 것을 다시 꺼낼 수 있게 한다. 세 AI(Claude·Grok·Antigravity)가 실측한 비용을 놓고 두 라운드에 걸쳐 정했다.
+
+- **실측 비용** (Windows NVMe, 데이터셋: 200개×5KB / 2,000개×25KB(49MB) / 20,000개×100B / 1개×200MB):
+  - 파일 복사 스냅샷: 0.28초 / 2.5초 / 20.3초 / 0.15초
+  - git 객체(임시 인덱스 + `write-tree`): 2.4초 / 18.6초 / 181초 / 1.5초 → 기각
+  - 이름 바꾸기(옮기기): 0.31초 / 2.5초 / 28초 / 0.002초
+- **복구 폴더:** 롤백이 작업 트리에서 치우는 것은 지우지 않고 `.ag-bridge/recovery/<taskId>/rollback-<시각>/`로 옮긴다(`TC-S24`, `TC-S24b`).
+  - `removed/`에는 에이전트가 만든 파일이 간다. 스테이징·커밋한 것도 포함한다.
+  - `replaced/`에는 사용자 파일을 덮어쓴 에이전트의 판, 또는 사용자 폴더 자리에 놓인 링크가 간다.
+  - 결과의 `quarantineDir`이 이 폴더를 알려 준다.
+- **스냅샷:** 체크포인트 때 사용자의 untracked 파일(일반 파일만, 링크 제외)이 2,000개·50MB 이내면 `.ag-bridge/recovery/<taskId>/untracked/`로 복사한다. 매니페스트에는 `gitUntrackedSnapshotDir`로 기록한다. 상한을 넘거나 복사가 실패하면 복사하지 않고 체크포인트 경고로 알린다(`TC-S24d`). 상한은 실측 2,000개×25KB = 2.5초를 기준으로 정했다.
+- **되돌리기:** 롤백은 스냅샷과 내용이 다르거나 없어진 사용자 파일을 되돌리고 `restoredUntrackedFiles`로 보고한다(`TC-S24c`). 손대지 않은 파일은 건드리지 않는다.
+  - 읽는 곳은 이 작업의 스냅샷 폴더뿐이다. 매니페스트는 에이전트가 고칠 수 있는 데이터라, 다른 폴더를 가리켜도 무시한다(`TC-S24g`).
+  - 되돌릴 경로에 있는 폴더가 링크(정션 등)면 먼저 `replaced/`로 옮기고 실제 폴더를 만든다. 그래서 워크스페이스 밖에 쓰지 않는다(`TC-S24f`).
+- **링크 뒤는 건드리지 않는다(`TC-S24h`):**
+  - Windows git은 정션 대상 폴더 안의 파일까지 untracked로 나열한다. 실측에서 `docs/precious.txt`가 나왔고, 롤백이 그 파일을 바깥 폴더에서 빼냈다. `main`의 `rmSync`는 그 파일을 지웠다(Antigravity 구현 검토 지적, 실측).
+  - 이제 가는 길에 링크가 있는 untracked 경로는 옮기지도 지우지도 않는다. 결과 `pathsBehindLinks`와 경고로 알린다.
+- **삭제된 경로에 다시 만든 파일:** 에이전트가 `git rm`한 경로에 새로 쓴 파일은 untracked라 `reset --hard`가 사본 없이 덮어썼다(Antigravity 구현 검토 지적, 실측). 리셋 전에 `replaced/`로 옮긴다(`TC-S24i`).
+- **사본이 정리된 경우:** 보관 규칙으로 그 작업의 사본이 이미 없으면 `untrackedSnapshotMissing`과 경고로 알린다(`TC-S24j`). 아무것도 되돌리지 못한 사실을 조용히 넘기지 않는다.
+- **롤백 되돌리기:** 결과의 `preRollbackHead`(롤백 직전 HEAD)와 `preRollbackRef`(미커밋 추적 변경이 있었을 때의 `stash create`)로 `git reset --hard <preRollbackHead>` 뒤 `git stash apply <preRollbackRef>`를 하면 에이전트의 작업이 돌아온다. 복구 폴더의 파일은 손으로 옮긴다(`TC-S24e`).
+- **보관 규칙:** 최근 10개 작업 또는 7일 중 더 적은 쪽을 남기고, 그다음 합계가 250MB를 넘지 않을 때까지 오래된 것부터 지운다. 지금 작업의 폴더는 늘 남긴다. pre-rollback ref도 폴더와 함께 지운다. 체크포인트와 롤백 때 돈다(`TC-U38`).
+- **한계:** 복구 폴더는 워크스페이스 안에 있다. 위임 중 에이전트가 그 안을 고칠 수 있고, 그러면 되돌리는 내용도 바뀐다. 그래도 그 파일을 직접 고칠 수 있는 에이전트가 얻는 것은 없다. 상한을 넘는 경우는 §5.3 한계를 따른다.
 
 ### 5.4 git 호출 시간 제한
 - `execFileSync`는 MCP 서버 전체를 멈춘다. 그런데 저장소의 clean 필터(LFS 때문에 켜 둔다, §8)는 `git status`를 얼마든지 붙잡을 수 있다. 실측(`TC-U34`)에서 16.6초 동안 붙잡았다.

@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-002` |
-| **버전** | `1.2.0` |
+| **버전** | `1.3.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [시스템 아키텍처](./system-architecture.md), [보안 & Git Guard](./security-and-git-guard.md), [ADR-001](../06-adr/ADR-001-file-based-ag-bridge.md) |
@@ -91,6 +91,7 @@ export interface BridgeManifest {
   gitCheckpointIsStash?: boolean; // true = 미커밋 변경을 담은 stash 스냅샷, false = HEAD 커밋
   gitUntrackedBaseline?: string[];// 위임 직전 존재하던 untracked 파일 목록 (롤백 보존용, 이름만 — 내용은 아님)
   gitCheckpointHeadRef?: string;  // 체크포인트 때 HEAD가 가리키던 ref ("refs/heads/main" 또는 분리 상태면 "HEAD") — 다르면 롤백 거부
+  gitUntrackedSnapshotDir?: string; // ".ag-bridge/recovery/<taskId>/untracked" — 사용자 untracked 파일 사본(2,000개·50MB 이내일 때만, ARC-003 §5.5)
   artifacts: string[];            // .ag-bridge/ 기준 상대 경로 목록
   changedFiles?: string[];        // 완료 시 감지된 변경 파일 목록
   errorCode?: string;             // FAILED 시 표준 에러 코드

@@ -59743,8 +59743,130 @@ function checkpointManifestFields(cp) {
     gitCheckpointRef: cp.checkpointRef,
     gitCheckpointIsStash: cp.isStashSnapshot,
     gitUntrackedBaseline: cp.untrackedBaseline,
-    gitCheckpointHeadRef: cp.headRef
+    gitCheckpointHeadRef: cp.headRef,
+    gitUntrackedSnapshotDir: cp.untrackedSnapshotDir
   };
+}
+var SNAPSHOT_MAX_FILES = 2e3;
+var SNAPSHOT_MAX_BYTES = 50 * 1024 * 1024;
+var RECOVERY_RETENTION = {
+  maxTasks: 10,
+  maxAgeMs: 7 * 24 * 60 * 60 * 1e3,
+  maxBytes: 250 * 1024 * 1024
+};
+var recoveryRoot = (workspaceRoot) => path3.join(getBridgeDir(workspaceRoot), "recovery");
+var relativeTo = (workspaceRoot, abs) => path3.relative(workspaceRoot, abs).split(path3.sep).join("/");
+var snapshotDirFor = (workspaceRoot, taskId) => path3.join(recoveryRoot(workspaceRoot), assertSafeTaskId(taskId), "untracked");
+function snapshotUntracked(workspaceRoot, taskId, baseline) {
+  const files = [];
+  let bytes = 0;
+  for (const rel of baseline) {
+    let st;
+    try {
+      st = fs3.lstatSync(path3.join(workspaceRoot, rel));
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    files.push(rel);
+    bytes += st.size;
+  }
+  if (files.length > SNAPSHOT_MAX_FILES || bytes > SNAPSHOT_MAX_BYTES) {
+    return {
+      warning: `The ${files.length} untracked files (${(bytes / 1024 / 1024).toFixed(1)} MB) were not snapshotted: they exceed the ${SNAPSHOT_MAX_FILES}-file / ${SNAPSHOT_MAX_BYTES / 1024 / 1024} MB cap, so a rollback cannot undo an agent's edit or delete of one.`
+    };
+  }
+  if (files.length === 0) return {};
+  const dir = snapshotDirFor(workspaceRoot, taskId);
+  try {
+    for (const rel of files) {
+      const dst = path3.join(dir, rel);
+      fs3.mkdirSync(path3.dirname(dst), { recursive: true });
+      fs3.copyFileSync(path3.join(workspaceRoot, rel), dst);
+    }
+  } catch (err) {
+    fs3.rmSync(dir, { recursive: true, force: true });
+    const why = err instanceof Error ? err.message : String(err);
+    return { warning: `The untracked files were not snapshotted (${why}), so a rollback cannot undo an agent's edit or delete of one.` };
+  }
+  return { dir: relativeTo(workspaceRoot, dir) };
+}
+function realFoldersTo(workspaceRoot, rel, moveAside) {
+  const parts = rel.split("/").slice(0, -1);
+  for (let i2 = 1; i2 <= parts.length; i2++) {
+    const partRel = parts.slice(0, i2).join("/");
+    const abs = path3.join(workspaceRoot, partRel);
+    let st;
+    try {
+      st = fs3.lstatSync(abs);
+    } catch {
+      st = void 0;
+    }
+    if (st && (st.isSymbolicLink() || !st.isDirectory())) moveAside(partRel);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) fs3.mkdirSync(abs);
+  }
+}
+function linkOnTheWay(workspaceRoot, rel) {
+  const parts = rel.split("/").filter((p) => p.length > 0).slice(0, -1);
+  for (let i2 = 1; i2 <= parts.length; i2++) {
+    try {
+      if (fs3.lstatSync(path3.join(workspaceRoot, parts.slice(0, i2).join("/"))).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+function regularFilesUnder(dir, prefix = "") {
+  const out = [];
+  for (const entry of fs3.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...regularFilesUnder(path3.join(dir, entry.name), rel));
+    else if (entry.isFile()) out.push(rel);
+  }
+  return out;
+}
+function bytesUnder(dir) {
+  let total = 0;
+  for (const entry of fs3.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path3.join(dir, entry.name);
+    if (entry.isDirectory()) total += bytesUnder(abs);
+    else if (entry.isFile()) total += fs3.statSync(abs).size;
+  }
+  return total;
+}
+function pruneRecoveryArtifacts(workspaceRoot, keepTaskId, policy = RECOVERY_RETENTION, now = Date.now()) {
+  const root = recoveryRoot(workspaceRoot);
+  let entries;
+  try {
+    entries = fs3.readdirSync(root, { withFileTypes: true }).filter((e2) => e2.isDirectory()).map((e2) => {
+      const dir = path3.join(root, e2.name);
+      return { id: e2.name, mtimeMs: fs3.statSync(dir).mtimeMs, bytes: bytesUnder(dir) };
+    });
+  } catch {
+    return [];
+  }
+  entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const kept = entries.filter((e2) => e2.id === keepTaskId);
+  const pruned = [];
+  for (const e2 of entries) {
+    if (e2.id === keepTaskId) continue;
+    if (kept.length < policy.maxTasks && now - e2.mtimeMs <= policy.maxAgeMs) kept.push(e2);
+    else pruned.push(e2.id);
+  }
+  let total = kept.reduce((sum, e2) => sum + e2.bytes, 0);
+  while (total > policy.maxBytes) {
+    const oldest = [...kept].reverse().find((e2) => e2.id !== keepTaskId);
+    if (!oldest) break;
+    kept.splice(kept.indexOf(oldest), 1);
+    total -= oldest.bytes;
+    pruned.push(oldest.id);
+  }
+  for (const id of pruned) {
+    fs3.rmSync(path3.join(root, id), { recursive: true, force: true });
+    tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/pre-rollback/${id}`]);
+  }
+  return pruned;
 }
 function symbolicHead(workspaceRoot) {
   const res = tryRunGit(workspaceRoot, ["rev-parse", "--symbolic-full-name", "HEAD"]);
@@ -59813,18 +59935,16 @@ function createCheckpoint(workspaceRoot, taskId, policy) {
         `Failed to pin git checkpoint ref ${refName}: ${pinRes.stderr}`
       );
     }
-    return {
-      checkpointRef: stashHash,
-      isStashSnapshot: true,
-      untrackedBaseline,
-      headRef
-    };
   }
+  const snapshot = snapshotUntracked(workspaceRoot, taskId, untrackedBaseline);
+  pruneRecoveryArtifacts(workspaceRoot, taskId);
   return {
-    checkpointRef: headRes.stdout.trim(),
-    isStashSnapshot: false,
+    checkpointRef: stashHash || headRes.stdout.trim(),
+    isStashSnapshot: Boolean(stashHash),
     untrackedBaseline,
-    headRef
+    headRef,
+    untrackedSnapshotDir: snapshot.dir,
+    ...snapshot.warning ? { warning: snapshot.warning } : {}
   };
 }
 function rollbackCheckpoint(workspaceRoot, manifest) {
@@ -59853,28 +59973,74 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
+  const taskId = assertSafeTaskId(manifest.taskId);
+  const preHeadRes = tryRunGit(workspaceRoot, ["rev-parse", "--verify", "HEAD"]);
+  const preStashRes = tryRunGit(workspaceRoot, ["stash", "create", `ag-bridge-pre-rollback-${taskId}`]);
+  if (!preHeadRes.ok || !preStashRes.ok) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr || preStashRes.stderr}`
+    );
+  }
+  const preRollbackHead = preHeadRes.stdout.trim();
+  let preRollbackRef;
+  if (preStashRes.stdout.trim()) {
+    preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
+    const pinRes = tryRunGit(workspaceRoot, ["update-ref", preRollbackRef, preStashRes.stdout.trim()]);
+    if (!pinRes.ok) {
+      throw new AgPluginError(
+        "GIT_CHECKPOINT_FAILED",
+        `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`
+      );
+    }
+  }
+  let runDir;
+  const moveAside = (rel, kind) => {
+    runDir ??= path3.join(recoveryRoot(workspaceRoot), taskId, `rollback-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
+    const dst = path3.join(runDir, kind, rel);
+    fs3.mkdirSync(path3.dirname(dst), { recursive: true });
+    const src = path3.join(workspaceRoot, rel);
+    try {
+      fs3.renameSync(src, dst);
+    } catch {
+      fs3.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+      fs3.rmSync(src, { recursive: true, force: true });
+    }
+  };
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === void 0;
   const baselineSet = new Set(baseline ?? []);
-  if (baselineSet.size > 0) {
-    const indexRes = tryRunGit(workspaceRoot, ["ls-files", "-z"]);
-    if (!indexRes.ok) {
-      throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${indexRes.stderr}`);
-    }
-    const userFilesStaged = indexRes.stdout.split("\0").filter((file2) => baselineSet.has(file2));
-    if (userFilesStaged.length > 0) {
-      const unstageRes = tryRunGit(
-        workspaceRoot,
-        ["update-index", "-z", "--force-remove", "--stdin"],
-        userFilesStaged.join("\0")
+  const addedRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=A", ref]);
+  if (!addedRes.ok) {
+    throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${addedRes.stderr}`);
+  }
+  const addedSinceCheckpoint = addedRes.stdout.split("\0").filter((file2) => file2.length > 0 && !isBridgePath(file2));
+  if (addedSinceCheckpoint.length > 0) {
+    const unstageRes = tryRunGit(
+      workspaceRoot,
+      ["update-index", "-z", "--force-remove", "--stdin"],
+      addedSinceCheckpoint.join("\0")
+    );
+    if (!unstageRes.ok) {
+      throw new AgPluginError(
+        "GIT_CHECKPOINT_FAILED",
+        `Failed to unstage the files added since the checkpoint: ${unstageRes.stderr}`
       );
-      if (!unstageRes.ok) {
-        throw new AgPluginError(
-          "GIT_CHECKPOINT_FAILED",
-          `Failed to unstage the user's untracked files before rollback: ${unstageRes.stderr}`
-        );
-      }
     }
+  }
+  const removedFromIndexRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", ref]);
+  if (!removedFromIndexRes.ok) {
+    throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
+  }
+  for (const rel of removedFromIndexRes.stdout.split("\0")) {
+    if (rel.length === 0 || isBridgePath(rel) || linkOnTheWay(workspaceRoot, rel)) continue;
+    let present = true;
+    try {
+      fs3.lstatSync(path3.join(workspaceRoot, rel));
+    } catch {
+      present = false;
+    }
+    if (present) moveAside(rel, "replaced");
   }
   const diffRes = tryRunGit(workspaceRoot, ["diff", "--name-only", "-z", "--no-renames", ref]);
   if (!diffRes.ok) {
@@ -59913,24 +60079,61 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     }
   }
   const removedUntrackedFiles = [];
+  const pathsBehindLinks = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
-      if (baselineSet.has(relFile)) {
+      if (baselineSet.has(relFile)) continue;
+      if (linkOnTheWay(workspaceRoot, relFile)) {
+        pathsBehindLinks.push(relFile);
         continue;
       }
-      const fullPath = path3.resolve(workspaceRoot, relFile);
-      if (fs3.existsSync(fullPath)) {
-        fs3.rmSync(fullPath, { recursive: true, force: true });
+      let present = true;
+      try {
+        fs3.lstatSync(path3.join(workspaceRoot, relFile));
+      } catch {
+        present = false;
+      }
+      if (present) {
+        moveAside(relFile, "removed");
         removedUntrackedFiles.push(relFile);
       }
     }
   }
+  const restoredUntrackedFiles = [];
+  const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
+  const snapshotRecorded = manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir);
+  const untrackedSnapshotMissing = snapshotRecorded && !fs3.existsSync(snapshotDir);
+  if (snapshotRecorded && !untrackedSnapshotMissing) {
+    for (const rel of regularFilesUnder(snapshotDir)) {
+      const saved = path3.join(snapshotDir, rel);
+      const current = path3.join(workspaceRoot, rel);
+      realFoldersTo(workspaceRoot, rel, (partRel) => moveAside(partRel, "replaced"));
+      let st;
+      try {
+        st = fs3.lstatSync(current);
+      } catch {
+        st = void 0;
+      }
+      if (st?.isFile() && fs3.readFileSync(current).equals(fs3.readFileSync(saved))) continue;
+      if (st) moveAside(rel, "replaced");
+      fs3.copyFileSync(saved, current);
+      restoredUntrackedFiles.push(rel);
+    }
+    restoredUntrackedFiles.sort();
+  }
   tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
+  pruneRecoveryArtifacts(workspaceRoot, taskId);
   return {
     restoredCheckpointRef: ref,
     revertedTrackedFiles,
     removedUntrackedFiles,
-    untrackedBaselineMissing
+    untrackedBaselineMissing,
+    restoredUntrackedFiles,
+    untrackedSnapshotMissing,
+    pathsBehindLinks: pathsBehindLinks.sort(),
+    ...runDir ? { quarantineDir: relativeTo(workspaceRoot, runDir) } : {},
+    preRollbackHead,
+    ...preRollbackRef ? { preRollbackRef } : {}
   };
 }
 
@@ -82891,12 +83094,31 @@ async function handleRollbackAgTask(input2) {
     restoredCheckpointRef: rollbackRes.restoredCheckpointRef,
     revertedTrackedFiles: rollbackRes.revertedTrackedFiles,
     removedUntrackedFiles: rollbackRes.removedUntrackedFiles,
-    ...rollbackRes.untrackedBaselineMissing ? {
-      warnings: [
-        "Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed."
-      ]
-    } : {}
+    restoredUntrackedFiles: rollbackRes.restoredUntrackedFiles,
+    ...rollbackRes.quarantineDir ? { quarantineDir: rollbackRes.quarantineDir } : {},
+    preRollbackHead: rollbackRes.preRollbackHead,
+    ...rollbackRes.preRollbackRef ? { preRollbackRef: rollbackRes.preRollbackRef } : {},
+    ...rollbackWarnings(rollbackRes).length > 0 ? { warnings: rollbackWarnings(rollbackRes) } : {}
   };
+}
+function rollbackWarnings(res) {
+  const warnings = [];
+  if (res.untrackedBaselineMissing) {
+    warnings.push(
+      "Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed."
+    );
+  }
+  if (res.untrackedSnapshotMissing) {
+    warnings.push(
+      "The checkpoint's copy of your untracked files is gone (recovery folders are kept for the last 10 tasks or 7 days), so files the agent edited or deleted were not put back."
+    );
+  }
+  if (res.pathsBehindLinks.length > 0) {
+    warnings.push(
+      `Left alone because a link (a junction) lies on the way to them, which may lead outside the workspace: ${res.pathsBehindLinks.join(", ")}.`
+    );
+  }
+  return warnings;
 }
 function createAntigravityMcpServer(deps = {}) {
   const server = new McpServer({

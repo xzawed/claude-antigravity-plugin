@@ -156,6 +156,8 @@ export interface BridgeManifest {
   gitUntrackedBaseline?: string[];
   /** `refs/heads/<branch>` (or `HEAD` when detached) at the checkpoint; rollback refuses elsewhere. */
   gitCheckpointHeadRef?: string;
+  /** `.ag-bridge/recovery/<taskId>/untracked` when the user's untracked files were copied aside at the checkpoint. */
+  gitUntrackedSnapshotDir?: string;
   artifacts: string[];
   changedFiles?: string[];
   metrics?: ExecutionMetrics;
@@ -256,6 +258,14 @@ export interface RollbackToolOutput {
   restoredCheckpointRef?: string;
   revertedTrackedFiles: string[];
   removedUntrackedFiles: string[];
+  /** The user's untracked files put back from the checkpoint's snapshot. */
+  restoredUntrackedFiles?: string[];
+  /** Where this rollback moved what it removed or replaced (workspace-relative), when it moved anything. */
+  quarantineDir?: string;
+  /** The commit HEAD was on before the rollback. */
+  preRollbackHead?: string;
+  /** A ref holding the uncommitted tracked changes the rollback undid, when there were any. */
+  preRollbackRef?: string;
   warnings?: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;

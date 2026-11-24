@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-001` |
-| **버전** | `1.6.0` |
+| **버전** | `1.7.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [듀얼 엔진 명세](./execution-engines.md), [PRD](../01-planning/PRD.md) |
@@ -178,8 +178,12 @@ export interface RollbackToolOutput {
   ok: boolean;
   taskId: string;
   restoredCheckpointRef?: string;
-  revertedTrackedFiles: string[];  // 체크포인트와 달랐던 추적 파일 (git diff --no-renames <ref>, 에이전트 커밋 포함)
-  removedUntrackedFiles: string[]; // 기준선에 없던 untracked 파일 (위임 중 생긴 것)
+  revertedTrackedFiles: string[];  // 체크포인트와 달랐던 추적 파일 (git diff --no-renames <ref>, 에이전트 커밋 포함; 에이전트가 추가한 파일은 제외)
+  removedUntrackedFiles: string[]; // 작업 트리에서 치운 파일: 기준선에 없던 untracked 파일과 에이전트가 추가·스테이징·커밋한 파일 — quarantineDir/removed/로 옮김
+  restoredUntrackedFiles?: string[]; // 에이전트가 고치거나 지운 사용자 untracked 파일을 스냅샷에서 되돌린 것 (에이전트 판은 quarantineDir/replaced/)
+  quarantineDir?: string;          // ".ag-bridge/recovery/<taskId>/rollback-<시각>" — 무엇이든 옮겼을 때
+  preRollbackHead?: string;        // 롤백 직전 HEAD 커밋
+  preRollbackRef?: string;         // "refs/ag-bridge/pre-rollback/<taskId>" — 미커밋 추적 변경이 있었을 때의 stash create
   warnings?: string[];             // 예: 기준선 없는 매니페스트라 untracked 파일을 하나도 지우지 않음
   errorCode?: AgErrorCode;
   errorMessage?: string;
@@ -187,6 +191,7 @@ export interface RollbackToolOutput {
 ```
 
 - HEAD가 체크포인트 때와 다른 ref를 가리키면(에이전트의 브랜치 전환) 아무것도 바꾸지 않고 `GIT_CHECKPOINT_FAILED`로 거부한다. 메시지가 돌아갈 명령(`git switch <branch>`)을 알려 준다([ARC-003 §5.3](../02-architecture/security-and-git-guard.md)).
+- 롤백 되돌리기: `git reset --hard <preRollbackHead>`, 그다음 `preRollbackRef`가 있으면 `git stash apply <preRollbackRef>`를 실행한다. 치운 파일은 `quarantineDir/removed/`에서 손으로 옮긴다([ARC-003 §5.5](../02-architecture/security-and-git-guard.md)).
 
 ---
 
