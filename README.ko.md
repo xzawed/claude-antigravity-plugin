@@ -112,7 +112,7 @@ npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server"
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-> 💡 **로컬 클론 없이 GitHub에서 바로 등록할 경우:**
+> 💡 **로컬 클론·빌드 없이 GitHub에서 바로 등록할 경우:** 저장소에 미리 빌드된 자체완결 서버 번들(`server/dist/index.js`)이 들어 있어 마켓플레이스 설치만으로 바로 동작합니다:
 > `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`
 
 #### 방법 B — `--plugin-dir`로 즉시 실행 *(빠른 체험 · 개발용)*
@@ -176,6 +176,15 @@ Claude Code 채팅창에 입력합니다:
 새 버전이 나오면 아래 블록을 그대로 복사·실행하는 것만으로 30초 안에 최신 기능을 받을 수 있습니다.
 
 ### 1. 플러그인(`claude-antigravity-plugin`) 최신 버전 업데이트
+
+**GitHub에서 바로 설치했다면** (`/plugin marketplace add xzawed/claude-antigravity-plugin`) 빌드할 것이 없습니다 — 마켓플레이스를 새로 고치고 플러그인을 업데이트한 뒤 Claude Code를 다시 시작하세요:
+
+```bash
+claude plugin marketplace update claude-antigravity-plugin
+claude plugin update antigravity-delegate@claude-antigravity-plugin
+```
+
+**로컬 클론(1단계)으로 설치했다면** 클론을 받아 자체 점검합니다:
 
 **macOS / Linux:**
 
@@ -431,6 +440,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | :--- | :--- | :--- |
 | **`NO_ANTIGRAVITY_PROVIDER`** | 로컬 Antigravity(`agy`)와 `GEMINI_API_KEY`가 모두 없음 | `agy` 설치 후 `/ag-login` 실행 **또는** `GEMINI_API_KEY` 설정 후 `/ag-status` 확인 |
 | **로그인 안 됨 / 모델 0개 표시** | `agy`는 설치됐지만 Google 계정 로그인이 아직 안 됨 | Claude Code에서 `/ag-login` 실행 (SSH 환경은 `/ag-login --manual`) |
+| **MCP 서버 연결 실패: `Cannot find module …/server/dist/index.js`** | v1.4.1 이전 버전을 GitHub에서 설치 — 빌드된 서버가 저장소에 없었고 마켓플레이스 설치는 빌드를 하지 않음 | 위 [업데이트 방법](#-업데이트-방법-복사해서-바로-실행)대로 플러그인 업데이트 — v1.4.1부터 미리 빌드된 번들이 들어 있음 |
 | **업데이트했는데 새 커맨드가 안 보임** | `server/dist/` 재빌드 또는 플러그인 리로드 누락 | 위 [업데이트 블록](#-업데이트-방법-복사해서-바로-실행) 실행 후 Claude Code에서 `/reload-plugins` 입력 |
 | **`BRIDGE_BUSY`** | 현재 폴더에서 이전 위임 작업이 아직 `RUNNING` 중 | `/ag-jobs`로 진행 상황 확인하거나 `/ag-cancel`로 안전 중단 |
 | **Windows 공백 포함 폴더 경로 오류** | 경로에 큰따옴표 누락 | 경로 전체를 큰따옴표로 감싸세요: `claude --plugin-dir "C:\My Plugins\claude-antigravity-plugin"` |
