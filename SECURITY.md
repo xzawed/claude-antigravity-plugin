@@ -36,7 +36,7 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S23e`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S24g`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
@@ -56,7 +56,10 @@ This plugin delegates file edits, browser automation, and verification commands 
    - `maskSecrets()` redacts configured secrets plus Google API keys (`AIza...`), Google OAuth tokens (`ya29....`) & authorization codes (`4/0...`), OpenAI/Anthropic keys (`sk-...`), GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`), and `Bearer` headers across MCP responses, `report.md`, `agy-cli.log`, and `stderr`.
 4. **Lossless Rollback & Process Hygiene (`server/src/git-guard.ts`, `server/src/jobs.ts`, `server/src/sessions.ts`):**
    - Snapshots working trees via `git stash create` pinned under `refs/ag-bridge/checkpoints/<taskId>` without altering `HEAD` or the user's `git stash list`.
-   - On rollback, pre-existing untracked files stay in place, even ones the agent staged or committed (`TC-S23`, `TC-S23b`). Their content is not snapshotted, so an agent's edit inside one is not undone.
+   - On rollback, pre-existing untracked files stay in place, even ones the agent staged or committed (`TC-S23`, `TC-S23b`).
+   - Rollback deletes nothing. What it removes from the work tree is moved under `.ag-bridge/recovery/<taskId>/` (`TC-S24`, `TC-S24b`).
+   - Pre-existing untracked files are copied there at checkpoint time, within 2,000 files and 50 MB. Rollback puts back the ones the agent edited or deleted, reading only the task's own copy and never writing through a link (`TC-S24c` ~ `TC-S24g`).
+   - The state before rollback is recorded (`preRollbackHead`, `refs/ag-bridge/pre-rollback/<taskId>`), so the rollback itself can be undone (`TC-S24e`).
    - Rollback refuses, changing nothing, when `HEAD` names a different branch than at the checkpoint (`TC-S23d`). It applies a dirty snapshot onto the commit the snapshot was taken on, so no merge runs, and no repository merge driver either (`TC-S23c`).
    - Rollback deletes untracked files only against a recorded baseline. If git could not list them at checkpoint time, no checkpoint is made. A manifest without a baseline makes rollback remove no untracked file and warn (`TC-S22`, `TC-S22b`). On Windows and macOS the listing folds letter case, so a tracked file the agent renamed only in case is not taken for an untracked one (`TC-S22c`).
    - Each git command is cut off after 120 s (`AG_GIT_TIMEOUT_MS`), so a stalled filter cannot freeze the server (`TC-U34`). On Windows, where `git` is usually Git for Windows' launcher, the real git and the filters it started are ended too, rather than left holding the work tree (`TC-U34b`).

@@ -408,7 +408,7 @@ By default, the plugin runs safely (`agy_mode: "accept-edits"`, `agy_sandbox: tr
 
 | Protection Layer | Plain-English Guarantee |
 | :--- | :--- |
-| **Lossless Git Guard** | Before Antigravity starts, it snapshots every modified, staged, and unstaged tracked file and records which untracked files already exist. `/ag-rollback` restores the tracked files and removes only the untracked files that appeared during the task, so your own notes and drafts stay even if the agent staged or committed them. Their content is not snapshotted, though: an agent's edit inside one of them stays. |
+| **Lossless Git Guard** | Before Antigravity starts, it snapshots every modified, staged, and unstaged tracked file and records which untracked files already exist. It also copies your untracked notes and drafts aside (up to 2,000 files and 50 MB). `/ag-rollback` restores the tracked files, puts back any of your files the agent edited or deleted, and moves what the agent created into `.ag-bridge/recovery/` instead of deleting it. It records the state it rolled back from, so the rollback itself can be undone. |
 | **Fail-Closed Path Guard** | Even before checking providers, blocks edits to `.git/`, `.env*`, `node_modules/`, and `.ag-bridge/config.json`, and stops `../` or symlink escapes outside `lockedPaths`. |
 | **Atomic Bridge, Never Committed** | Keeps `.ag-bridge/` and the handoff workflow file out of git *without editing your tracked files*: inside a repository they are listed in the local-only `.git/info/exclude`; outside one, `.ag-bridge/` goes to `.gitignore`. |
 | **Secret Redaction** | API keys, OAuth authorization codes, and tokens are automatically replaced with `[REDACTED]` in logs, reports, and error responses. |
