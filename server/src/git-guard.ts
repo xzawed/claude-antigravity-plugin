@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertSafeTaskId, getBridgeDir } from './bridge-fs.js';
-import { requireExecutable } from './exec-path.js';
+import { requireExecutable, resolveExecutable } from './exec-path.js';
 import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './types.js';
 
 /**
@@ -35,17 +35,121 @@ function gitTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
 }
 
-function runGit(workspaceRoot: string, args: string[], input?: string): string {
-  // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).
-  return execFileSync(requireExecutable('git'), [...NO_REPO_COMMANDS, ...args], {
-    cwd: workspaceRoot,
-    encoding: 'utf8',
-    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-    input,
-    timeout: gitTimeoutMs(),
-    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
-    maxBuffer: 64 * 1024 * 1024,
-  }).trimEnd();
+export interface PosixGroupScan {
+  members: number;
+  includesSelf: boolean;
+}
+
+function scanPosixGroup(pgid: number): PosixGroupScan {
+  const psPath = resolveExecutable('ps');
+  if (!psPath) {
+    return { members: 0, includesSelf: false };
+  }
+  try {
+    const res = spawnSync(psPath, ['-eo', 'pid=,pgid='], {
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    });
+    if (res.status !== 0 || typeof res.stdout !== 'string') {
+      return { members: 0, includesSelf: false };
+    }
+    let members = 0;
+    let includesSelf = false;
+    for (const line of res.stdout.split(/\r?\n/)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 2 && Number(parts[1]) === pgid) {
+        if (Number(parts[0]) === process.pid) {
+          includesSelf = true;
+        } else {
+          members += 1;
+        }
+      }
+    }
+    return { members, includesSelf };
+  } catch {
+    return { members: 0, includesSelf: false };
+  }
+}
+
+/**
+ * Resolve a POSIX wrapper that places the child git process in its own process group (`PGID === pid`)
+ * before `exec`ing `gitBin` in-place. Node.js `spawnSync` does not honor `detached: true`, so without
+ * this wrapper a timed-out git's clean/smudge filter children are reparented to PID 1 while sharing
+ * the MCP server's own process group.
+ * - Linux: `setsid -- <git> ...` (native util-linux binary; child is not a group leader so no fork)
+ * - macOS / fallback: `perl -e 'setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127' <git> ...`
+ */
+function buildPosixGitCommand(
+  gitBin: string,
+  gitArgs: string[],
+): { command: string; args: string[]; isolatedGroup: boolean } {
+  const setsidPath = resolveExecutable('setsid');
+  if (setsidPath) {
+    return {
+      command: setsidPath,
+      args: ['--', gitBin, ...gitArgs],
+      isolatedGroup: true,
+    };
+  }
+  const perlPath = resolveExecutable('perl');
+  if (perlPath) {
+    return {
+      command: perlPath,
+      args: ['-e', 'setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127', gitBin, ...gitArgs],
+      isolatedGroup: true,
+    };
+  }
+  return {
+    command: gitBin,
+    args: gitArgs,
+    isolatedGroup: false,
+  };
+}
+
+/**
+ * End any filter/helper subprocesses left running in a timed-out git's POSIX process group.
+ * Because `tryRunGit` places POSIX git calls in their own process group (`PGID === pid`), any
+ * clean/smudge filter spawned by git inherits that PGID even after git exits and is reaped, so
+ * `kill(-pgid, 'SIGKILL')` stops the whole tree without racing reparenting to PID 1
+ * (ARC-003 §5.4, TC-U34d ~ TC-U34e).
+ */
+export function endPosixLeftovers(
+  pgid: number,
+  killFn: (pid: number, signal?: NodeJS.Signals | number) => boolean = process.kill.bind(process),
+  scanFn: (pgid: number) => PosixGroupScan = scanPosixGroup,
+): number {
+  if (!Number.isInteger(pgid) || pgid <= 1 || pgid === process.pid) {
+    return 0;
+  }
+  const firstScan = scanFn(pgid);
+  if (firstScan.includesSelf) {
+    return 0;
+  }
+  try {
+    killFn(-pgid, 0);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ESRCH') {
+      return 0;
+    }
+  }
+  try {
+    killFn(-pgid, 'SIGKILL');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ESRCH') {
+      return 0;
+    }
+  }
+  const secondScan = scanFn(pgid);
+  if (!secondScan.includesSelf && secondScan.members > 0) {
+    try {
+      killFn(-pgid, 'SIGKILL');
+    } catch {
+      // ignore
+    }
+  }
+  return Math.max(firstScan.members + (secondScan.includesSelf ? 0 : secondScan.members), 1);
 }
 
 /**
@@ -101,32 +205,70 @@ function tryRunGit(
   input?: string,
 ): { ok: boolean; stdout: string; stderr: string; timedOut: boolean; leftoversEnded: number } {
   const startedAt = new Date();
+  let gitBin: string;
   try {
-    const stdout = runGit(workspaceRoot, args, input);
-    return { ok: true, stdout, stderr: '', timedOut: false, leftoversEnded: 0 };
+    // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).
+    gitBin = requireExecutable('git');
   } catch (err) {
-    const rawStderr =
-      err && typeof err === 'object' && 'stderr' in err
-        ? String((err as { stderr?: unknown }).stderr ?? '')
-        : err instanceof Error
-          ? err.message
-          : String(err);
-    const timedOut = Boolean(err && typeof err === 'object' && (err as { code?: unknown }).code === 'ETIMEDOUT');
-    const pid = err && typeof err === 'object' ? (err as { pid?: unknown }).pid : undefined;
-    const leftoversEnded =
-      timedOut && process.platform === 'win32' && typeof pid === 'number' && Number.isInteger(pid) && pid > 0
-        ? endWindowsLeftovers(pid, startedAt, new Date())
-        : 0;
-    const cleanup =
-      leftoversEnded > 0
-        ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? '' : 'es'} it left running)`
-        : '';
-    const stderr =
-      timedOut && rawStderr.trim().length === 0
-        ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}`
-        : rawStderr;
-    return { ok: false, stdout: '', stderr, timedOut, leftoversEnded };
+    const stderr = err instanceof Error ? err.message : String(err);
+    return { ok: false, stdout: '', stderr, timedOut: false, leftoversEnded: 0 };
   }
+
+  const fullGitArgs = [...NO_REPO_COMMANDS, ...args];
+  const launch =
+    process.platform === 'win32'
+      ? { command: gitBin, args: fullGitArgs, isolatedGroup: false }
+      : buildPosixGitCommand(gitBin, fullGitArgs);
+
+  const res = spawnSync(launch.command, launch.args, {
+    cwd: workspaceRoot,
+    encoding: 'utf8',
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    input,
+    timeout: gitTimeoutMs(),
+    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+
+  if (!res.error && res.status === 0 && res.signal === null) {
+    return {
+      ok: true,
+      stdout: (res.stdout ?? '').trimEnd(),
+      stderr: '',
+      timedOut: false,
+      leftoversEnded: 0,
+    };
+  }
+
+  const errCode = (res.error as NodeJS.ErrnoException | undefined)?.code;
+  const timedOut = errCode === 'ETIMEDOUT';
+  const pid = res.pid;
+  const leftoversEnded =
+    timedOut && typeof pid === 'number' && Number.isInteger(pid) && pid > 0
+      ? process.platform === 'win32'
+        ? endWindowsLeftovers(pid, startedAt, new Date())
+        : launch.isolatedGroup
+          ? endPosixLeftovers(pid)
+          : 0
+      : 0;
+  const cleanup =
+    leftoversEnded > 0
+      ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? '' : 'es'} it left running)`
+      : '';
+  const rawStderr =
+    typeof res.stderr === 'string' && res.stderr.length > 0
+      ? res.stderr
+      : res.error instanceof Error
+        ? res.error.message
+        : res.error
+          ? String(res.error)
+          : '';
+  const stderr =
+    timedOut && rawStderr.trim().length === 0
+      ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}`
+      : rawStderr;
+  return { ok: false, stdout: '', stderr, timedOut, leftoversEnded };
 }
 
 const isBridgePath = (p: string): boolean => p === '.ag-bridge' || p.startsWith('.ag-bridge/');
