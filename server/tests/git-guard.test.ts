@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createCheckpoint, getGitInfo, rollbackCheckpoint } from '../src/git-guard.js';
+import {
+  createCheckpoint,
+  getGitInfo,
+  listGitChangedFiles,
+  listUntrackedFiles,
+  rollbackCheckpoint,
+} from '../src/git-guard.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
 function git(cwd: string, args: string[]): string {
@@ -81,11 +87,91 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    // retries: a filter process git left behind (TC-U34) may still hold the folder for a moment
+    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
   });
 
   afterAll(() => {
     if (fakeNodeDir) fs.rmSync(fakeNodeDir, { recursive: true, force: true });
+  });
+
+  const manifestFor = (taskId: string, cp: ReturnType<typeof createCheckpoint>, withBaseline: boolean): BridgeManifest => ({
+    schemaVersion: 1,
+    taskId,
+    title: taskId,
+    mode: 'api',
+    status: 'VERIFIED',
+    lockedPaths: ['.'],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    gitCheckpointRef: cp.checkpointRef,
+    gitCheckpointIsStash: cp.isStashSnapshot,
+    ...(withBaseline ? { gitUntrackedBaseline: cp.untrackedBaseline } : {}),
+    artifacts: [],
+  });
+
+  it('TC-S22: a rollback whose checkpoint has no untracked baseline deletes no untracked file', () => {
+    // Without a baseline nothing tells the user's own untracked files from the agent's; the old
+    // code treated "unknown" as "none" and deleted every untracked file.
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'user-notes.txt'), 'mine\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-no-baseline', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'agent-new.ts'), 'export {};\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-no-baseline', cp, false));
+    expect(fs.existsSync(path.join(tmpRoot, 'user-notes.txt'))).toBe(true);
+    expect(res.removedUntrackedFiles).toEqual([]);
+    expect(res.untrackedBaselineMissing).toBe(true);
+  });
+
+  it('TC-S22b: a failed untracked-file listing is not mistaken for "no untracked files"', () => {
+    expect(listUntrackedFiles(tmpRoot)).toBeUndefined(); // not a repository: git fails
+    initRepo(tmpRoot);
+    expect(listUntrackedFiles(tmpRoot)).toEqual([]);
+  });
+
+  it('TC-U35: rollback removes an agent file with a non-ASCII name and keeps the user\'s', () => {
+    // git quotes such names ("\354\202\254…") unless asked for -z output (measured: the agent's
+    // 에이전트결과.txt survived a rollback).
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, '사용자 메모.txt'), 'mine\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-names', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, '에이전트결과.txt'), 'agent\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-names', cp, true));
+    expect(res.removedUntrackedFiles).toEqual(['에이전트결과.txt']);
+    expect(fs.existsSync(path.join(tmpRoot, '에이전트결과.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpRoot, '사용자 메모.txt'))).toBe(true);
+  });
+
+  it('TC-U35b: changed files with non-ASCII names are reported as named', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, '설정.json'), '{}\n', 'utf8');
+    git(tmpRoot, ['add', '설정.json']);
+    git(tmpRoot, ['commit', '-qm', 'add settings']);
+    fs.writeFileSync(path.join(tmpRoot, '설정.json'), '{"a":1}\n', 'utf8');
+    expect(listGitChangedFiles(tmpRoot)).toEqual(['설정.json']);
+  });
+
+  it('TC-U34: a git call that does not answer within the time limit is cut off', () => {
+    // Clean filters stay on by design (ARC-003 §8); a repository's filter can stall `git status`.
+    initRepo(tmpRoot);
+    const slow = path.join(tmpRoot, '.git', 'slow-filter.sh');
+    fs.writeFileSync(slow, '#!/bin/sh\nsleep 4\ncat\n', { mode: 0o755 });
+    git(tmpRoot, ['config', 'filter.slow.clean', slow.replace(/\\/g, '/')]);
+    fs.writeFileSync(path.join(tmpRoot, '.gitattributes'), 'app.ts filter=slow\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 7;\n', 'utf8');
+
+    process.env.AG_GIT_TIMEOUT_MS = '1000';
+    try {
+      const started = Date.now();
+      const info = getGitInfo(tmpRoot);
+      expect(Date.now() - started).toBeLessThan(3000);
+      expect(info.isGitRepo).toBe(false);
+      expect(info.error).toContain('1000 ms');
+    } finally {
+      delete process.env.AG_GIT_TIMEOUT_MS;
+    }
   });
 
   it('TC-U07: creates clean checkpoint and rolls back modified + newly created files', () => {

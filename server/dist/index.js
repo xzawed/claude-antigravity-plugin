@@ -59618,29 +59618,39 @@ var NO_REPO_COMMANDS = [
   "-c",
   "protocol.allow=never"
 ];
+var DEFAULT_GIT_TIMEOUT_MS = 12e4;
+function gitTimeoutMs() {
+  const configured = Number(process.env.AG_GIT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
+}
 function runGit(workspaceRoot, args) {
   return execFileSync(requireExecutable("git"), [...NO_REPO_COMMANDS, ...args], {
     cwd: workspaceRoot,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: gitTimeoutMs(),
+    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
+    maxBuffer: 64 * 1024 * 1024
   }).trimEnd();
 }
 function tryRunGit(workspaceRoot, args) {
   try {
     const stdout = runGit(workspaceRoot, args);
-    return { ok: true, stdout, stderr: "" };
+    return { ok: true, stdout, stderr: "", timedOut: false };
   } catch (err) {
     const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
-    return { ok: false, stdout: "", stderr };
+    const timedOut = Boolean(err && typeof err === "object" && err.code === "ETIMEDOUT");
+    return { ok: false, stdout: "", stderr, timedOut };
   }
 }
+var isBridgePath = (p) => p === ".ag-bridge" || p.startsWith(".ag-bridge/");
 function isTrackedFile(workspaceRoot, pathspec) {
   return tryRunGit(workspaceRoot, ["ls-files", "--error-unmatch", "--", pathspec]).ok;
 }
 function getGitInfo(workspaceRoot) {
   const statusRes = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-b"]);
   if (!statusRes.ok) {
-    return { isGitRepo: false };
+    return statusRes.timedOut ? { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms` } : { isGitRepo: false };
   }
   const lines = statusRes.stdout.split(/\r?\n/).filter((l) => l.length > 0);
   const header = lines[0] ?? "";
@@ -59662,43 +59672,43 @@ function getGitInfo(workspaceRoot) {
   };
 }
 function listGitChangedFiles(workspaceRoot) {
-  const res = tryRunGit(workspaceRoot, ["status", "--porcelain"]);
-  if (!res.ok || !res.stdout.trim()) {
+  const res = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-z"]);
+  if (!res.ok) {
     return [];
   }
   const files = /* @__PURE__ */ new Set();
-  for (const line of res.stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const rawPath = line.slice(3).trim();
-    const finalPath = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop().trim() : rawPath;
-    const unquoted = finalPath.replace(/^"|"$/g, "");
-    if (unquoted && !unquoted.startsWith(".ag-bridge/") && unquoted !== ".ag-bridge") {
-      files.add(unquoted);
-    }
+  const entries = res.stdout.split("\0");
+  for (let i2 = 0; i2 < entries.length; i2++) {
+    const entry = entries[i2];
+    if (entry.length < 4) continue;
+    if (entry[0] === "R" || entry[0] === "C") i2++;
+    const file2 = entry.slice(3);
+    if (!isBridgePath(file2)) files.add(file2);
   }
   return Array.from(files).sort();
 }
 function listUntrackedFiles(workspaceRoot) {
-  const res = tryRunGit(workspaceRoot, ["ls-files", "--others", "--exclude-standard"]);
-  if (!res.ok || !res.stdout.trim()) {
-    return [];
+  const res = tryRunGit(workspaceRoot, ["ls-files", "-z", "--others", "--exclude-standard"]);
+  if (!res.ok) {
+    return void 0;
   }
-  return res.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith(".ag-bridge/") && line !== ".ag-bridge").sort();
+  return res.stdout.split("\0").filter((file2) => file2.length > 0 && !isBridgePath(file2)).sort();
 }
 function createCheckpoint(workspaceRoot, taskId, policy) {
   const gitInfo = getGitInfo(workspaceRoot);
   if (!gitInfo.isGitRepo) {
+    const why = gitInfo.error ?? "Workspace is not a Git repository";
     if (policy === "required") {
       throw new AgPluginError(
         "GIT_CHECKPOINT_FAILED",
-        'Workspace is not a Git repository and git_guard policy is set to "required".'
+        `${why} and git_guard policy is set to "required".`
       );
     }
     return {
       checkpointRef: void 0,
       isStashSnapshot: false,
       untrackedBaseline: [],
-      warning: "Workspace is not a Git repository; automatic rollback checkpoint is disabled."
+      warning: `${why}; automatic rollback checkpoint is disabled.`
     };
   }
   const headRes = tryRunGit(workspaceRoot, ["rev-parse", "--verify", "HEAD"]);
@@ -59717,6 +59727,18 @@ function createCheckpoint(workspaceRoot, taskId, policy) {
     };
   }
   const untrackedBaseline = listUntrackedFiles(workspaceRoot);
+  if (untrackedBaseline === void 0) {
+    const why = "Git could not list the untracked files";
+    if (policy === "required") {
+      throw new AgPluginError("GIT_CHECKPOINT_FAILED", `${why}; no checkpoint can be rolled back safely.`);
+    }
+    return {
+      checkpointRef: void 0,
+      isStashSnapshot: false,
+      untrackedBaseline: void 0,
+      warning: `${why}; automatic rollback checkpoint is disabled.`
+    };
+  }
   const stashRes = tryRunGit(workspaceRoot, ["stash", "create", `ag-bridge-checkpoint-${taskId}`]);
   if (!stashRes.ok) {
     throw new AgPluginError(
@@ -59789,17 +59811,20 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
-  const baselineSet = new Set(manifest.gitUntrackedBaseline ?? []);
-  const currentUntracked = listUntrackedFiles(workspaceRoot);
+  const baseline = manifest.gitUntrackedBaseline;
+  const untrackedBaselineMissing = baseline === void 0;
   const removedUntrackedFiles = [];
-  for (const relFile of currentUntracked) {
-    if (baselineSet.has(relFile)) {
-      continue;
-    }
-    const fullPath = path3.resolve(workspaceRoot, relFile);
-    if (fs3.existsSync(fullPath)) {
-      fs3.rmSync(fullPath, { recursive: true, force: true });
-      removedUntrackedFiles.push(relFile);
+  if (!untrackedBaselineMissing) {
+    const baselineSet = new Set(baseline);
+    for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
+      if (baselineSet.has(relFile)) {
+        continue;
+      }
+      const fullPath = path3.resolve(workspaceRoot, relFile);
+      if (fs3.existsSync(fullPath)) {
+        fs3.rmSync(fullPath, { recursive: true, force: true });
+        removedUntrackedFiles.push(relFile);
+      }
     }
   }
   tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
@@ -59808,7 +59833,8 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   return {
     restoredCheckpointRef: ref,
     revertedTrackedFiles,
-    removedUntrackedFiles
+    removedUntrackedFiles,
+    untrackedBaselineMissing
   };
 }
 
@@ -82713,7 +82739,12 @@ async function handleRollbackAgTask(input2) {
     taskId: targetManifest.taskId,
     restoredCheckpointRef: rollbackRes.restoredCheckpointRef,
     revertedTrackedFiles: rollbackRes.revertedTrackedFiles,
-    removedUntrackedFiles: rollbackRes.removedUntrackedFiles
+    removedUntrackedFiles: rollbackRes.removedUntrackedFiles,
+    ...rollbackRes.untrackedBaselineMissing ? {
+      warnings: [
+        "Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed."
+      ]
+    } : {}
   };
 }
 function createAntigravityMcpServer(deps = {}) {

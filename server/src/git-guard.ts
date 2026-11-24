@@ -21,19 +21,37 @@ const NO_REPO_COMMANDS = [
   'protocol.allow=never',
 ];
 
+/**
+ * How long Git Guard waits for one git command. execFileSync blocks the whole MCP server, and a
+ * repository's clean filter (left on, above) can stall `git status` for as long as it likes
+ * (TC-U34). AG_GIT_TIMEOUT_MS raises it for very large repositories.
+ */
+const DEFAULT_GIT_TIMEOUT_MS = 120_000;
+
+function gitTimeoutMs(): number {
+  const configured = Number(process.env.AG_GIT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
+}
+
 function runGit(workspaceRoot: string, args: string[]): string {
   // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).
   return execFileSync(requireExecutable('git'), [...NO_REPO_COMMANDS, ...args], {
     cwd: workspaceRoot,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: gitTimeoutMs(),
+    // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
+    maxBuffer: 64 * 1024 * 1024,
   }).trimEnd();
 }
 
-function tryRunGit(workspaceRoot: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
+function tryRunGit(
+  workspaceRoot: string,
+  args: string[],
+): { ok: boolean; stdout: string; stderr: string; timedOut: boolean } {
   try {
     const stdout = runGit(workspaceRoot, args);
-    return { ok: true, stdout, stderr: '' };
+    return { ok: true, stdout, stderr: '', timedOut: false };
   } catch (err) {
     const stderr =
       err && typeof err === 'object' && 'stderr' in err
@@ -41,9 +59,12 @@ function tryRunGit(workspaceRoot: string, args: string[]): { ok: boolean; stdout
         : err instanceof Error
           ? err.message
           : String(err);
-    return { ok: false, stdout: '', stderr };
+    const timedOut = Boolean(err && typeof err === 'object' && (err as { code?: unknown }).code === 'ETIMEDOUT');
+    return { ok: false, stdout: '', stderr, timedOut };
   }
 }
+
+const isBridgePath = (p: string): boolean => p === '.ag-bridge' || p.startsWith('.ag-bridge/');
 
 /** Whether git tracks a file matching `pathspec` (pathspec magic allowed). False outside a repository. */
 export function isTrackedFile(workspaceRoot: string, pathspec: string): boolean {
@@ -54,7 +75,9 @@ export function getGitInfo(workspaceRoot: string): GitStatusInfo {
   // Single subprocess (`git status --porcelain=v1 -b`) reduces latency ~3x vs 3 separate git calls
   const statusRes = tryRunGit(workspaceRoot, ['status', '--porcelain=v1', '-b']);
   if (!statusRes.ok) {
-    return { isGitRepo: false };
+    return statusRes.timedOut
+      ? { isGitRepo: false, error: `Git did not answer within ${gitTimeoutMs()} ms` }
+      : { isGitRepo: false };
   }
 
   const lines = statusRes.stdout.split(/\r?\n/).filter((l) => l.length > 0);
@@ -79,41 +102,47 @@ export function getGitInfo(workspaceRoot: string): GitStatusInfo {
   };
 }
 
+// Path lists are read with -z: without it git quotes non-ASCII names ("\354\202\254…"), which then
+// name no file — a rollback left the agent's 에이전트결과.txt behind (TC-U35).
+
 export function listGitChangedFiles(workspaceRoot: string): string[] {
-  const res = tryRunGit(workspaceRoot, ['status', '--porcelain']);
-  if (!res.ok || !res.stdout.trim()) {
+  const res = tryRunGit(workspaceRoot, ['status', '--porcelain=v1', '-z']);
+  if (!res.ok) {
     return [];
   }
   const files = new Set<string>();
-  for (const line of res.stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    // Porcelain format: XY <path> (or XY <old> -> <new>)
-    const rawPath = line.slice(3).trim();
-    const finalPath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop()!.trim() : rawPath;
-    const unquoted = finalPath.replace(/^"|"$/g, '');
-    if (unquoted && !unquoted.startsWith('.ag-bridge/') && unquoted !== '.ag-bridge') {
-      files.add(unquoted);
-    }
+  const entries = res.stdout.split('\0');
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (entry.length < 4) continue;
+    // "XY path", and for a rename or copy the next entry is the original path
+    if (entry[0] === 'R' || entry[0] === 'C') i++;
+    const file = entry.slice(3);
+    if (!isBridgePath(file)) files.add(file);
   }
   return Array.from(files).sort();
 }
 
-export function listUntrackedFiles(workspaceRoot: string): string[] {
-  const res = tryRunGit(workspaceRoot, ['ls-files', '--others', '--exclude-standard']);
-  if (!res.ok || !res.stdout.trim()) {
-    return [];
+/**
+ * The untracked files, or undefined when git could not list them. A failed listing is not "none":
+ * a baseline recorded as [] would make a later rollback delete every untracked file (TC-S22b).
+ */
+export function listUntrackedFiles(workspaceRoot: string): string[] | undefined {
+  const res = tryRunGit(workspaceRoot, ['ls-files', '-z', '--others', '--exclude-standard']);
+  if (!res.ok) {
+    return undefined;
   }
   return res.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('.ag-bridge/') && line !== '.ag-bridge')
+    .split('\0')
+    .filter((file) => file.length > 0 && !isBridgePath(file))
     .sort();
 }
 
 export interface CheckpointResult {
   checkpointRef?: string;
   isStashSnapshot: boolean;
-  untrackedBaseline: string[];
+  /** Untracked files before delegation; undefined when git could not list them. */
+  untrackedBaseline: string[] | undefined;
   warning?: string;
 }
 
@@ -124,17 +153,18 @@ export function createCheckpoint(
 ): CheckpointResult {
   const gitInfo = getGitInfo(workspaceRoot);
   if (!gitInfo.isGitRepo) {
+    const why = gitInfo.error ?? 'Workspace is not a Git repository';
     if (policy === 'required') {
       throw new AgPluginError(
         'GIT_CHECKPOINT_FAILED',
-        'Workspace is not a Git repository and git_guard policy is set to "required".',
+        `${why} and git_guard policy is set to "required".`,
       );
     }
     return {
       checkpointRef: undefined,
       isStashSnapshot: false,
       untrackedBaseline: [],
-      warning: 'Workspace is not a Git repository; automatic rollback checkpoint is disabled.',
+      warning: `${why}; automatic rollback checkpoint is disabled.`,
     };
   }
 
@@ -155,6 +185,19 @@ export function createCheckpoint(
   }
 
   const untrackedBaseline = listUntrackedFiles(workspaceRoot);
+  if (untrackedBaseline === undefined) {
+    // Without the list a rollback could not tell the user's untracked files from the agent's.
+    const why = 'Git could not list the untracked files';
+    if (policy === 'required') {
+      throw new AgPluginError('GIT_CHECKPOINT_FAILED', `${why}; no checkpoint can be rolled back safely.`);
+    }
+    return {
+      checkpointRef: undefined,
+      isStashSnapshot: false,
+      untrackedBaseline: undefined,
+      warning: `${why}; automatic rollback checkpoint is disabled.`,
+    };
+  }
   const stashRes = tryRunGit(workspaceRoot, ['stash', 'create', `ag-bridge-checkpoint-${taskId}`]);
   if (!stashRes.ok) {
     throw new AgPluginError(
@@ -191,6 +234,8 @@ export interface RollbackResult {
   restoredCheckpointRef: string;
   revertedTrackedFiles: string[];
   removedUntrackedFiles: string[];
+  /** The checkpoint recorded no untracked baseline, so no untracked file was removed. */
+  untrackedBaselineMissing: boolean;
 }
 
 export function rollbackCheckpoint(
@@ -243,19 +288,24 @@ export function rollbackCheckpoint(
     }
   }
 
-  // Remove only untracked files created after delegation began
-  const baselineSet = new Set(manifest.gitUntrackedBaseline ?? []);
-  const currentUntracked = listUntrackedFiles(workspaceRoot);
+  // Remove only untracked files created after delegation began. With no baseline (an older
+  // manifest, or one written by hand) nothing tells the user's files from the agent's: keep all
+  // (TC-S22). A failed listing now removes nothing either.
+  const baseline = manifest.gitUntrackedBaseline;
+  const untrackedBaselineMissing = baseline === undefined;
   const removedUntrackedFiles: string[] = [];
 
-  for (const relFile of currentUntracked) {
-    if (baselineSet.has(relFile)) {
-      continue;
-    }
-    const fullPath = path.resolve(workspaceRoot, relFile);
-    if (fs.existsSync(fullPath)) {
-      fs.rmSync(fullPath, { recursive: true, force: true });
-      removedUntrackedFiles.push(relFile);
+  if (!untrackedBaselineMissing) {
+    const baselineSet = new Set(baseline);
+    for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
+      if (baselineSet.has(relFile)) {
+        continue;
+      }
+      const fullPath = path.resolve(workspaceRoot, relFile);
+      if (fs.existsSync(fullPath)) {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+        removedUntrackedFiles.push(relFile);
+      }
     }
   }
 
@@ -269,5 +319,6 @@ export function rollbackCheckpoint(
     restoredCheckpointRef: ref,
     revertedTrackedFiles,
     removedUntrackedFiles,
+    untrackedBaselineMissing,
   };
 }
