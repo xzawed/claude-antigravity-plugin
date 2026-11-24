@@ -118,6 +118,8 @@ describe('exec-path: programs come from absolute PATH entries only (TC-S12, TC-S
       { re: /\bshell:\s*true\b/g, why: 'shell: true (the shell searches the cwd)' },
       // A value, not a list entry: `isWin ? 'cmd.exe' : bin`, `command: 'cmd.exe'`, `= 'cmd.exe'`.
       { re: /[=?:]\s*(['"`])cmd\.exe\1/gi, why: 'bare cmd.exe value (use windowsShell())' },
+      // git runs only through git-guard.ts's runGit, which turns repository commands off (TC-S20).
+      { re: /(?:require|resolve)Executable\(\s*(['"`])git(?:\.exe)?\1/g, why: 'git launched outside git-guard.ts' },
     ];
 
     const violations: string[] = [];
@@ -128,6 +130,7 @@ describe('exec-path: programs come from absolute PATH entries only (TC-S12, TC-S
         .replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
       const rel = path.relative(srcDir, file).split(path.sep).join('/');
       for (const { re, why } of rules) {
+        if (rel === 'git-guard.ts' && why.startsWith('git launched')) continue;
         for (const m of code.matchAll(re)) {
           const line = code.slice(0, m.index).split('\n').length;
           violations.push(`${rel}:${line} ${why}`);

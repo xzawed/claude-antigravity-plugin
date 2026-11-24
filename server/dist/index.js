@@ -59610,8 +59610,9 @@ function windowsShell(env = process.env) {
 import { execFileSync } from "node:child_process";
 import fs3 from "node:fs";
 import path3 from "node:path";
+var NO_REPO_COMMANDS = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
 function runGit(workspaceRoot, args) {
-  return execFileSync(requireExecutable("git"), args, {
+  return execFileSync(requireExecutable("git"), [...NO_REPO_COMMANDS, ...args], {
     cwd: workspaceRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
