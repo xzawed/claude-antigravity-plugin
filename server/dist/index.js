@@ -59638,14 +59638,17 @@ function runGit(workspaceRoot, args, input2) {
 function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
-    "$all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CreationDate)",
-    `$from = [datetime]::Parse('${startedAt.toISOString()}').ToUniversalTime().AddSeconds(-2)`,
-    `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddSeconds(2)`,
-    `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.CreationDate.ToUniversalTime() -ge $from -and $_.CreationDate.ToUniversalTime() -le $to })`,
+    "function Get-Procs { @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, @{ n = 'Created'; e = { $_.CreationDate.ToUniversalTime() } }) }",
+    "$all = Get-Procs",
+    `$from = [datetime]::Parse('${startedAt.toISOString()}').ToUniversalTime().AddSeconds(-1)`,
+    `$to = [datetime]::Parse('${cutAt.toISOString()}').ToUniversalTime().AddMilliseconds(250)`,
+    `$queue = @($all | Where-Object { $_.ParentProcessId -eq ${launcherPid} -and $_.Created -ge $from -and $_.Created -le $to })`,
     "$found = @()",
-    "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.CreationDate -ge $p.CreationDate }) }",
+    "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created }) }",
     "foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }",
-    "$found.Count"
+    "$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })",
+    "foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }",
+    "$found.Count + $late.Count"
   ].join("; ");
   try {
     const out = execFileSync(requireExecutable("powershell"), ["-NoProfile", "-NonInteractive", "-Command", script], {
