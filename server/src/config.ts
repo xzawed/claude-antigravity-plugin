@@ -146,6 +146,29 @@ const TRUST_SENSITIVE: Array<[TrustSection, string, (value: unknown) => boolean]
   ['api', 'api_key_env', (v) => v !== undefined && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env],
 ];
 
+/**
+ * Why `.ag-bridge/config.json` may not be the user's own, or undefined when it is: the user's file
+ * is a regular file under a real `.ag-bridge/` directory that git does not track. The pathspec is
+ * case-insensitive because Windows and macOS read `.AG-BRIDGE/CONFIG.JSON` as this file (TC-S18d),
+ * and a link could lead to a file git tracks under another name (TC-S18e).
+ */
+function whyConfigIsNotUsers(workspaceRoot: string): string | undefined {
+  const dir = path.join(workspaceRoot, '.ag-bridge');
+  for (const p of [dir, path.join(dir, 'config.json')]) {
+    try {
+      if (fs.lstatSync(p).isSymbolicLink()) {
+        return 'the file is reached through a link';
+      }
+    } catch {
+      // missing: nothing to read through
+    }
+  }
+  if (isTrackedFile(workspaceRoot, ':(icase).ag-bridge/config.json')) {
+    return 'the file is tracked by git, so the repository may have supplied it';
+  }
+  return undefined;
+}
+
 function applyConfigTrust(
   workspaceRoot: string,
   data: z.infer<typeof PartialBridgeConfigSchema>,
@@ -158,13 +181,14 @@ function applyConfigTrust(
   const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile(section, key)));
 
   // git runs only when the file sets one of these, so an ordinary config costs no process.
-  if (unsafe.length > 0 && isTrackedFile(workspaceRoot, '.ag-bridge/config.json')) {
+  const notOwn = unsafe.length > 0 ? whyConfigIsNotUsers(workspaceRoot) : undefined;
+  if (notOwn) {
     for (const [section, key] of unsafe) {
       const target = merged[section] as unknown as Record<string, unknown>;
       const fallback = (base[section] as unknown as Record<string, unknown>)[key];
       if (fallback === undefined) delete target[key];
       else target[key] = fallback;
-      ignored.push(`${section}.${key} (the file is tracked by git, so the repository may have supplied it)`);
+      ignored.push(`${section}.${key} (${notOwn})`);
     }
   }
 

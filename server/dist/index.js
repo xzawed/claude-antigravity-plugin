@@ -59626,8 +59626,8 @@ function tryRunGit(workspaceRoot, args) {
     return { ok: false, stdout: "", stderr };
   }
 }
-function isTrackedFile(workspaceRoot, relPath) {
-  return tryRunGit(workspaceRoot, ["ls-files", "--error-unmatch", "--", relPath]).ok;
+function isTrackedFile(workspaceRoot, pathspec) {
+  return tryRunGit(workspaceRoot, ["ls-files", "--error-unmatch", "--", pathspec]).ok;
 }
 function getGitInfo(workspaceRoot) {
   const statusRes = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-b"]);
@@ -60114,17 +60114,33 @@ var TRUST_SENSITIVE = [
   ["api", "apiKey", (v) => v !== void 0],
   ["api", "api_key_env", (v) => v !== void 0 && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env]
 ];
+function whyConfigIsNotUsers(workspaceRoot) {
+  const dir = path5.join(workspaceRoot, ".ag-bridge");
+  for (const p of [dir, path5.join(dir, "config.json")]) {
+    try {
+      if (fs5.lstatSync(p).isSymbolicLink()) {
+        return "the file is reached through a link";
+      }
+    } catch {
+    }
+  }
+  if (isTrackedFile(workspaceRoot, ":(icase).ag-bridge/config.json")) {
+    return "the file is tracked by git, so the repository may have supplied it";
+  }
+  return void 0;
+}
 function applyConfigTrust(workspaceRoot, data, merged, base) {
   const ignored = [];
   const fromFile2 = (section, key) => data[section]?.[key];
   const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile2(section, key)));
-  if (unsafe.length > 0 && isTrackedFile(workspaceRoot, ".ag-bridge/config.json")) {
+  const notOwn = unsafe.length > 0 ? whyConfigIsNotUsers(workspaceRoot) : void 0;
+  if (notOwn) {
     for (const [section, key] of unsafe) {
       const target = merged[section];
       const fallback = base[section][key];
       if (fallback === void 0) delete target[key];
       else target[key] = fallback;
-      ignored.push(`${section}.${key} (the file is tracked by git, so the repository may have supplied it)`);
+      ignored.push(`${section}.${key} (${notOwn})`);
     }
   }
   const appPath = merged.subscription.app_path;

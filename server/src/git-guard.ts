@@ -28,9 +28,9 @@ function tryRunGit(workspaceRoot: string, args: string[]): { ok: boolean; stdout
   }
 }
 
-/** Whether git tracks `relPath` (it is in the index). False outside a repository. */
-export function isTrackedFile(workspaceRoot: string, relPath: string): boolean {
-  return tryRunGit(workspaceRoot, ['ls-files', '--error-unmatch', '--', relPath]).ok;
+/** Whether git tracks a file matching `pathspec` (pathspec magic allowed). False outside a repository. */
+export function isTrackedFile(workspaceRoot: string, pathspec: string): boolean {
+  return tryRunGit(workspaceRoot, ['ls-files', '--error-unmatch', '--', pathspec]).ok;
 }
 
 export function getGitInfo(workspaceRoot: string): GitStatusInfo {

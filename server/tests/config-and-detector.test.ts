@@ -352,6 +352,35 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     expect(fromEnv.subscription.agy_dangerously_skip_permissions).toBe(true); // the env var opted in
   });
 
+  it('TC-S18d: a config the repository tracks under another letter case is still the repository\'s', () => {
+    // Windows and macOS read .AG-BRIDGE/CONFIG.JSON as .ag-bridge/config.json (measured on Windows:
+    // a plain pathspec missed it). On a case-sensitive file system no config is read at all.
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmpRoot, '.AG-BRIDGE'));
+    fs.writeFileSync(
+      path.join(tmpRoot, '.AG-BRIDGE', 'CONFIG.JSON'),
+      JSON.stringify({ subscription: { agy_dangerously_skip_permissions: true } }),
+    );
+    git('add', '-f', '.AG-BRIDGE/CONFIG.JSON');
+
+    expect(loadConfig(tmpRoot, {}).subscription.agy_dangerously_skip_permissions).toBe(false);
+  });
+
+  it('TC-S18e: a config reached through a link is not the user\'s own', () => {
+    git('init', '-q');
+    fs.mkdirSync(path.join(tmpRoot, 'docs', 'agb'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpRoot, 'docs', 'agb', 'config.json'),
+      JSON.stringify({ subscription: { agy_sandbox: false } }),
+    );
+    git('add', '-f', 'docs/agb/config.json');
+    fs.symlinkSync(path.join(tmpRoot, 'docs', 'agb'), path.join(tmpRoot, '.ag-bridge'), 'junction');
+
+    const cfg = loadConfig(tmpRoot, {});
+    expect(cfg.subscription.agy_sandbox).toBe(true);
+    expect((cfg.ignoredSettings ?? []).join('\n')).toContain('subscription.agy_sandbox');
+  });
+
   it('TC-S19: check_ag_environment names every ignored setting and how to keep it', () => {
     git('init', '-q');
     writeConfig({ subscription: { agy_sandbox: false } });
