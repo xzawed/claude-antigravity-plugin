@@ -14061,7 +14061,7 @@ var require_node_domexception = __commonJS({
 });
 
 // node_modules/fetch-blob/from.js
-import { statSync, createReadStream, promises as fs10 } from "node:fs";
+import { statSync, createReadStream, promises as fs11 } from "node:fs";
 import { basename } from "node:path";
 var import_node_domexception, stat, blobFromSync, blobFrom, fileFrom, fileFromSync, fromBlob, fromFile, BlobDataItem;
 var init_from = __esm({
@@ -14069,7 +14069,7 @@ var init_from = __esm({
     import_node_domexception = __toESM(require_node_domexception(), 1);
     init_file();
     init_fetch_blob();
-    ({ stat } = fs10);
+    ({ stat } = fs11);
     blobFromSync = (path16, type) => fromBlob(statSync(path16), path16, type);
     blobFrom = (path16, type) => stat(path16).then((stat3) => fromBlob(stat3, path16, type));
     fileFrom = (path16, type) => stat(path16).then((stat3) => fromFile(stat3, path16, type));
@@ -59078,8 +59078,8 @@ var StdioServerTransport = class {
 };
 
 // src/artifacts.ts
-import fs3 from "node:fs";
-import path3 from "node:path";
+import fs6 from "node:fs";
+import path6 from "node:path";
 
 // src/bridge-fs.ts
 import crypto2 from "node:crypto";
@@ -59533,263 +59533,12 @@ function syncHandoffTemplate(workspaceRoot, pluginRoot, options = {}) {
 }
 
 // src/config.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var ExecutionModeSchema = external_exports.enum(["auto", "subscription", "api"]);
-var GitGuardPolicySchema = external_exports.enum(["best_effort", "required"]);
-var TriggerMethodSchema = external_exports.enum(["cli_or_ipc", "cli_only", "clipboard"]);
-var AgyModeSchema = external_exports.enum(["accept-edits", "auto", "plan"]);
-var AgyEffortSchema = external_exports.enum(["low", "medium", "high", "xhigh", "max"]);
-var PartialBridgeConfigSchema = external_exports.object({
-  execution_mode: ExecutionModeSchema.optional(),
-  git_guard: GitGuardPolicySchema.optional(),
-  subscription: external_exports.object({
-    app_path: external_exports.string().min(1).optional(),
-    trigger_method: TriggerMethodSchema.optional(),
-    timeout_sec: external_exports.number().int().min(1).max(3600).optional(),
-    poll_interval_ms: external_exports.number().int().min(100).max(3e4).optional(),
-    agy_mode: AgyModeSchema.optional(),
-    agy_sandbox: external_exports.boolean().optional(),
-    agy_dangerously_skip_permissions: external_exports.boolean().optional(),
-    agy_stream_heartbeat: external_exports.boolean().optional(),
-    agy_model: external_exports.string().min(1).optional(),
-    agy_effort: AgyEffortSchema.optional(),
-    agy_agent: external_exports.string().min(1).optional(),
-    agy_project: external_exports.string().min(1).optional(),
-    agy_remote_agent: external_exports.boolean().optional(),
-    agy_disable_slash_commands: external_exports.boolean().optional(),
-    agy_settings: external_exports.string().min(1).optional()
-  }).partial().optional(),
-  api: external_exports.object({
-    api_key_env: external_exports.string().min(1).optional(),
-    apiKey: external_exports.string().min(1).optional(),
-    model: external_exports.string().min(1).optional(),
-    max_turns: external_exports.number().int().min(1).max(50).optional(),
-    command_timeout_sec: external_exports.number().int().min(5).max(600).optional()
-  }).partial().optional()
-}).strict();
-function getConfigPath(workspaceRoot) {
-  return path2.join(workspaceRoot, ".ag-bridge", "config.json");
-}
-function loadConfig(workspaceRoot, env = process.env) {
-  const envModeRaw = env.AG_DEFAULT_MODE?.trim();
-  const envMode = envModeRaw === "auto" || envModeRaw === "subscription" || envModeRaw === "api" ? envModeRaw : DEFAULT_BRIDGE_CONFIG.execution_mode;
-  const envModel = env.AG_MODEL?.trim() || DEFAULT_BRIDGE_CONFIG.api.model;
-  const envSkipPerm = env.AG_DANGEROUSLY_SKIP_PERMISSIONS === "1" || env.AG_DANGEROUSLY_SKIP_PERMISSIONS?.toLowerCase() === "true";
-  const base = {
-    execution_mode: envMode,
-    git_guard: DEFAULT_BRIDGE_CONFIG.git_guard,
-    subscription: {
-      ...DEFAULT_BRIDGE_CONFIG.subscription,
-      agy_dangerously_skip_permissions: envSkipPerm
-    },
-    api: {
-      ...DEFAULT_BRIDGE_CONFIG.api,
-      model: envModel
-    }
-  };
-  const configPath = getConfigPath(workspaceRoot);
-  if (!fs2.existsSync(configPath)) {
-    return base;
-  }
-  let parsedRaw;
-  try {
-    const content = fs2.readFileSync(configPath, "utf8");
-    parsedRaw = JSON.parse(content);
-  } catch (err) {
-    throw new AgPluginError(
-      "INVALID_CONFIG",
-      `Failed to parse ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-  const parsed = PartialBridgeConfigSchema.safeParse(parsedRaw);
-  if (!parsed.success) {
-    throw new AgPluginError(
-      "INVALID_CONFIG",
-      `Invalid .ag-bridge/config.json: ${parsed.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ")}`
-    );
-  }
-  const data = parsed.data;
-  return {
-    execution_mode: data.execution_mode ?? base.execution_mode,
-    git_guard: data.git_guard ?? base.git_guard,
-    subscription: {
-      ...base.subscription,
-      ...data.subscription ?? {}
-    },
-    api: {
-      ...base.api,
-      ...data.api ?? {}
-    }
-  };
-}
-function resolveApiKey(config2, env = process.env) {
-  const envKey = env[config2.api.api_key_env]?.trim();
-  if (envKey) {
-    return { key: envKey, source: "env" };
-  }
-  const configKey = config2.api.apiKey?.trim();
-  if (configKey) {
-    return { key: configKey, source: "config" };
-  }
-  return { key: void 0, source: "none" };
-}
-function maskSecrets(input2, extraSecrets = [], env = process.env) {
-  let result = input2;
-  const candidates = /* @__PURE__ */ new Set();
-  const envKeys = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
-  for (const k of envKeys) {
-    const val = env[k]?.trim();
-    if (val && val.length >= 8) {
-      candidates.add(val);
-    }
-  }
-  for (const s2 of extraSecrets) {
-    const trimmed = s2?.trim();
-    if (trimmed && trimmed.length >= 8) {
-      candidates.add(trimmed);
-    }
-  }
-  for (const secret of candidates) {
-    result = result.split(secret).join("[REDACTED]");
-  }
-  result = result.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED]");
-  result = result.replace(/ya29\.[0-9A-Za-z._-]{20,}/g, "[REDACTED]");
-  result = result.replace(/\b4\/0[A-Za-z0-9_-]{20,}\b/g, "[REDACTED]");
-  result = result.replace(/\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}\b/g, "[REDACTED]");
-  result = result.replace(/\bgh[pousr]_[0-9A-Za-z]{20,}\b/g, "[REDACTED]");
-  result = result.replace(/\b(Bearer\s+)[A-Za-z0-9\-._~+/=]{16,}/gi, "$1[REDACTED]");
-  return result;
-}
-
-// src/artifacts.ts
-function classifyArtifactKind(filePath) {
-  const ext = path3.extname(filePath).toLowerCase();
-  if ([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(ext)) return "screenshot";
-  if (ext === ".log" || ext === ".txt") return "log";
-  if (ext === ".md") return "report";
-  if (ext === ".json") return "json";
-  return "other";
-}
-function collectArtifactFiles(workspaceRoot, taskId) {
-  const artDir = getArtifactsDir(workspaceRoot, taskId);
-  if (!fs3.existsSync(artDir)) return [];
-  const entries = [];
-  const walk = (dir) => {
-    for (const dirent of fs3.readdirSync(dir, { withFileTypes: true })) {
-      const full = path3.join(dir, dirent.name);
-      if (dirent.isDirectory()) {
-        walk(full);
-      } else if (dirent.isFile()) {
-        try {
-          const stat3 = fs3.statSync(full);
-          entries.push({
-            name: dirent.name,
-            relativePath: path3.relative(workspaceRoot, full).replace(/\\/g, "/"),
-            absolutePath: full,
-            kind: classifyArtifactKind(full),
-            sizeBytes: stat3.size,
-            modifiedAt: stat3.mtime.toISOString()
-          });
-        } catch {
-        }
-      }
-    }
-  };
-  walk(artDir);
-  return entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-}
-function readMaskedLogTail(workspaceRoot, taskId, maxLines) {
-  const logPath = path3.join(getArtifactsDir(workspaceRoot, taskId), "agy-cli.log");
-  if (!fs3.existsSync(logPath)) return void 0;
-  try {
-    const raw = fs3.readFileSync(logPath, "utf8");
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return void 0;
-    return maskSecrets(lines.slice(-Math.max(1, maxLines)).join("\n"));
-  } catch {
-    return void 0;
-  }
-}
-function handleListArtifacts(input2 = {}) {
-  const workspaceRoot = path3.resolve(input2.workspaceRoot ?? process.cwd());
-  const current = readManifest(workspaceRoot);
-  const allManifests = readAllTaskManifests(workspaceRoot);
-  const artifactsRoot = path3.join(getBridgeDir(workspaceRoot), "artifacts");
-  const seenIds = /* @__PURE__ */ new Set();
-  const availableTasks = [];
-  for (const m2 of allManifests) {
-    seenIds.add(m2.taskId);
-    const files = collectArtifactFiles(workspaceRoot, m2.taskId);
-    availableTasks.push({
-      taskId: m2.taskId,
-      title: m2.title,
-      status: m2.status,
-      artifactCount: files.length,
-      updatedAt: m2.updatedAt
-    });
-  }
-  if (fs3.existsSync(artifactsRoot)) {
-    for (const dirent of fs3.readdirSync(artifactsRoot, { withFileTypes: true })) {
-      if (!dirent.isDirectory() || seenIds.has(dirent.name)) continue;
-      const files = collectArtifactFiles(workspaceRoot, dirent.name);
-      availableTasks.push({
-        taskId: dirent.name,
-        title: "(Artifact folder)",
-        status: "IDLE",
-        artifactCount: files.length,
-        updatedAt: files[0]?.modifiedAt ?? (/* @__PURE__ */ new Date(0)).toISOString()
-      });
-    }
-  }
-  const targetTaskId = input2.taskId ?? current?.taskId ?? availableTasks[0]?.taskId;
-  if (!targetTaskId) {
-    return {
-      ok: true,
-      workspaceRoot,
-      artifacts: [],
-      availableTasks: []
-    };
-  }
-  const targetManifest = current?.taskId === targetTaskId ? current : readArchivedManifest(workspaceRoot, targetTaskId);
-  const artifacts = collectArtifactFiles(workspaceRoot, targetTaskId);
-  const includeReport = input2.includeReport ?? true;
-  const includeLogTail = input2.includeLogTail ?? true;
-  const logTailLines = Math.min(200, Math.max(5, input2.logTailLines ?? 40));
-  let reportMarkdown;
-  if (includeReport && current?.taskId === targetTaskId) {
-    const raw = readReportMarkdown(workspaceRoot);
-    if (raw) reportMarkdown = maskSecrets(raw);
-  }
-  const logTail = includeLogTail ? readMaskedLogTail(workspaceRoot, targetTaskId, logTailLines) : void 0;
-  return {
-    ok: true,
-    workspaceRoot,
-    taskId: targetTaskId,
-    taskTitle: targetManifest?.title,
-    taskStatus: targetManifest?.status,
-    artifacts,
-    reportMarkdown,
-    logTail,
-    availableTasks: availableTasks.slice(0, 20)
-  };
-}
-
-// src/auth.ts
-import { spawn as spawn2 } from "node:child_process";
-import crypto3 from "node:crypto";
-import fs8 from "node:fs";
-import os2 from "node:os";
-import path8 from "node:path";
-
-// src/detector.ts
 import fs5 from "node:fs";
-import os from "node:os";
 import path5 from "node:path";
 
 // src/exec-path.ts
-import fs4 from "node:fs";
-import path4 from "node:path";
+import fs2 from "node:fs";
+import path2 from "node:path";
 function envValue(env, name) {
   const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
   return key === void 0 ? void 0 : env[key];
@@ -59797,23 +59546,26 @@ function envValue(env, name) {
 function isFullyQualifiedWin32(p) {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }
+function isFullyQualifiedPath(p, platform = process.platform) {
+  return platform === "win32" ? isFullyQualifiedWin32(p) : path2.posix.isAbsolute(p);
+}
 var POSIX_DEFAULT_PATH = "/usr/bin:/bin";
 function absolutePathDirs(platform, env) {
   const raw = envValue(env, "PATH") ?? (platform === "win32" ? "" : POSIX_DEFAULT_PATH);
   if (!raw) {
     return [];
   }
-  const pathApi = platform === "win32" ? path4.win32 : path4.posix;
-  const qualified = platform === "win32" ? isFullyQualifiedWin32 : (d) => path4.posix.isAbsolute(d);
+  const pathApi = platform === "win32" ? path2.win32 : path2.posix;
+  const qualified = platform === "win32" ? isFullyQualifiedWin32 : (d) => path2.posix.isAbsolute(d);
   return raw.split(pathApi.delimiter).map((d) => d.trim().replace(/^"|"$/g, "")).filter((d) => d.length > 0 && qualified(d));
 }
 function isSpawnableFile(candidate) {
   try {
-    if (!fs4.statSync(candidate).isFile()) {
+    if (!fs2.statSync(candidate).isFile()) {
       return false;
     }
     if (process.platform !== "win32") {
-      fs4.accessSync(candidate, fs4.constants.X_OK);
+      fs2.accessSync(candidate, fs2.constants.X_OK);
     }
     return true;
   } catch {
@@ -59824,7 +59576,7 @@ function resolveExecutable(name, lookup = {}) {
   const platform = lookup.platform ?? process.platform;
   const env = lookup.env ?? process.env;
   const isCandidate = lookup.isCandidate ?? isSpawnableFile;
-  const pathApi = platform === "win32" ? path4.win32 : path4.posix;
+  const pathApi = platform === "win32" ? path2.win32 : path2.posix;
   const fileNames = platform === "win32" && !/\.(com|exe)$/i.test(name) ? [`${name}.com`, `${name}.exe`] : [name];
   for (const dir of absolutePathDirs(platform, env)) {
     for (const fileName of fileNames) {
@@ -59851,221 +59603,13 @@ function windowsShell(env = process.env) {
     return comspec;
   }
   const root = envValue(env, "SystemRoot")?.trim();
-  return path4.win32.join(root && isFullyQualifiedWin32(root) ? root : "C:\\Windows", "System32", "cmd.exe");
+  return path2.win32.join(root && isFullyQualifiedWin32(root) ? root : "C:\\Windows", "System32", "cmd.exe");
 }
-
-// src/detector.ts
-function findBinaryInPath(name, platform = process.platform, env = process.env, existsSyncFn = fs5.existsSync) {
-  const pathApi = platform === "win32" ? path5.win32 : path5.posix;
-  const dirs = absolutePathDirs(platform, env);
-  const extensions = platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").map((e2) => e2.trim().toLowerCase()).filter(Boolean) : [""];
-  for (const dir of dirs) {
-    for (const ext of extensions) {
-      const candidate = ext && !name.toLowerCase().endsWith(ext) ? pathApi.join(dir, `${name}${ext}`) : pathApi.join(dir, name);
-      try {
-        if (existsSyncFn(candidate)) {
-          return candidate;
-        }
-      } catch {
-      }
-    }
-  }
-  return void 0;
-}
-function getDefaultDetectorDeps() {
-  const platform = process.platform;
-  const env = process.env;
-  return {
-    platform,
-    env,
-    homedir: os.homedir(),
-    existsSync: (p) => fs5.existsSync(p),
-    findBinary: (name) => findBinaryInPath(name, platform, env, fs5.existsSync)
-  };
-}
-function getDefaultCliCandidates(deps) {
-  if (deps.platform === "win32") {
-    const localAppData = deps.env.LOCALAPPDATA ?? path5.join(deps.homedir, "AppData", "Local");
-    return [
-      { binary: "agy", path: path5.join(localAppData, "agy", "bin", "agy.exe") },
-      { binary: "agy", path: path5.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy.exe") },
-      { binary: "agy", path: path5.join(deps.homedir, ".local", "bin", "agy.exe") },
-      { binary: "antigravity", path: path5.join(localAppData, "Programs", "Antigravity", "bin", "antigravity.cmd") }
-    ];
-  }
-  return [
-    { binary: "agy", path: path5.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy") },
-    { binary: "agy", path: path5.join(deps.homedir, ".local", "bin", "agy") },
-    { binary: "agy", path: "/usr/local/bin/agy" },
-    { binary: "antigravity", path: path5.join(deps.homedir, ".local", "bin", "antigravity") },
-    { binary: "antigravity", path: "/usr/local/bin/antigravity" }
-  ];
-}
-function getDefaultAppCandidates(deps) {
-  if (deps.platform === "darwin") {
-    return [
-      "/Applications/Antigravity.app",
-      path5.join(deps.homedir, "Applications", "Antigravity.app")
-    ];
-  }
-  if (deps.platform === "win32") {
-    const localAppData = deps.env.LOCALAPPDATA ?? path5.join(deps.homedir, "AppData", "Local");
-    const programFiles = deps.env.ProgramFiles ?? "C:\\Program Files";
-    return [
-      path5.join(localAppData, "Programs", "Antigravity", "Antigravity.exe"),
-      path5.join(programFiles, "Antigravity", "Antigravity.exe")
-    ];
-  }
-  return [
-    "/usr/bin/antigravity",
-    path5.join(deps.homedir, ".local", "bin", "antigravity"),
-    "/opt/Antigravity/antigravity"
-  ];
-}
-function inferCliBinaryFromPath(binaryPath) {
-  const base = path5.basename(binaryPath).toLowerCase().replace(/\.(exe|cmd|bat|app)$/, "");
-  if (base === "agy" || base.includes("agy")) {
-    return "agy";
-  }
-  if (base === "antigravity" || base.includes("antigravity")) {
-    return "antigravity";
-  }
-  if (base === "ag") {
-    return "ag";
-  }
-  return void 0;
-}
-function detectSubscriptionApp(config2, deps = getDefaultDetectorDeps()) {
-  const triggerMethod = config2.subscription.trigger_method;
-  if (config2.subscription.app_path && config2.subscription.app_path !== "auto") {
-    if (deps.existsSync(config2.subscription.app_path)) {
-      return {
-        detected: true,
-        cliBinary: inferCliBinaryFromPath(config2.subscription.app_path),
-        appPath: config2.subscription.app_path,
-        cliPath: config2.subscription.app_path,
-        triggerMethod
-      };
-    }
-  }
-  let cliBinary;
-  let cliPath;
-  for (const bin of ["agy", "antigravity", "ag"]) {
-    const found = deps.findBinary(bin);
-    if (found) {
-      cliBinary = bin;
-      cliPath = found;
-      break;
-    }
-  }
-  if (!cliPath) {
-    for (const candidate of getDefaultCliCandidates(deps)) {
-      if (deps.existsSync(candidate.path)) {
-        cliBinary = candidate.binary;
-        cliPath = candidate.path;
-        break;
-      }
-    }
-  }
-  let appPath;
-  for (const candidate of getDefaultAppCandidates(deps)) {
-    if (deps.existsSync(candidate)) {
-      appPath = candidate;
-      break;
-    }
-  }
-  return {
-    detected: Boolean(cliPath || appPath),
-    cliBinary,
-    cliPath,
-    appPath,
-    triggerMethod
-  };
-}
-function detectEnvironment(config2, modeOverride, deps = getDefaultDetectorDeps()) {
-  const configuredMode = modeOverride ?? config2.execution_mode;
-  const subscription = detectSubscriptionApp(config2, deps);
-  const apiKeyInfo = resolveApiKey(config2, deps.env);
-  const api = {
-    configured: Boolean(apiKeyInfo.key),
-    source: apiKeyInfo.source,
-    envVarName: config2.api.api_key_env,
-    model: config2.api.model,
-    maxTurns: config2.api.max_turns
-  };
-  let resolvedMode;
-  const recommendations = [];
-  if (configuredMode === "subscription") {
-    resolvedMode = subscription.detected ? "subscription" : "unavailable";
-    if (!subscription.detected) {
-      recommendations.push(
-        "Local Antigravity app/CLI (agy/antigravity) was not detected. Install Antigravity or switch mode with `/ag-config mode api`."
-      );
-    }
-  } else if (configuredMode === "api") {
-    resolvedMode = api.configured ? "api" : "unavailable";
-    if (!api.configured) {
-      recommendations.push(
-        `Set the ${config2.api.api_key_env} environment variable to enable Gemini API Fallback Mode.`
-      );
-    }
-  } else {
-    if (subscription.detected) {
-      resolvedMode = "subscription";
-    } else if (api.configured) {
-      resolvedMode = "api";
-    } else {
-      resolvedMode = "unavailable";
-      recommendations.push(
-        "Install & sign in to Antigravity (CLI `agy` or desktop app) for Subscription Mode, OR export GEMINI_API_KEY for API Fallback Mode."
-      );
-    }
-  }
-  if (api.source === "config") {
-    recommendations.push(
-      `API key is currently stored in .ag-bridge/config.json. Move it to the ${config2.api.api_key_env} environment variable for better security.`
-    );
-  }
-  return {
-    configuredMode,
-    resolvedMode,
-    platform: deps.platform,
-    subscription,
-    api,
-    recommendations
-  };
-}
-function assertResolvedMode(detection) {
-  if (detection.resolvedMode !== "unavailable") {
-    return detection.resolvedMode;
-  }
-  if (detection.configuredMode === "subscription") {
-    throw new AgPluginError(
-      "SUBSCRIPTION_UNAVAILABLE",
-      detection.recommendations[0] ?? "Subscription mode was requested, but Antigravity app/CLI was not detected."
-    );
-  }
-  if (detection.configuredMode === "api") {
-    throw new AgPluginError(
-      "API_KEY_MISSING",
-      detection.recommendations[0] ?? `API mode was requested, but ${detection.api.envVarName} is not configured.`
-    );
-  }
-  throw new AgPluginError(
-    "NO_ANTIGRAVITY_PROVIDER",
-    detection.recommendations[0] ?? "Neither local Antigravity (subscription) nor GEMINI_API_KEY (api) is available."
-  );
-}
-
-// src/engines/subscription.ts
-import { execFileSync as execFileSync2, spawn } from "node:child_process";
-import fs7 from "node:fs";
-import path7 from "node:path";
 
 // src/git-guard.ts
 import { execFileSync } from "node:child_process";
-import fs6 from "node:fs";
-import path6 from "node:path";
+import fs3 from "node:fs";
+import path3 from "node:path";
 function runGit(workspaceRoot, args) {
   return execFileSync(requireExecutable("git"), args, {
     cwd: workspaceRoot,
@@ -60081,6 +59625,9 @@ function tryRunGit(workspaceRoot, args) {
     const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
     return { ok: false, stdout: "", stderr };
   }
+}
+function isTrackedFile(workspaceRoot, relPath) {
+  return tryRunGit(workspaceRoot, ["ls-files", "--error-unmatch", "--", relPath]).ok;
 }
 function getGitInfo(workspaceRoot) {
   const statusRes = tryRunGit(workspaceRoot, ["status", "--porcelain=v1", "-b"]);
@@ -60241,9 +59788,9 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     if (baselineSet.has(relFile)) {
       continue;
     }
-    const fullPath = path6.resolve(workspaceRoot, relFile);
-    if (fs6.existsSync(fullPath)) {
-      fs6.rmSync(fullPath, { recursive: true, force: true });
+    const fullPath = path3.resolve(workspaceRoot, relFile);
+    if (fs3.existsSync(fullPath)) {
+      fs3.rmSync(fullPath, { recursive: true, force: true });
       removedUntrackedFiles.push(relFile);
     }
   }
@@ -60257,7 +59804,715 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   };
 }
 
+// src/path-guard.ts
+import fs4 from "node:fs";
+import path4 from "node:path";
+var IS_WINDOWS = process.platform === "win32";
+function normalizeForComparison(p) {
+  const normalized = path4.resolve(p);
+  return IS_WINDOWS ? normalized.toLowerCase() : normalized;
+}
+function toPosixRelative(workspaceRoot, absolutePath) {
+  const rel = path4.relative(workspaceRoot, absolutePath);
+  return rel.split(path4.sep).join("/");
+}
+function isInsideRoot(rootPath, candidatePath) {
+  const rootCmp = normalizeForComparison(rootPath);
+  const candCmp = normalizeForComparison(candidatePath);
+  if (candCmp === rootCmp) {
+    return true;
+  }
+  const prefix = rootCmp.endsWith(path4.sep) ? rootCmp : rootCmp + path4.sep;
+  return candCmp.startsWith(prefix);
+}
+function resolveRealPathOrNearestParent(targetPath) {
+  let current = path4.resolve(targetPath);
+  const trailingSegments = [];
+  while (!fs4.existsSync(current)) {
+    const parent = path4.dirname(current);
+    if (parent === current) {
+      return path4.resolve(targetPath);
+    }
+    trailingSegments.unshift(path4.basename(current));
+    current = parent;
+  }
+  const realExisting = fs4.realpathSync(current);
+  return trailingSegments.length > 0 ? path4.join(realExisting, ...trailingSegments) : realExisting;
+}
+function isInsideWorkspace(workspaceRoot, candidatePath) {
+  return isInsideRoot(
+    resolveRealPathOrNearestParent(workspaceRoot),
+    resolveRealPathOrNearestParent(candidatePath)
+  );
+}
+function isProtectedWritePath(posixRel) {
+  const lower2 = posixRel.toLowerCase();
+  const segments = lower2.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return true;
+  }
+  if (segments[0] === ".git" || segments.includes(".git")) {
+    return true;
+  }
+  if (segments[0] === "node_modules" || segments.includes("node_modules")) {
+    return true;
+  }
+  if (lower2 === ".ag-bridge/config.json") {
+    return true;
+  }
+  const base = segments[segments.length - 1];
+  if (base === ".env" || base.startsWith(".env.")) {
+    return true;
+  }
+  return false;
+}
+function isProtectedReadPath(posixRel) {
+  const lower2 = posixRel.toLowerCase();
+  const segments = lower2.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return false;
+  }
+  if (segments.includes(".ssh")) {
+    return true;
+  }
+  const base = segments[segments.length - 1];
+  if ((base === ".env" || base.startsWith(".env.")) && base !== ".env.example" && base !== ".env.sample") {
+    return true;
+  }
+  if (base.endsWith(".pem") || base.endsWith(".key") || base === "id_rsa" || base === "id_ed25519") {
+    return true;
+  }
+  return false;
+}
+function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
+  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
+    throw new AgPluginError(
+      "INVALID_LOCKED_PATHS",
+      "lockedPaths must contain at least one relative file or directory path inside the workspace."
+    );
+  }
+  const realRoot = fs4.realpathSync(path4.resolve(workspaceRoot));
+  const normalizedScopes = [];
+  for (const rawScope of lockedPaths) {
+    const scope = rawScope.trim();
+    if (!scope || scope.includes("\0")) {
+      throw new AgPluginError("INVALID_LOCKED_PATHS", `Invalid lockedPath entry: "${rawScope}"`);
+    }
+    const resolved = path4.resolve(realRoot, scope);
+    if (!isInsideRoot(realRoot, resolved)) {
+      throw new AgPluginError(
+        "INVALID_LOCKED_PATHS",
+        `lockedPath "${scope}" resolves outside the workspace root.`
+      );
+    }
+    const realScope = resolveRealPathOrNearestParent(resolved);
+    if (!isInsideRoot(realRoot, realScope)) {
+      throw new AgPluginError(
+        "INVALID_LOCKED_PATHS",
+        `lockedPath "${scope}" escapes the workspace via symlink.`
+      );
+    }
+    const rel = toPosixRelative(realRoot, realScope);
+    if (isProtectedWritePath(rel)) {
+      throw new AgPluginError(
+        "PROTECTED_PATH_BLOCKED",
+        `lockedPath "${scope}" targets a protected path (.git, .env*, node_modules, or .ag-bridge/config.json).`
+      );
+    }
+    normalizedScopes.push(rel);
+  }
+  return normalizedScopes;
+}
+function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
+  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
+    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
+  }
+  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
+    throw new AgPluginError(
+      "PATH_OUTSIDE_LOCKED_SCOPE",
+      "Write denied: lockedPaths is empty (fail-closed policy)."
+    );
+  }
+  const realRoot = fs4.realpathSync(path4.resolve(workspaceRoot));
+  const resolvedTarget = path4.resolve(realRoot, targetPath);
+  if (!isInsideRoot(realRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Write denied: "${targetPath}" resolves outside the workspace root.`
+    );
+  }
+  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
+  if (!isInsideRoot(realRoot, realTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Write denied: "${targetPath}" escapes the workspace root via symlink.`
+    );
+  }
+  const relTarget = toPosixRelative(realRoot, realTarget);
+  if (isProtectedWritePath(relTarget)) {
+    throw new AgPluginError(
+      "PROTECTED_PATH_BLOCKED",
+      `Write denied: "${relTarget}" is a protected path and cannot be modified by delegated agents.`
+    );
+  }
+  const matchesScope = lockedPaths.some((scope) => {
+    const trimmed = scope.trim();
+    if (!trimmed || trimmed.includes("\0")) {
+      return false;
+    }
+    const resolvedScope = path4.resolve(realRoot, trimmed);
+    if (!isInsideRoot(realRoot, resolvedScope)) {
+      return false;
+    }
+    const realScope = resolveRealPathOrNearestParent(resolvedScope);
+    if (!isInsideRoot(realRoot, realScope)) {
+      return false;
+    }
+    const scopeCmp = normalizeForComparison(realScope);
+    const targetCmp = normalizeForComparison(realTarget);
+    if (targetCmp === scopeCmp) {
+      return true;
+    }
+    const dirPrefix = scopeCmp.endsWith(path4.sep) ? scopeCmp : scopeCmp + path4.sep;
+    return targetCmp.startsWith(dirPrefix);
+  });
+  if (!matchesScope) {
+    throw new AgPluginError(
+      "PATH_OUTSIDE_LOCKED_SCOPE",
+      `Write denied: "${relTarget}" is outside allowed lockedPaths [${lockedPaths.join(", ")}].`
+    );
+  }
+  return realTarget;
+}
+function assertReadablePath(workspaceRoot, targetPath) {
+  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
+    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
+  }
+  const realRoot = fs4.realpathSync(path4.resolve(workspaceRoot));
+  const resolvedTarget = path4.resolve(realRoot, targetPath);
+  if (!isInsideRoot(realRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Read denied: "${targetPath}" resolves outside the workspace root.`
+    );
+  }
+  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
+  if (!isInsideRoot(realRoot, realTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Read denied: "${targetPath}" escapes the workspace root via symlink.`
+    );
+  }
+  const relTarget = toPosixRelative(realRoot, realTarget);
+  if (isProtectedReadPath(relTarget)) {
+    throw new AgPluginError(
+      "PROTECTED_PATH_BLOCKED",
+      `Read denied: "${relTarget}" is a protected secret file.`
+    );
+  }
+  return realTarget;
+}
+
+// src/config.ts
+var ExecutionModeSchema = external_exports.enum(["auto", "subscription", "api"]);
+var GitGuardPolicySchema = external_exports.enum(["best_effort", "required"]);
+var TriggerMethodSchema = external_exports.enum(["cli_or_ipc", "cli_only", "clipboard"]);
+var AgyModeSchema = external_exports.enum(["accept-edits", "auto", "plan"]);
+var AgyEffortSchema = external_exports.enum(["low", "medium", "high", "xhigh", "max"]);
+var PartialBridgeConfigSchema = external_exports.object({
+  execution_mode: ExecutionModeSchema.optional(),
+  git_guard: GitGuardPolicySchema.optional(),
+  subscription: external_exports.object({
+    app_path: external_exports.string().min(1).optional(),
+    trigger_method: TriggerMethodSchema.optional(),
+    timeout_sec: external_exports.number().int().min(1).max(3600).optional(),
+    poll_interval_ms: external_exports.number().int().min(100).max(3e4).optional(),
+    agy_mode: AgyModeSchema.optional(),
+    agy_sandbox: external_exports.boolean().optional(),
+    agy_dangerously_skip_permissions: external_exports.boolean().optional(),
+    agy_stream_heartbeat: external_exports.boolean().optional(),
+    agy_model: external_exports.string().min(1).optional(),
+    agy_effort: AgyEffortSchema.optional(),
+    agy_agent: external_exports.string().min(1).optional(),
+    agy_project: external_exports.string().min(1).optional(),
+    agy_remote_agent: external_exports.boolean().optional(),
+    agy_disable_slash_commands: external_exports.boolean().optional(),
+    agy_settings: external_exports.string().min(1).optional()
+  }).partial().optional(),
+  api: external_exports.object({
+    api_key_env: external_exports.string().min(1).optional(),
+    apiKey: external_exports.string().min(1).optional(),
+    model: external_exports.string().min(1).optional(),
+    max_turns: external_exports.number().int().min(1).max(50).optional(),
+    command_timeout_sec: external_exports.number().int().min(5).max(600).optional()
+  }).partial().optional()
+}).strict();
+function getConfigPath(workspaceRoot) {
+  return path5.join(workspaceRoot, ".ag-bridge", "config.json");
+}
+function loadConfig(workspaceRoot, env = process.env) {
+  const envModeRaw = env.AG_DEFAULT_MODE?.trim();
+  const envMode = envModeRaw === "auto" || envModeRaw === "subscription" || envModeRaw === "api" ? envModeRaw : DEFAULT_BRIDGE_CONFIG.execution_mode;
+  const envModel = env.AG_MODEL?.trim() || DEFAULT_BRIDGE_CONFIG.api.model;
+  const envSkipPerm = env.AG_DANGEROUSLY_SKIP_PERMISSIONS === "1" || env.AG_DANGEROUSLY_SKIP_PERMISSIONS?.toLowerCase() === "true";
+  const base = {
+    execution_mode: envMode,
+    git_guard: DEFAULT_BRIDGE_CONFIG.git_guard,
+    subscription: {
+      ...DEFAULT_BRIDGE_CONFIG.subscription,
+      agy_dangerously_skip_permissions: envSkipPerm
+    },
+    api: {
+      ...DEFAULT_BRIDGE_CONFIG.api,
+      model: envModel
+    }
+  };
+  const configPath = getConfigPath(workspaceRoot);
+  if (!fs5.existsSync(configPath)) {
+    return base;
+  }
+  let parsedRaw;
+  try {
+    const content = fs5.readFileSync(configPath, "utf8");
+    parsedRaw = JSON.parse(content);
+  } catch (err) {
+    throw new AgPluginError(
+      "INVALID_CONFIG",
+      `Failed to parse ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  const parsed = PartialBridgeConfigSchema.safeParse(parsedRaw);
+  if (!parsed.success) {
+    throw new AgPluginError(
+      "INVALID_CONFIG",
+      `Invalid .ag-bridge/config.json: ${parsed.error.issues.map((i2) => `${i2.path.join(".")}: ${i2.message}`).join("; ")}`
+    );
+  }
+  const data = parsed.data;
+  const merged = {
+    execution_mode: data.execution_mode ?? base.execution_mode,
+    git_guard: data.git_guard ?? base.git_guard,
+    subscription: {
+      ...base.subscription,
+      ...data.subscription ?? {}
+    },
+    api: {
+      ...base.api,
+      ...data.api ?? {}
+    }
+  };
+  const ignored = applyConfigTrust(workspaceRoot, data, merged, base);
+  return ignored.length > 0 ? { ...merged, ignoredSettings: ignored } : merged;
+}
+var TRUST_SENSITIVE = [
+  ["subscription", "app_path", (v) => v !== void 0 && v !== "auto"],
+  ["subscription", "agy_dangerously_skip_permissions", (v) => v === true],
+  ["subscription", "agy_sandbox", (v) => v === false],
+  ["subscription", "agy_mode", (v) => v === "auto"],
+  ["subscription", "agy_settings", (v) => v !== void 0],
+  ["subscription", "agy_remote_agent", (v) => v === true],
+  ["api", "apiKey", (v) => v !== void 0],
+  ["api", "api_key_env", (v) => v !== void 0 && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env]
+];
+function applyConfigTrust(workspaceRoot, data, merged, base) {
+  const ignored = [];
+  const fromFile2 = (section, key) => data[section]?.[key];
+  const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile2(section, key)));
+  if (unsafe.length > 0 && isTrackedFile(workspaceRoot, ".ag-bridge/config.json")) {
+    for (const [section, key] of unsafe) {
+      const target = merged[section];
+      const fallback = base[section][key];
+      if (fallback === void 0) delete target[key];
+      else target[key] = fallback;
+      ignored.push(`${section}.${key} (the file is tracked by git, so the repository may have supplied it)`);
+    }
+  }
+  const appPath = merged.subscription.app_path;
+  if (appPath !== "auto" && (!isFullyQualifiedPath(appPath) || isInsideWorkspace(workspaceRoot, appPath))) {
+    merged.subscription.app_path = "auto";
+    ignored.push("subscription.app_path (not an absolute path outside the workspace)");
+  }
+  return ignored;
+}
+function describeIgnoredSettings(config2) {
+  if (!config2.ignoredSettings || config2.ignoredSettings.length === 0) {
+    return void 0;
+  }
+  return `Ignored settings from .ag-bridge/config.json: ${config2.ignoredSettings.join("; ")}. To use them, keep the file out of git (\`git rm --cached .ag-bridge/config.json\`) and point subscription.app_path at an agy installed outside the project, or pass the option per call.`;
+}
+function resolveApiKey(config2, env = process.env) {
+  const envKey = env[config2.api.api_key_env]?.trim();
+  if (envKey) {
+    return { key: envKey, source: "env" };
+  }
+  const configKey = config2.api.apiKey?.trim();
+  if (configKey) {
+    return { key: configKey, source: "config" };
+  }
+  return { key: void 0, source: "none" };
+}
+function maskSecrets(input2, extraSecrets = [], env = process.env) {
+  let result = input2;
+  const candidates = /* @__PURE__ */ new Set();
+  const envKeys = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
+  for (const k of envKeys) {
+    const val = env[k]?.trim();
+    if (val && val.length >= 8) {
+      candidates.add(val);
+    }
+  }
+  for (const s2 of extraSecrets) {
+    const trimmed = s2?.trim();
+    if (trimmed && trimmed.length >= 8) {
+      candidates.add(trimmed);
+    }
+  }
+  for (const secret of candidates) {
+    result = result.split(secret).join("[REDACTED]");
+  }
+  result = result.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED]");
+  result = result.replace(/ya29\.[0-9A-Za-z._-]{20,}/g, "[REDACTED]");
+  result = result.replace(/\b4\/0[A-Za-z0-9_-]{20,}\b/g, "[REDACTED]");
+  result = result.replace(/\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}\b/g, "[REDACTED]");
+  result = result.replace(/\bgh[pousr]_[0-9A-Za-z]{20,}\b/g, "[REDACTED]");
+  result = result.replace(/\b(Bearer\s+)[A-Za-z0-9\-._~+/=]{16,}/gi, "$1[REDACTED]");
+  return result;
+}
+
+// src/artifacts.ts
+function classifyArtifactKind(filePath) {
+  const ext = path6.extname(filePath).toLowerCase();
+  if ([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(ext)) return "screenshot";
+  if (ext === ".log" || ext === ".txt") return "log";
+  if (ext === ".md") return "report";
+  if (ext === ".json") return "json";
+  return "other";
+}
+function collectArtifactFiles(workspaceRoot, taskId) {
+  const artDir = getArtifactsDir(workspaceRoot, taskId);
+  if (!fs6.existsSync(artDir)) return [];
+  const entries = [];
+  const walk = (dir) => {
+    for (const dirent of fs6.readdirSync(dir, { withFileTypes: true })) {
+      const full = path6.join(dir, dirent.name);
+      if (dirent.isDirectory()) {
+        walk(full);
+      } else if (dirent.isFile()) {
+        try {
+          const stat3 = fs6.statSync(full);
+          entries.push({
+            name: dirent.name,
+            relativePath: path6.relative(workspaceRoot, full).replace(/\\/g, "/"),
+            absolutePath: full,
+            kind: classifyArtifactKind(full),
+            sizeBytes: stat3.size,
+            modifiedAt: stat3.mtime.toISOString()
+          });
+        } catch {
+        }
+      }
+    }
+  };
+  walk(artDir);
+  return entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+function readMaskedLogTail(workspaceRoot, taskId, maxLines) {
+  const logPath = path6.join(getArtifactsDir(workspaceRoot, taskId), "agy-cli.log");
+  if (!fs6.existsSync(logPath)) return void 0;
+  try {
+    const raw = fs6.readFileSync(logPath, "utf8");
+    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return void 0;
+    return maskSecrets(lines.slice(-Math.max(1, maxLines)).join("\n"));
+  } catch {
+    return void 0;
+  }
+}
+function handleListArtifacts(input2 = {}) {
+  const workspaceRoot = path6.resolve(input2.workspaceRoot ?? process.cwd());
+  const current = readManifest(workspaceRoot);
+  const allManifests = readAllTaskManifests(workspaceRoot);
+  const artifactsRoot = path6.join(getBridgeDir(workspaceRoot), "artifacts");
+  const seenIds = /* @__PURE__ */ new Set();
+  const availableTasks = [];
+  for (const m2 of allManifests) {
+    seenIds.add(m2.taskId);
+    const files = collectArtifactFiles(workspaceRoot, m2.taskId);
+    availableTasks.push({
+      taskId: m2.taskId,
+      title: m2.title,
+      status: m2.status,
+      artifactCount: files.length,
+      updatedAt: m2.updatedAt
+    });
+  }
+  if (fs6.existsSync(artifactsRoot)) {
+    for (const dirent of fs6.readdirSync(artifactsRoot, { withFileTypes: true })) {
+      if (!dirent.isDirectory() || seenIds.has(dirent.name)) continue;
+      const files = collectArtifactFiles(workspaceRoot, dirent.name);
+      availableTasks.push({
+        taskId: dirent.name,
+        title: "(Artifact folder)",
+        status: "IDLE",
+        artifactCount: files.length,
+        updatedAt: files[0]?.modifiedAt ?? (/* @__PURE__ */ new Date(0)).toISOString()
+      });
+    }
+  }
+  const targetTaskId = input2.taskId ?? current?.taskId ?? availableTasks[0]?.taskId;
+  if (!targetTaskId) {
+    return {
+      ok: true,
+      workspaceRoot,
+      artifacts: [],
+      availableTasks: []
+    };
+  }
+  const targetManifest = current?.taskId === targetTaskId ? current : readArchivedManifest(workspaceRoot, targetTaskId);
+  const artifacts = collectArtifactFiles(workspaceRoot, targetTaskId);
+  const includeReport = input2.includeReport ?? true;
+  const includeLogTail = input2.includeLogTail ?? true;
+  const logTailLines = Math.min(200, Math.max(5, input2.logTailLines ?? 40));
+  let reportMarkdown;
+  if (includeReport && current?.taskId === targetTaskId) {
+    const raw = readReportMarkdown(workspaceRoot);
+    if (raw) reportMarkdown = maskSecrets(raw);
+  }
+  const logTail = includeLogTail ? readMaskedLogTail(workspaceRoot, targetTaskId, logTailLines) : void 0;
+  return {
+    ok: true,
+    workspaceRoot,
+    taskId: targetTaskId,
+    taskTitle: targetManifest?.title,
+    taskStatus: targetManifest?.status,
+    artifacts,
+    reportMarkdown,
+    logTail,
+    availableTasks: availableTasks.slice(0, 20)
+  };
+}
+
+// src/auth.ts
+import { spawn as spawn2 } from "node:child_process";
+import crypto3 from "node:crypto";
+import fs9 from "node:fs";
+import os2 from "node:os";
+import path9 from "node:path";
+
+// src/detector.ts
+import fs7 from "node:fs";
+import os from "node:os";
+import path7 from "node:path";
+function findBinaryInPath(name, platform = process.platform, env = process.env, existsSyncFn = fs7.existsSync) {
+  const pathApi = platform === "win32" ? path7.win32 : path7.posix;
+  const dirs = absolutePathDirs(platform, env);
+  const extensions = platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").map((e2) => e2.trim().toLowerCase()).filter(Boolean) : [""];
+  for (const dir of dirs) {
+    for (const ext of extensions) {
+      const candidate = ext && !name.toLowerCase().endsWith(ext) ? pathApi.join(dir, `${name}${ext}`) : pathApi.join(dir, name);
+      try {
+        if (existsSyncFn(candidate)) {
+          return candidate;
+        }
+      } catch {
+      }
+    }
+  }
+  return void 0;
+}
+function getDefaultDetectorDeps() {
+  const platform = process.platform;
+  const env = process.env;
+  return {
+    platform,
+    env,
+    homedir: os.homedir(),
+    existsSync: (p) => fs7.existsSync(p),
+    findBinary: (name) => findBinaryInPath(name, platform, env, fs7.existsSync)
+  };
+}
+function getDefaultCliCandidates(deps) {
+  if (deps.platform === "win32") {
+    const localAppData = deps.env.LOCALAPPDATA ?? path7.join(deps.homedir, "AppData", "Local");
+    return [
+      { binary: "agy", path: path7.join(localAppData, "agy", "bin", "agy.exe") },
+      { binary: "agy", path: path7.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy.exe") },
+      { binary: "agy", path: path7.join(deps.homedir, ".local", "bin", "agy.exe") },
+      { binary: "antigravity", path: path7.join(localAppData, "Programs", "Antigravity", "bin", "antigravity.cmd") }
+    ];
+  }
+  return [
+    { binary: "agy", path: path7.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy") },
+    { binary: "agy", path: path7.join(deps.homedir, ".local", "bin", "agy") },
+    { binary: "agy", path: "/usr/local/bin/agy" },
+    { binary: "antigravity", path: path7.join(deps.homedir, ".local", "bin", "antigravity") },
+    { binary: "antigravity", path: "/usr/local/bin/antigravity" }
+  ];
+}
+function getDefaultAppCandidates(deps) {
+  if (deps.platform === "darwin") {
+    return [
+      "/Applications/Antigravity.app",
+      path7.join(deps.homedir, "Applications", "Antigravity.app")
+    ];
+  }
+  if (deps.platform === "win32") {
+    const localAppData = deps.env.LOCALAPPDATA ?? path7.join(deps.homedir, "AppData", "Local");
+    const programFiles = deps.env.ProgramFiles ?? "C:\\Program Files";
+    return [
+      path7.join(localAppData, "Programs", "Antigravity", "Antigravity.exe"),
+      path7.join(programFiles, "Antigravity", "Antigravity.exe")
+    ];
+  }
+  return [
+    "/usr/bin/antigravity",
+    path7.join(deps.homedir, ".local", "bin", "antigravity"),
+    "/opt/Antigravity/antigravity"
+  ];
+}
+function inferCliBinaryFromPath(binaryPath) {
+  const base = path7.basename(binaryPath).toLowerCase().replace(/\.(exe|cmd|bat|app)$/, "");
+  if (base === "agy" || base.includes("agy")) {
+    return "agy";
+  }
+  if (base === "antigravity" || base.includes("antigravity")) {
+    return "antigravity";
+  }
+  if (base === "ag") {
+    return "ag";
+  }
+  return void 0;
+}
+function detectSubscriptionApp(config2, deps = getDefaultDetectorDeps()) {
+  const triggerMethod = config2.subscription.trigger_method;
+  if (config2.subscription.app_path && config2.subscription.app_path !== "auto") {
+    if (deps.existsSync(config2.subscription.app_path)) {
+      return {
+        detected: true,
+        cliBinary: inferCliBinaryFromPath(config2.subscription.app_path),
+        appPath: config2.subscription.app_path,
+        cliPath: config2.subscription.app_path,
+        triggerMethod
+      };
+    }
+  }
+  let cliBinary;
+  let cliPath;
+  for (const bin of ["agy", "antigravity", "ag"]) {
+    const found = deps.findBinary(bin);
+    if (found) {
+      cliBinary = bin;
+      cliPath = found;
+      break;
+    }
+  }
+  if (!cliPath) {
+    for (const candidate of getDefaultCliCandidates(deps)) {
+      if (deps.existsSync(candidate.path)) {
+        cliBinary = candidate.binary;
+        cliPath = candidate.path;
+        break;
+      }
+    }
+  }
+  let appPath;
+  for (const candidate of getDefaultAppCandidates(deps)) {
+    if (deps.existsSync(candidate)) {
+      appPath = candidate;
+      break;
+    }
+  }
+  return {
+    detected: Boolean(cliPath || appPath),
+    cliBinary,
+    cliPath,
+    appPath,
+    triggerMethod
+  };
+}
+function detectEnvironment(config2, modeOverride, deps = getDefaultDetectorDeps()) {
+  const configuredMode = modeOverride ?? config2.execution_mode;
+  const subscription = detectSubscriptionApp(config2, deps);
+  const apiKeyInfo = resolveApiKey(config2, deps.env);
+  const api = {
+    configured: Boolean(apiKeyInfo.key),
+    source: apiKeyInfo.source,
+    envVarName: config2.api.api_key_env,
+    model: config2.api.model,
+    maxTurns: config2.api.max_turns
+  };
+  let resolvedMode;
+  const recommendations = [];
+  if (configuredMode === "subscription") {
+    resolvedMode = subscription.detected ? "subscription" : "unavailable";
+    if (!subscription.detected) {
+      recommendations.push(
+        "Local Antigravity app/CLI (agy/antigravity) was not detected. Install Antigravity or switch mode with `/ag-config mode api`."
+      );
+    }
+  } else if (configuredMode === "api") {
+    resolvedMode = api.configured ? "api" : "unavailable";
+    if (!api.configured) {
+      recommendations.push(
+        `Set the ${config2.api.api_key_env} environment variable to enable Gemini API Fallback Mode.`
+      );
+    }
+  } else {
+    if (subscription.detected) {
+      resolvedMode = "subscription";
+    } else if (api.configured) {
+      resolvedMode = "api";
+    } else {
+      resolvedMode = "unavailable";
+      recommendations.push(
+        "Install & sign in to Antigravity (CLI `agy` or desktop app) for Subscription Mode, OR export GEMINI_API_KEY for API Fallback Mode."
+      );
+    }
+  }
+  const ignoredAdvice = describeIgnoredSettings(config2);
+  if (ignoredAdvice) {
+    recommendations.push(ignoredAdvice);
+  }
+  if (api.source === "config") {
+    recommendations.push(
+      `API key is currently stored in .ag-bridge/config.json. Move it to the ${config2.api.api_key_env} environment variable for better security.`
+    );
+  }
+  return {
+    configuredMode,
+    resolvedMode,
+    platform: deps.platform,
+    subscription,
+    api,
+    recommendations
+  };
+}
+function assertResolvedMode(detection) {
+  if (detection.resolvedMode !== "unavailable") {
+    return detection.resolvedMode;
+  }
+  if (detection.configuredMode === "subscription") {
+    throw new AgPluginError(
+      "SUBSCRIPTION_UNAVAILABLE",
+      detection.recommendations[0] ?? "Subscription mode was requested, but Antigravity app/CLI was not detected."
+    );
+  }
+  if (detection.configuredMode === "api") {
+    throw new AgPluginError(
+      "API_KEY_MISSING",
+      detection.recommendations[0] ?? `API mode was requested, but ${detection.api.envVarName} is not configured.`
+    );
+  }
+  throw new AgPluginError(
+    "NO_ANTIGRAVITY_PROVIDER",
+    detection.recommendations[0] ?? "Neither local Antigravity (subscription) nor GEMINI_API_KEY (api) is available."
+  );
+}
+
 // src/engines/subscription.ts
+import { execFileSync as execFileSync2, spawn } from "node:child_process";
+import fs8 from "node:fs";
+import path8 from "node:path";
 var NATIVE_AGY_SLASH_RE = /^\/(boost|browser|swarm|goal|teamwork|grill-me|plan|btw|compact|codesearch|learn|schedule)\b/i;
 function buildHandoffPrompt(ctx) {
   const disableSlash = ctx.agyOptions?.disableSlashCommands ?? ctx.config.subscription.agy_disable_slash_commands;
@@ -60379,8 +60634,8 @@ function attachStreamJsonHeartbeat(stream, options) {
   const appendLog = (line) => {
     if (!options.logFilePath) return;
     try {
-      fs7.mkdirSync(path7.dirname(options.logFilePath), { recursive: true });
-      fs7.appendFileSync(options.logFilePath, `${maskSecrets(line)}
+      fs8.mkdirSync(path8.dirname(options.logFilePath), { recursive: true });
+      fs8.appendFileSync(options.logFilePath, `${maskSecrets(line)}
 `, "utf8");
     } catch {
     }
@@ -60737,12 +60992,12 @@ async function tryCliTrigger(ctx) {
   const spawnSpec = buildCliSpawnSpec(cliPath, args, ctx.detection.platform);
   const useStreamHeartbeat = cliBinary === "agy" && ctx.config.subscription.agy_stream_heartbeat;
   const artDir = getArtifactsDir(ctx.workspaceRoot, ctx.manifest.taskId);
-  const logFilePath = path7.join(artDir, "agy-cli.log");
+  const logFilePath = path8.join(artDir, "agy-cli.log");
   let logFd = null;
   if (!useStreamHeartbeat) {
     try {
-      fs7.mkdirSync(artDir, { recursive: true });
-      logFd = fs7.openSync(logFilePath, "a");
+      fs8.mkdirSync(artDir, { recursive: true });
+      logFd = fs8.openSync(logFilePath, "a");
     } catch {
       logFd = null;
     }
@@ -60752,7 +61007,7 @@ async function tryCliTrigger(ctx) {
     const closeLogFd = () => {
       if (logFd !== null) {
         try {
-          fs7.closeSync(logFd);
+          fs8.closeSync(logFd);
         } catch {
         }
         logFd = null;
@@ -60815,9 +61070,9 @@ async function tryCliTrigger(ctx) {
       if (useStreamHeartbeat && child.stderr) {
         child.stderr.on("data", (chunk) => {
           try {
-            fs7.mkdirSync(artDir, { recursive: true });
+            fs8.mkdirSync(artDir, { recursive: true });
             const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-            fs7.appendFileSync(logFilePath, maskSecrets(text), "utf8");
+            fs8.appendFileSync(logFilePath, maskSecrets(text), "utf8");
           } catch {
           }
         });
@@ -60992,7 +61247,7 @@ function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollInterv
     };
     const bridgeDir = getBridgeDir(workspaceRoot);
     try {
-      watcher = fs7.watch(bridgeDir, (_eventType, filename) => {
+      watcher = fs8.watch(bridgeDir, (_eventType, filename) => {
         if (!filename || filename.toString().includes("manifest.json")) {
           checkOnce();
         }
@@ -61250,12 +61505,12 @@ function extractOAuthUrl(text) {
   return void 0;
 }
 function readAgySettingsAuthHints(homeDir = os2.homedir()) {
-  const settingsPath = path8.join(homeDir, ".gemini", "antigravity-cli", "settings.json");
+  const settingsPath = path9.join(homeDir, ".gemini", "antigravity-cli", "settings.json");
   try {
-    if (!fs8.existsSync(settingsPath)) {
+    if (!fs9.existsSync(settingsPath)) {
       return { hasGcpConfig: false };
     }
-    const raw = JSON.parse(fs8.readFileSync(settingsPath, "utf8"));
+    const raw = JSON.parse(fs9.readFileSync(settingsPath, "utf8"));
     const modelProvider = typeof raw.modelProvider === "string" && raw.modelProvider.trim().length > 0 ? raw.modelProvider.trim() : void 0;
     const hasGcpConfig = Boolean(raw.gcp && typeof raw.gcp === "object");
     return { modelProvider, hasGcpConfig };
@@ -61293,7 +61548,7 @@ function getInstallNextSteps(platform) {
   ];
 }
 async function checkAgAuthStatus(workspaceRootInput, deps = {}) {
-  const workspaceRoot = path8.resolve(workspaceRootInput ?? process.cwd());
+  const workspaceRoot = path9.resolve(workspaceRootInput ?? process.cwd());
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
   const env = detDeps.env ?? process.env;
   const config2 = loadConfig(workspaceRoot, env);
@@ -61885,7 +62140,7 @@ async function completeManualLoginFlow(code, sessionId, deps) {
 }
 async function handleAgAuth(input2 = {}, deps = {}) {
   const action = input2.action ?? "login";
-  const workspaceRoot = path8.resolve(input2.workspaceRoot ?? process.cwd());
+  const workspaceRoot = path9.resolve(input2.workspaceRoot ?? process.cwd());
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
   const env = detDeps.env ?? process.env;
   const manager = deps.sessionManager ?? defaultAuthSessionManager;
@@ -62020,8 +62275,8 @@ async function handleAgAuth(input2 = {}, deps = {}) {
 
 // src/cli-admin.ts
 import { spawn as spawn3 } from "node:child_process";
-import fs9 from "node:fs";
-import path9 from "node:path";
+import fs10 from "node:fs";
+import path10 from "node:path";
 var VALID_SERVER_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 var CONTROL_CHAR_RE = /[\r\n\0]/;
 function hasControlChars(values) {
@@ -62109,7 +62364,7 @@ function buildMcpAddArgs(input2) {
   return cliArgs;
 }
 async function handleAgCliAdmin(input2, deps = {}) {
-  const workspaceRoot = path9.resolve(input2.workspaceRoot ?? process.cwd());
+  const workspaceRoot = path10.resolve(input2.workspaceRoot ?? process.cwd());
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
   const config2 = loadConfig(workspaceRoot, detDeps.env);
   const detection = detectEnvironment(config2, void 0, detDeps);
@@ -62127,8 +62382,8 @@ async function handleAgCliAdmin(input2, deps = {}) {
   const cliPath = detection.subscription.cliPath;
   const runCli = deps.runCliFn ?? defaultRunAdminCli;
   if (input2.action === "mcp_sync_from_claude") {
-    const mcpJsonPath = path9.join(workspaceRoot, ".mcp.json");
-    if (!fs9.existsSync(mcpJsonPath)) {
+    const mcpJsonPath = path10.join(workspaceRoot, ".mcp.json");
+    if (!fs10.existsSync(mcpJsonPath)) {
       return {
         ok: false,
         action: input2.action,
@@ -62141,7 +62396,7 @@ async function handleAgCliAdmin(input2, deps = {}) {
     }
     let parsed;
     try {
-      parsed = JSON.parse(fs9.readFileSync(mcpJsonPath, "utf8"));
+      parsed = JSON.parse(fs10.readFileSync(mcpJsonPath, "utf8"));
     } catch (err) {
       return {
         ok: false,
@@ -62331,7 +62586,7 @@ import path13 from "node:path";
 var import_p_retry = __toESM(require_p_retry(), 1);
 var import_google_auth_library = __toESM(require_src5(), 1);
 import { createWriteStream } from "fs";
-import * as fs11 from "fs/promises";
+import * as fs12 from "fs/promises";
 import { writeFile } from "fs/promises";
 import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
@@ -77512,7 +77767,7 @@ ${underline}`);
   }
   return path17;
 });
-var path10 = /* @__PURE__ */ createPathTagFunction(encodeURIPath);
+var path11 = /* @__PURE__ */ createPathTagFunction(encodeURIPath);
 var BaseInteractions = class extends APIResource {
   create(params, options) {
     var _a4;
@@ -77523,7 +77778,7 @@ var BaseInteractions = class extends APIResource {
     if ("agent" in body && "generation_config" in body) {
       throw new GeminiNextGenAPIClientError(`Invalid request: specified \`agent\` and \`generation_config\`. If specifying \`agent\`, use \`agent_config\`.`);
     }
-    return this._client.post(path10`/${api_version}/interactions`, Object.assign(Object.assign({ body }, options), { stream: (_a4 = params.stream) !== null && _a4 !== void 0 ? _a4 : false }));
+    return this._client.post(path11`/${api_version}/interactions`, Object.assign(Object.assign({ body }, options), { stream: (_a4 = params.stream) !== null && _a4 !== void 0 ? _a4 : false }));
   }
   /**
    * Deletes the interaction by id.
@@ -77537,7 +77792,7 @@ var BaseInteractions = class extends APIResource {
    */
   delete(id, params = {}, options) {
     const { api_version = this._client.apiVersion } = params !== null && params !== void 0 ? params : {};
-    return this._client.delete(path10`/${api_version}/interactions/${id}`, options);
+    return this._client.delete(path11`/${api_version}/interactions/${id}`, options);
   }
   /**
    * Cancels an interaction by id. This only applies to background interactions that
@@ -77552,12 +77807,12 @@ var BaseInteractions = class extends APIResource {
    */
   cancel(id, params = {}, options) {
     const { api_version = this._client.apiVersion } = params !== null && params !== void 0 ? params : {};
-    return this._client.post(path10`/${api_version}/interactions/${id}/cancel`, options);
+    return this._client.post(path11`/${api_version}/interactions/${id}/cancel`, options);
   }
   get(id, params = {}, options) {
     var _a4;
     const _b = params !== null && params !== void 0 ? params : {}, { api_version = this._client.apiVersion } = _b, query = __rest(_b, ["api_version"]);
-    return this._client.get(path10`/${api_version}/interactions/${id}`, Object.assign(Object.assign({ query }, options), { stream: (_a4 = params === null || params === void 0 ? void 0 : params.stream) !== null && _a4 !== void 0 ? _a4 : false }));
+    return this._client.get(path11`/${api_version}/interactions/${id}`, Object.assign(Object.assign({ query }, options), { stream: (_a4 = params === null || params === void 0 ? void 0 : params.stream) !== null && _a4 !== void 0 ? _a4 : false }));
   }
 };
 BaseInteractions._key = Object.freeze(["interactions"]);
@@ -77569,49 +77824,49 @@ var BaseWebhooks = class extends APIResource {
    */
   create(params, options) {
     const { api_version = this._client.apiVersion } = params, body = __rest(params, ["api_version"]);
-    return this._client.post(path10`/${api_version}/webhooks`, Object.assign({ body }, options));
+    return this._client.post(path11`/${api_version}/webhooks`, Object.assign({ body }, options));
   }
   /**
    * Updates an existing Webhook.
    */
   update(id, params = {}, options) {
     const _a4 = params !== null && params !== void 0 ? params : {}, { api_version = this._client.apiVersion, update_mask } = _a4, body = __rest(_a4, ["api_version", "update_mask"]);
-    return this._client.patch(path10`/${api_version}/webhooks/${id}`, Object.assign({ query: { update_mask }, body }, options));
+    return this._client.patch(path11`/${api_version}/webhooks/${id}`, Object.assign({ query: { update_mask }, body }, options));
   }
   /**
    * Lists all Webhooks.
    */
   list(params = {}, options) {
     const _a4 = params !== null && params !== void 0 ? params : {}, { api_version = this._client.apiVersion } = _a4, query = __rest(_a4, ["api_version"]);
-    return this._client.get(path10`/${api_version}/webhooks`, Object.assign({ query }, options));
+    return this._client.get(path11`/${api_version}/webhooks`, Object.assign({ query }, options));
   }
   /**
    * Deletes a Webhook.
    */
   delete(id, params = {}, options) {
     const { api_version = this._client.apiVersion } = params !== null && params !== void 0 ? params : {};
-    return this._client.delete(path10`/${api_version}/webhooks/${id}`, options);
+    return this._client.delete(path11`/${api_version}/webhooks/${id}`, options);
   }
   /**
    * Gets a specific Webhook.
    */
   get(id, params = {}, options) {
     const { api_version = this._client.apiVersion } = params !== null && params !== void 0 ? params : {};
-    return this._client.get(path10`/${api_version}/webhooks/${id}`, options);
+    return this._client.get(path11`/${api_version}/webhooks/${id}`, options);
   }
   /**
    * Sends a ping event to a Webhook.
    */
   ping(id, params = void 0, options) {
     const { api_version = this._client.apiVersion, body } = params !== null && params !== void 0 ? params : {};
-    return this._client.post(path10`/${api_version}/webhooks/${id}:ping`, Object.assign({ body }, options));
+    return this._client.post(path11`/${api_version}/webhooks/${id}:ping`, Object.assign({ body }, options));
   }
   /**
    * Generates a new signing secret for a Webhook.
    */
   rotateSigningSecret(id, params = {}, options) {
     const _a4 = params !== null && params !== void 0 ? params : {}, { api_version = this._client.apiVersion } = _a4, body = __rest(_a4, ["api_version"]);
-    return this._client.post(path10`/${api_version}/webhooks/${id}:rotateSigningSecret`, Object.assign({ body }, options));
+    return this._client.post(path11`/${api_version}/webhooks/${id}:rotateSigningSecret`, Object.assign({ body }, options));
   }
 };
 BaseWebhooks._key = Object.freeze(["webhooks"]);
@@ -79984,7 +80239,7 @@ var NodeUploader = class {
   async stat(file2) {
     const fileStat = { size: 0, type: void 0 };
     if (typeof file2 === "string") {
-      const originalStat = await fs11.stat(file2);
+      const originalStat = await fs12.stat(file2);
       fileStat.size = originalStat.size;
       fileStat.type = this.inferMimeType(file2);
       return fileStat;
@@ -80132,7 +80387,7 @@ var NodeUploader = class {
     let fileHandle;
     const fileName = path$1.basename(file2);
     try {
-      fileHandle = await fs11.open(file2, "r");
+      fileHandle = await fs12.open(file2, "r");
       if (!fileHandle) {
         throw new Error(`Failed to open file`);
       }
@@ -80367,211 +80622,6 @@ function getApiKeyFromEnv() {
 import { execFileSync as execFileSync3, spawn as spawn4 } from "node:child_process";
 import fs13 from "node:fs";
 import path12 from "node:path";
-
-// src/path-guard.ts
-import fs12 from "node:fs";
-import path11 from "node:path";
-var IS_WINDOWS = process.platform === "win32";
-function normalizeForComparison(p) {
-  const normalized = path11.resolve(p);
-  return IS_WINDOWS ? normalized.toLowerCase() : normalized;
-}
-function toPosixRelative(workspaceRoot, absolutePath) {
-  const rel = path11.relative(workspaceRoot, absolutePath);
-  return rel.split(path11.sep).join("/");
-}
-function isInsideRoot(rootPath, candidatePath) {
-  const rootCmp = normalizeForComparison(rootPath);
-  const candCmp = normalizeForComparison(candidatePath);
-  if (candCmp === rootCmp) {
-    return true;
-  }
-  const prefix = rootCmp.endsWith(path11.sep) ? rootCmp : rootCmp + path11.sep;
-  return candCmp.startsWith(prefix);
-}
-function resolveRealPathOrNearestParent(targetPath) {
-  let current = path11.resolve(targetPath);
-  const trailingSegments = [];
-  while (!fs12.existsSync(current)) {
-    const parent = path11.dirname(current);
-    if (parent === current) {
-      return path11.resolve(targetPath);
-    }
-    trailingSegments.unshift(path11.basename(current));
-    current = parent;
-  }
-  const realExisting = fs12.realpathSync(current);
-  return trailingSegments.length > 0 ? path11.join(realExisting, ...trailingSegments) : realExisting;
-}
-function isProtectedWritePath(posixRel) {
-  const lower2 = posixRel.toLowerCase();
-  const segments = lower2.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return true;
-  }
-  if (segments[0] === ".git" || segments.includes(".git")) {
-    return true;
-  }
-  if (segments[0] === "node_modules" || segments.includes("node_modules")) {
-    return true;
-  }
-  if (lower2 === ".ag-bridge/config.json") {
-    return true;
-  }
-  const base = segments[segments.length - 1];
-  if (base === ".env" || base.startsWith(".env.")) {
-    return true;
-  }
-  return false;
-}
-function isProtectedReadPath(posixRel) {
-  const lower2 = posixRel.toLowerCase();
-  const segments = lower2.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return false;
-  }
-  if (segments.includes(".ssh")) {
-    return true;
-  }
-  const base = segments[segments.length - 1];
-  if ((base === ".env" || base.startsWith(".env.")) && base !== ".env.example" && base !== ".env.sample") {
-    return true;
-  }
-  if (base.endsWith(".pem") || base.endsWith(".key") || base === "id_rsa" || base === "id_ed25519") {
-    return true;
-  }
-  return false;
-}
-function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
-  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
-    throw new AgPluginError(
-      "INVALID_LOCKED_PATHS",
-      "lockedPaths must contain at least one relative file or directory path inside the workspace."
-    );
-  }
-  const realRoot = fs12.realpathSync(path11.resolve(workspaceRoot));
-  const normalizedScopes = [];
-  for (const rawScope of lockedPaths) {
-    const scope = rawScope.trim();
-    if (!scope || scope.includes("\0")) {
-      throw new AgPluginError("INVALID_LOCKED_PATHS", `Invalid lockedPath entry: "${rawScope}"`);
-    }
-    const resolved = path11.resolve(realRoot, scope);
-    if (!isInsideRoot(realRoot, resolved)) {
-      throw new AgPluginError(
-        "INVALID_LOCKED_PATHS",
-        `lockedPath "${scope}" resolves outside the workspace root.`
-      );
-    }
-    const realScope = resolveRealPathOrNearestParent(resolved);
-    if (!isInsideRoot(realRoot, realScope)) {
-      throw new AgPluginError(
-        "INVALID_LOCKED_PATHS",
-        `lockedPath "${scope}" escapes the workspace via symlink.`
-      );
-    }
-    const rel = toPosixRelative(realRoot, realScope);
-    if (isProtectedWritePath(rel)) {
-      throw new AgPluginError(
-        "PROTECTED_PATH_BLOCKED",
-        `lockedPath "${scope}" targets a protected path (.git, .env*, node_modules, or .ag-bridge/config.json).`
-      );
-    }
-    normalizedScopes.push(rel);
-  }
-  return normalizedScopes;
-}
-function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
-  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
-    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
-  }
-  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
-    throw new AgPluginError(
-      "PATH_OUTSIDE_LOCKED_SCOPE",
-      "Write denied: lockedPaths is empty (fail-closed policy)."
-    );
-  }
-  const realRoot = fs12.realpathSync(path11.resolve(workspaceRoot));
-  const resolvedTarget = path11.resolve(realRoot, targetPath);
-  if (!isInsideRoot(realRoot, resolvedTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Write denied: "${targetPath}" resolves outside the workspace root.`
-    );
-  }
-  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
-  if (!isInsideRoot(realRoot, realTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Write denied: "${targetPath}" escapes the workspace root via symlink.`
-    );
-  }
-  const relTarget = toPosixRelative(realRoot, realTarget);
-  if (isProtectedWritePath(relTarget)) {
-    throw new AgPluginError(
-      "PROTECTED_PATH_BLOCKED",
-      `Write denied: "${relTarget}" is a protected path and cannot be modified by delegated agents.`
-    );
-  }
-  const matchesScope = lockedPaths.some((scope) => {
-    const trimmed = scope.trim();
-    if (!trimmed || trimmed.includes("\0")) {
-      return false;
-    }
-    const resolvedScope = path11.resolve(realRoot, trimmed);
-    if (!isInsideRoot(realRoot, resolvedScope)) {
-      return false;
-    }
-    const realScope = resolveRealPathOrNearestParent(resolvedScope);
-    if (!isInsideRoot(realRoot, realScope)) {
-      return false;
-    }
-    const scopeCmp = normalizeForComparison(realScope);
-    const targetCmp = normalizeForComparison(realTarget);
-    if (targetCmp === scopeCmp) {
-      return true;
-    }
-    const dirPrefix = scopeCmp.endsWith(path11.sep) ? scopeCmp : scopeCmp + path11.sep;
-    return targetCmp.startsWith(dirPrefix);
-  });
-  if (!matchesScope) {
-    throw new AgPluginError(
-      "PATH_OUTSIDE_LOCKED_SCOPE",
-      `Write denied: "${relTarget}" is outside allowed lockedPaths [${lockedPaths.join(", ")}].`
-    );
-  }
-  return realTarget;
-}
-function assertReadablePath(workspaceRoot, targetPath) {
-  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
-    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
-  }
-  const realRoot = fs12.realpathSync(path11.resolve(workspaceRoot));
-  const resolvedTarget = path11.resolve(realRoot, targetPath);
-  if (!isInsideRoot(realRoot, resolvedTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Read denied: "${targetPath}" resolves outside the workspace root.`
-    );
-  }
-  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
-  if (!isInsideRoot(realRoot, realTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Read denied: "${targetPath}" escapes the workspace root via symlink.`
-    );
-  }
-  const relTarget = toPosixRelative(realRoot, realTarget);
-  if (isProtectedReadPath(relTarget)) {
-    throw new AgPluginError(
-      "PROTECTED_PATH_BLOCKED",
-      `Read denied: "${relTarget}" is a protected secret file.`
-    );
-  }
-  return realTarget;
-}
-
-// src/engines/api-worker.ts
 var MAX_READ_BYTES = 64 * 1024;
 var MAX_CMD_OUTPUT_BYTES = 16 * 1024;
 var MAX_LIST_ENTRIES = 200;
@@ -81498,6 +81548,10 @@ async function handleStartAgTask(input2, deps = {}) {
     normalizedLockedPaths = validateLockedPathsConfig(workspaceRoot, input2.lockedPaths);
   }
   const config2 = loadConfig(workspaceRoot, deps.detectorDeps?.env ?? process.env);
+  const ignoredAdvice = describeIgnoredSettings(config2);
+  if (ignoredAdvice) {
+    warnings.push(ignoredAdvice);
+  }
   const detection = detectEnvironment(
     config2,
     input2.modeOverride,
@@ -82204,6 +82258,10 @@ async function handleAgSession(input2, deps = {}) {
   }
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
   const config2 = loadConfig(workspaceRoot, detDeps.env);
+  const ignoredAdvice = describeIgnoredSettings(config2);
+  if (ignoredAdvice) {
+    warnings.push(ignoredAdvice);
+  }
   const detection = detectEnvironment(config2, "subscription", detDeps);
   if (!detection.subscription.detected || detection.subscription.cliBinary !== "agy" || !detection.subscription.cliPath) {
     return {
@@ -82500,6 +82558,10 @@ async function handleDelegateToAntigravity(input2, deps = {}) {
     normalizedLockedPaths = validateLockedPathsConfig(workspaceRoot, input2.lockedPaths);
   }
   const config2 = loadConfig(workspaceRoot, deps.detectorDeps?.env ?? process.env);
+  const ignoredAdvice = describeIgnoredSettings(config2);
+  if (ignoredAdvice) {
+    warnings.push(ignoredAdvice);
+  }
   const detection = detectEnvironment(
     config2,
     input2.modeOverride,

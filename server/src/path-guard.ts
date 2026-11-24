@@ -43,6 +43,14 @@ function resolveRealPathOrNearestParent(targetPath: string): string {
     : realExisting;
 }
 
+/** Whether `candidatePath`, resolved through links, lies inside `workspaceRoot`. */
+export function isInsideWorkspace(workspaceRoot: string, candidatePath: string): boolean {
+  return isInsideRoot(
+    resolveRealPathOrNearestParent(workspaceRoot),
+    resolveRealPathOrNearestParent(candidatePath),
+  );
+}
+
 function isProtectedWritePath(posixRel: string): boolean {
   const lower = posixRel.toLowerCase();
   const segments = lower.split('/').filter(Boolean);

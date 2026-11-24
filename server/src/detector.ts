@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveApiKey } from './config.js';
+import { describeIgnoredSettings, resolveApiKey } from './config.js';
 import { absolutePathDirs } from './exec-path.js';
 import {
   AgPluginError,
@@ -229,6 +229,11 @@ export function detectEnvironment(
         'Install & sign in to Antigravity (CLI `agy` or desktop app) for Subscription Mode, OR export GEMINI_API_KEY for API Fallback Mode.',
       );
     }
+  }
+
+  const ignoredAdvice = describeIgnoredSettings(config);
+  if (ignoredAdvice) {
+    recommendations.push(ignoredAdvice);
   }
 
   if (api.source === 'config') {

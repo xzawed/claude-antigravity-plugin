@@ -32,7 +32,7 @@ import {
   writeDispatchMarkdown,
   writeManifest,
 } from './bridge-fs.js';
-import { loadConfig, maskSecrets } from './config.js';
+import { describeIgnoredSettings, loadConfig, maskSecrets } from './config.js';
 import {
   assertResolvedMode,
   detectEnvironment,
@@ -314,6 +314,10 @@ export async function handleDelegateToAntigravity(
   }
 
   const config = loadConfig(workspaceRoot, deps.detectorDeps?.env ?? process.env);
+  const ignoredAdvice = describeIgnoredSettings(config);
+  if (ignoredAdvice) {
+    warnings.push(ignoredAdvice);
+  }
 
   const detection = detectEnvironment(
     config,

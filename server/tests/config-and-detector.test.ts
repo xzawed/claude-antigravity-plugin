@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -231,5 +232,140 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
     expect(overridden.subscription.agy_dangerously_skip_permissions).toBe(false);
     expect(overridden.subscription.agy_model).toBe('gemini-4-neon-high');
     expect(overridden.subscription.agy_effort).toBe('high');
+  });
+});
+
+// .ag-bridge/config.json lives in the workspace, so a repository can ship one (`git add -f`).
+describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
+  let tmpRoot: string;
+  let outsideDir: string;
+
+  const writeConfig = (data: unknown): void => {
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, '.ag-bridge', 'config.json'), JSON.stringify(data));
+  };
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: tmpRoot, stdio: 'ignore' });
+  };
+  // Every key a repository must not decide, each set to its unsafe value.
+  const unsafe = (appPath: string) => ({
+    subscription: {
+      app_path: appPath,
+      agy_dangerously_skip_permissions: true,
+      agy_sandbox: false,
+      agy_mode: 'auto',
+      agy_settings: '{"permissions":{"allow":["*"]}}',
+      agy_remote_agent: true,
+      agy_model: 'gemini-x', // not sensitive: always honored
+      timeout_sec: 120, // not sensitive: always honored
+    },
+    api: { apiKey: 'repo-supplied-key', api_key_env: 'GITHUB_TOKEN' },
+  });
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-trust-'));
+    outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-trust-outside-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it('TC-S17: subscription.app_path is honored only as an absolute path outside the workspace', () => {
+    const exe = process.platform === 'win32' ? 'agy.exe' : 'agy';
+    const inside = path.join(tmpRoot, 'tools', exe);
+    fs.mkdirSync(path.dirname(inside), { recursive: true });
+    fs.writeFileSync(inside, '');
+    const outside = path.join(outsideDir, exe);
+
+    for (const [appPath, honored] of [
+      [`./tools/${exe}`, false],
+      [`tools/${exe}`, false],
+      [inside, false],
+      [outside, true],
+    ] as const) {
+      writeConfig({ subscription: { app_path: appPath } });
+      const cfg = loadConfig(tmpRoot, {});
+      expect(cfg.subscription.app_path, appPath).toBe(honored ? appPath : 'auto');
+      if (honored) expect(cfg.ignoredSettings ?? [], appPath).toEqual([]);
+      else expect((cfg.ignoredSettings ?? []).join('\n'), appPath).toContain('subscription.app_path');
+    }
+  });
+
+  it('TC-S17b: an app_path outside the workspace that links back into it is not honored', () => {
+    const exe = process.platform === 'win32' ? 'agy.exe' : 'agy';
+    fs.mkdirSync(path.join(tmpRoot, 'tools'));
+    fs.writeFileSync(path.join(tmpRoot, 'tools', exe), '');
+    const link = path.join(outsideDir, 'link');
+    fs.symlinkSync(path.join(tmpRoot, 'tools'), link, 'junction'); // 'junction' is ignored on POSIX
+
+    writeConfig({ subscription: { app_path: path.join(link, exe) } });
+    expect(loadConfig(tmpRoot, {}).subscription.app_path).toBe('auto');
+  });
+
+  it('TC-S18: a config git tracks cannot pick a program or a secret, or weaken a safety default', () => {
+    git('init', '-q');
+    writeConfig(unsafe(path.join(outsideDir, 'agy.exe')));
+    git('add', '-f', '.ag-bridge/config.json');
+
+    const cfg = loadConfig(tmpRoot, {});
+    expect(cfg.subscription.app_path).toBe('auto');
+    expect(cfg.subscription.agy_dangerously_skip_permissions).toBe(false);
+    expect(cfg.subscription.agy_sandbox).toBe(true);
+    expect(cfg.subscription.agy_mode).toBe('accept-edits');
+    expect(cfg.subscription.agy_settings).toBeUndefined();
+    expect(cfg.subscription.agy_remote_agent).toBeUndefined();
+    expect(cfg.api.apiKey).toBeUndefined();
+    expect(cfg.api.api_key_env).toBe('GEMINI_API_KEY');
+    expect(cfg.subscription.agy_model).toBe('gemini-x');
+    expect(cfg.subscription.timeout_sec).toBe(120);
+    expect(cfg.ignoredSettings).toHaveLength(8);
+  });
+
+  it('TC-S18b: the same settings in the user\'s own (untracked) config are honored', () => {
+    git('init', '-q');
+    const outsideAgy = path.join(outsideDir, 'agy.exe');
+    writeConfig(unsafe(outsideAgy));
+
+    const cfg = loadConfig(tmpRoot, {});
+    expect(cfg.subscription.app_path).toBe(outsideAgy);
+    expect(cfg.subscription.agy_dangerously_skip_permissions).toBe(true);
+    expect(cfg.subscription.agy_sandbox).toBe(false);
+    expect(cfg.subscription.agy_mode).toBe('auto');
+    expect(cfg.api.api_key_env).toBe('GITHUB_TOKEN');
+    expect(cfg.ignoredSettings ?? []).toEqual([]);
+  });
+
+  it('TC-S18c: environment opt-ins stay the user\'s, and a tracked config may still tighten a default', () => {
+    git('init', '-q');
+    writeConfig({ subscription: { agy_dangerously_skip_permissions: false, agy_sandbox: true, agy_mode: 'plan' } });
+    git('add', '-f', '.ag-bridge/config.json');
+
+    const tightened = loadConfig(tmpRoot, {});
+    expect(tightened.subscription.agy_mode).toBe('plan');
+    expect(tightened.ignoredSettings ?? []).toEqual([]);
+
+    writeConfig({ subscription: { agy_dangerously_skip_permissions: true } });
+    git('add', '-f', '.ag-bridge/config.json');
+    const fromEnv = loadConfig(tmpRoot, { AG_DANGEROUSLY_SKIP_PERMISSIONS: '1' });
+    expect(fromEnv.subscription.agy_dangerously_skip_permissions).toBe(true); // the env var opted in
+  });
+
+  it('TC-S19: check_ag_environment names every ignored setting and how to keep it', () => {
+    git('init', '-q');
+    writeConfig({ subscription: { agy_sandbox: false } });
+    git('add', '-f', '.ag-bridge/config.json');
+
+    const env = detectEnvironment(loadConfig(tmpRoot, {}), undefined, {
+      platform: 'linux',
+      env: {},
+      homedir: '/home/tester',
+      existsSync: () => false,
+      findBinary: () => undefined,
+    });
+    const advice = env.recommendations.join('\n');
+    expect(advice).toContain('subscription.agy_sandbox');
+    expect(advice).toContain('git rm --cached .ag-bridge/config.json');
   });
 });

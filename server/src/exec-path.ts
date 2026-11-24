@@ -30,6 +30,11 @@ function isFullyQualifiedWin32(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }
 
+/** A path whose meaning does not depend on the current directory or drive. */
+export function isFullyQualifiedPath(p: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32' ? isFullyQualifiedWin32(p) : path.posix.isAbsolute(p);
+}
+
 /** What POSIX execvp searches when PATH is unset (`_PATH_DEFPATH`). Windows has no equivalent. */
 const POSIX_DEFAULT_PATH = '/usr/bin:/bin';
 

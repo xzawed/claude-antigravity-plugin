@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { isFullyQualifiedPath } from './exec-path.js';
+import { isTrackedFile } from './git-guard.js';
+import { isInsideWorkspace } from './path-guard.js';
 import {
   AgPluginError,
   BridgeConfig,
@@ -108,7 +111,7 @@ export function loadConfig(
   }
 
   const data = parsed.data;
-  return {
+  const merged: BridgeConfig = {
     execution_mode: data.execution_mode ?? base.execution_mode,
     git_guard: data.git_guard ?? base.git_guard,
     subscription: {
@@ -120,6 +123,70 @@ export function loadConfig(
       ...(data.api ?? {}),
     },
   };
+  const ignored = applyConfigTrust(workspaceRoot, data, merged, base);
+  return ignored.length > 0 ? { ...merged, ignoredSettings: ignored } : merged;
+}
+
+type TrustSection = 'subscription' | 'api';
+
+/**
+ * Settings a repository must not decide: each picks a program or a secret, or weakens a safety
+ * default. `.ag-bridge/config.json` lives in the workspace and a repository can commit one, so
+ * these are honored only from a config git does not track — the plugin keeps `.ag-bridge/` out of
+ * git, so the user's own file (written by `/ag-config`) is untracked. ARC-003 §7, TC-S17 ~ TC-S19.
+ */
+const TRUST_SENSITIVE: Array<[TrustSection, string, (value: unknown) => boolean]> = [
+  ['subscription', 'app_path', (v) => v !== undefined && v !== 'auto'],
+  ['subscription', 'agy_dangerously_skip_permissions', (v) => v === true],
+  ['subscription', 'agy_sandbox', (v) => v === false],
+  ['subscription', 'agy_mode', (v) => v === 'auto'],
+  ['subscription', 'agy_settings', (v) => v !== undefined],
+  ['subscription', 'agy_remote_agent', (v) => v === true],
+  ['api', 'apiKey', (v) => v !== undefined],
+  ['api', 'api_key_env', (v) => v !== undefined && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env],
+];
+
+function applyConfigTrust(
+  workspaceRoot: string,
+  data: z.infer<typeof PartialBridgeConfigSchema>,
+  merged: BridgeConfig,
+  base: BridgeConfig,
+): string[] {
+  const ignored: string[] = [];
+  const fromFile = (section: TrustSection, key: string): unknown =>
+    (data[section] as Record<string, unknown> | undefined)?.[key];
+  const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile(section, key)));
+
+  // git runs only when the file sets one of these, so an ordinary config costs no process.
+  if (unsafe.length > 0 && isTrackedFile(workspaceRoot, '.ag-bridge/config.json')) {
+    for (const [section, key] of unsafe) {
+      const target = merged[section] as unknown as Record<string, unknown>;
+      const fallback = (base[section] as unknown as Record<string, unknown>)[key];
+      if (fallback === undefined) delete target[key];
+      else target[key] = fallback;
+      ignored.push(`${section}.${key} (the file is tracked by git, so the repository may have supplied it)`);
+    }
+  }
+
+  // From any config: the program to launch must be absolute and outside the workspace.
+  const appPath = merged.subscription.app_path;
+  if (appPath !== 'auto' && (!isFullyQualifiedPath(appPath) || isInsideWorkspace(workspaceRoot, appPath))) {
+    merged.subscription.app_path = 'auto';
+    ignored.push('subscription.app_path (not an absolute path outside the workspace)');
+  }
+  return ignored;
+}
+
+/** One recommendation naming every setting `loadConfig` ignored, and how to keep them. */
+export function describeIgnoredSettings(config: BridgeConfig): string | undefined {
+  if (!config.ignoredSettings || config.ignoredSettings.length === 0) {
+    return undefined;
+  }
+  return (
+    `Ignored settings from .ag-bridge/config.json: ${config.ignoredSettings.join('; ')}. ` +
+    'To use them, keep the file out of git (`git rm --cached .ag-bridge/config.json`) and point ' +
+    'subscription.app_path at an agy installed outside the project, or pass the option per call.'
+  );
 }
 
 export function resolveApiKey(
