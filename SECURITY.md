@@ -36,7 +36,7 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S23d`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S23e`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
