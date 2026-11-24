@@ -37,7 +37,7 @@
    - `.git/`, `.env*`, `.ag-bridge/config.json`에 대한 에이전트 쓰기는 어떠한 경우에도 차단한다.
 2. **원자적 상태 갱신 (Atomic Bridge I/O)**
    - `.ag-bridge/manifest.json` 등 상태 파일은 임시 파일(`.tmp`)에 기록 후 `rename`으로 원자적 교체한다.
-   - `.ag-bridge/`는 항상 대상 워크스페이스의 `.gitignore`에 등록되어야 하며 API 키는 로그/리포트에 절대 노출하지 않는다.
+   - `.ag-bridge/`는 대상 워크스페이스에서 항상 git이 무시해야 하며 API 키는 로그/리포트에 절대 노출하지 않는다. git 저장소에서는 사용자 프로젝트의 추적 파일을 고치지 않도록 로컬 전용 `.git/info/exclude`에 등록하고(핸드오프 템플릿 경로 포함), 저장소가 아닐 때만 `.gitignore`에 등록한다. 이 경로는 SessionStart 훅이 모든 폴더에서 자동 실행하므로 **프로세스를 띄우지 않고**(`git` 실행 금지), **링크를 따라 쓰지 않는다**. 근거: [ADR-005](docs/06-adr/ADR-005-local-git-exclude.md).
 3. **크로스플랫폼 우선 (Windows / macOS / Linux)**
    - 경로 조립은 `path.join` / `path.resolve`를 사용하고 셸 명령 인젝션을 유발하는 문자열 결합 대신 `spawn(..., { shell: false })`를 기본으로 한다.
    - `hooks/hooks.json` 및 `.mcp.json`의 `${CLAUDE_PLUGIN_ROOT}` 경로는 공백 포함 경로(Windows)를 고려해 안전하게 처리한다.

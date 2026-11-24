@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-002` |
-| **버전** | `1.0.0` |
+| **버전** | `1.1.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [시스템 아키텍처](./system-architecture.md), [보안 & Git Guard](./security-and-git-guard.md), [ADR-001](../06-adr/ADR-001-file-based-ag-bridge.md) |
 
 ---
@@ -18,7 +18,8 @@
 
 ```text
 <target-workspace>/
-├── .gitignore                  # ".ag-bridge/" 항목 자동 등록
+├── .git/info/exclude           # git 저장소: ".ag-bridge/"·핸드오프 템플릿 경로 등록 (로컬 전용, 추적 파일 아님)
+├── .gitignore                  # git 저장소가 아닐 때만 ".ag-bridge/" 등록 (§5.3)
 ├── .agent/
 │   └── workflows/
 │       └── claude-handoff.md   # Antigravity 핸드오프 워크플로우 (자동 동기화)
@@ -192,11 +193,19 @@ export interface BridgeManifest {
    - `timeout_sec`를 초과한 경우 **Stale Lock**으로 판단하여 기존 `manifest.json`을 `FAILED(STALE_TIMEOUT)`로 마킹하고 `history/<taskId>.json`으로 아카이브한 뒤 새 작업을 수락한다.
 3. `status`가 `VERIFIED` 또는 `FAILED`인 경우 기존 메타데이터를 `history/<taskId>.json`에 아카이브하고 새 `manifest.json`을 생성한다.
 
-### 5.3 `.gitignore` 자동 등록 규칙
-- `cli-init.ts` 및 `bridge-fs.ts`는 대상 워크스페이스 루트의 `.gitignore`를 확인한다.
-- `.ag-bridge` 또는 `.ag-bridge/` 라인이 이미 존재하면 수정하지 않는다(Idempotent).
-- 존재하지 않으면 파일 끝에 개행을 보장한 뒤 아래 블록을 추가한다:
+### 5.3 git 무시 등록 규칙 ([ADR-005](../06-adr/ADR-005-local-git-exclude.md))
+- `cli-init.ts`(SessionStart)와 위임 시작 경로(`index.ts`·`jobs.ts`)는 `bridge-fs.ts`의 `ensureGitignoreEntry()`를 호출한다. 결과의 `file`이 어느 파일에 기록했는지 알려 준다(`git-info-exclude` / `gitignore`).
+- **git 작업 트리 안:** 가장 가까운 `.git`을 찾아(하위 디렉터리, `.git` 파일의 `gitdir:`·`commondir`로 연결된 worktree·submodule 포함, `GIT_CEILING_DIRECTORIES` 준수) 저장소의 로컬 전용 `info/exclude`에 아래 줄 중 없는 것만 덧붙인다. 사용자 프로젝트의 **추적 파일 `.gitignore`는 고치지 않는다**(이전 버전이 넣은 `.ag-bridge/` 줄도 그대로 둔다).
+  ```gitignore
+  # antigravity-delegate: local session artifacts (kept out of the tracked .gitignore)
+  .ag-bridge/
+  **/.agent/workflows/claude-handoff.md
+  **/.agents/workflows/claude-handoff.md
+  ```
+- **git 작업 트리 밖:** 추적 파일이 없으므로 기존대로 `.gitignore`에 `.ag-bridge` 또는 `.ag-bridge/` 줄이 없을 때만 아래 블록을 추가한다(Idempotent).
   ```gitignore
   # Antigravity Claude Bridge (local session artifacts)
   .ag-bridge/
   ```
+- **안전 규칙:** 이 경로는 `git`을 실행하지 않는다(PATH에 상대 경로가 있으면 워크스페이스에 심어 둔 `git` 바이너리가 실행된다 — 실측). `HEAD`가 있는 실제 디렉터리만 git 디렉터리로 인정하고, `.git`·`info`·`exclude`·`.gitignore`가 심볼릭 링크나 정션이면 그것을 통해 쓰지 않는다(`exclude`가 안전하지 않으면 `.gitignore` 경로로, `.gitignore`도 링크면 아무것도 쓰지 않고 `protected: false`).
+- 상태 필드 `bridge.gitignoreProtected`는 `.gitignore` 또는 `info/exclude` 중 한쪽에 `.ag-bridge` 줄이 있으면 `true`다.

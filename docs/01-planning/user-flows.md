@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `PLN-002` |
-| **버전** | `1.0.0` |
+| **버전** | `1.1.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](./PRD.md), [브릿지 프로토콜](../02-architecture/bridge-protocol.md), [프롬프트 & 커맨드 명세](../03-specs/prompts-and-commands.md) |
 
 ---
@@ -40,14 +40,14 @@ sequenceDiagram
     alt 최초 실행
         Init->>FS: .ag-bridge/ 및 artifacts/ 생성
         Init->>FS: 기본 config.json 생성 (mode: auto)
-        Init->>FS: .gitignore에 .ag-bridge/ 추가 (중복 체크)
+        Init->>FS: git 저장소면 .git/info/exclude, 아니면 .gitignore에 .ag-bridge/ 추가 (중복 체크)
     end
     Init->>FS: claude-handoff.md 템플릿 버전 비교 및 동기화
     Init-->>CC: 종료 코드 0 (실패 시에도 세션 비차단)
 ```
 
 ### 동작 정책
-- 워크스페이스가 빈 폴더이거나 `.gitignore`가 없더라도 안전하게 처리한다(`.gitignore`가 없으면 생성하거나 Git 리포지토리인 경우에만 추가).
+- 워크스페이스가 빈 폴더이거나 `.gitignore`가 없더라도 안전하게 처리한다. git 저장소면 추적 파일을 건드리지 않고 `.git/info/exclude`에 등록해 초기화 뒤에도 `git status`가 깨끗하고, 저장소가 아니면 `.gitignore`를 만들거나 덧붙인다([ADR-005](../06-adr/ADR-005-local-git-exclude.md)).
 - 사용자가 `.agent/workflows/claude-handoff.md`를 직접 커스터마이징한 경우(해시 불일치 & 사용자 수정 마커 존재 시) 덮어쓰지 않고 경고만 남긴다.
 
 ---

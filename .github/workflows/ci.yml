@@ -101,6 +101,26 @@ jobs:
             } finally {
               fs.rmSync(smokeDir, { recursive: true, force: true });
             }
+
+            // G3 (git): inside a repository the hook must leave the work tree clean (ADR-005)
+            const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "ag plugin repo "));
+            try {
+              const git = (...args) => execFileSync("git", args, { cwd: repoDir, encoding: "utf8" }).trim();
+              git("init", "-q");
+              execFileSync(process.execPath, ["server/dist/cli-init.js", "--silent", "--workspace", repoDir], {
+                stdio: "inherit"
+              });
+              if (fs.existsSync(path.join(repoDir, ".gitignore"))) {
+                throw new Error("cli-init wrote .gitignore inside a git repository");
+              }
+              const status = git("status", "--porcelain", "--untracked-files=all");
+              if (status !== "") {
+                throw new Error("cli-init left the work tree dirty:\n" + status);
+              }
+              console.log("G3 (git) PASS: work tree stays clean on", process.platform);
+            } finally {
+              fs.rmSync(repoDir, { recursive: true, force: true });
+            }
           '
 
   docs-integrity:

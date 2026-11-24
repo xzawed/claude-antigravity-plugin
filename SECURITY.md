@@ -34,9 +34,9 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ---
 
-## Security Architecture & Boundaries (`v1.4.0`)
+## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S07`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S11`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
@@ -57,3 +57,6 @@ This plugin delegates file edits, browser automation, and verification commands 
    - Automatically disposes pending auth sessions, background jobs, and persistent `stream-json` workers on MCP server exit.
 5. **Dependency Hygiene:**
    - All dependencies are audited via `npm --prefix server audit` (**0 known vulnerabilities**), and GitHub Actions CI runs with least-privilege `permissions: contents: read`.
+6. **Zero-Execution SessionStart Hook & No Tracked-File Edits (`server/src/bridge-fs.ts`, `server/src/cli-init.ts`):**
+   - The `SessionStart` hook runs in every folder Claude Code opens, so it never spawns a process: a bare `git` can resolve to a binary planted in that folder when `PATH` contains a relative entry such as `.`. `server/dist/cli-init.js` contains no `child_process` reference (`TC-S08`).
+   - Inside a git repository it lists `.ag-bridge/` and the handoff template paths in the local-only `.git/info/exclude` instead of editing the tracked `.gitignore`. It accepts only a real git directory that contains `HEAD` and never writes through a symlink or junction (`TC-S09` ~ `TC-S11`). See [ADR-005](./docs/06-adr/ADR-005-local-git-exclude.md).

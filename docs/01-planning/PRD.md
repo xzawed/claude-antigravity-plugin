@@ -3,9 +3,9 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `PLN-001` |
-| **버전** | `1.0.0` |
+| **버전** | `1.1.0` |
 | **상태** | `Approved` |
-| **최종 수정일** | `2026-11-22` |
+| **최종 수정일** | `2026-11-24` |
 | **원본 기준** | [claude_antigravity_plugin_spec_md.md](../../claude_antigravity_plugin_spec_md.md) |
 | **관련 문서** | [사용자/에이전트 플로우](./user-flows.md), [시스템 아키텍처](../02-architecture/system-architecture.md) |
 
@@ -42,7 +42,7 @@ Claude Code 내부에서 **단일 MCP 플러그인(`antigravity-delegate`)**을 
 - Claude Code 플러그인 패키징 (`.claude-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json`, `skills/`, `commands/`, `templates/`)
 - 내장 Stdio MCP 서버 (`delegate_to_antigravity`, `check_ag_environment`, `rollback_ag_task`)
 - Dual Execution Mode 자동 감지 및 수동 전환 (`auto` / `subscription` / `api`)
-- `.ag-bridge/` 파일 기반 단일 진실 공급원(SSOT) 프로토콜 및 `.gitignore` 자동 등록
+- `.ag-bridge/` 파일 기반 단일 진실 공급원(SSOT) 프로토콜 및 git 무시 자동 등록(git 저장소는 `.git/info/exclude`, 아니면 `.gitignore` — [ADR-005](../06-adr/ADR-005-local-git-exclude.md))
 - `SessionStart` 훅을 통한 대상 워크스페이스 자동 초기화 (`cli-init.ts`)
 - 작업 전 Git 체크포인트 생성 및 실패/불만족 시 즉시 롤백 (`git-guard.ts`)
 - `lockedPaths` 기반 쓰기 범위 제한 및 Path Traversal 방지
@@ -60,7 +60,7 @@ Claude Code 내부에서 **단일 MCP 플러그인(`antigravity-delegate`)**을 
 
 | ID | 분류 | 요구사항 | 우선순위 | 수용 기준 (Acceptance Criteria) |
 | :--- | :--- | :--- | :---: | :--- |
-| `FR-001` | 플러그인 초기화 | Claude Code 세션 시작 시 `SessionStart` 훅이 대상 워크스페이스에 `.ag-bridge/` 및 `.gitignore` 항목을 자동 초기화한다. | P0 | 최초 실행 시 `.ag-bridge/config.json` 생성, `.gitignore`에 `.ag-bridge/` 중복 없이 추가, 오류 시 세션 블로킹 없음(`--silent`) |
+| `FR-001` | 플러그인 초기화 | Claude Code 세션 시작 시 `SessionStart` 훅이 대상 워크스페이스에 `.ag-bridge/`와 git 무시 항목을 자동 초기화한다. | P0 | 최초 실행 시 `.ag-bridge/config.json` 생성, `.ag-bridge/`를 중복 없이 git 무시 등록(git 저장소는 `.git/info/exclude` — 실행 후 `git status`가 깨끗, 아니면 `.gitignore`), 오류 시 세션 블로킹 없음(`--silent`) |
 | `FR-002` | 환경 감지 | `execution_mode: "auto"`일 때 로컬 Antigravity 앱/CLI(`agy`/`antigravity`)를 우선 감지하고, 없으면 `GEMINI_API_KEY`를 감지한다. | P0 | macOS/Windows/Linux에서 우선순위 `subscription -> api -> NO_ANTIGRAVITY_PROVIDER` 정확 판별 |
 | `FR-003` | 상태 진단 | `check_ag_environment` MCP Tool 및 `/ag-status` 커맨드로 현재 실행 모드, 감지 경로, API 키 설정 여부(마스킹), 활성 작업 상태를 조회한다. | P0 | 민감 키 값 노출 없이 구조화된 JSON 및 마크다운 표 출력 |
 | `FR-004` | 설정 관리 | `/ag-config` 커맨드 또는 `.ag-bridge/config.json`으로 실행 모드, 모델, 타임아웃, 최대 턴 수를 변경할 수 있다. | P1 | 유효하지 않은 모드/값 입력 시 스키마 검증 에러 반환, 유효 값은 즉시 반영 |

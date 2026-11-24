@@ -454,7 +454,7 @@ export async function handleRollbackAgTask(
 export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpServer {
   const server = new McpServer({
     name: 'antigravity-delegate',
-    version: '1.4.0',
+    version: '1.4.1',
   });
 
   const sharedDelegateSchema = {

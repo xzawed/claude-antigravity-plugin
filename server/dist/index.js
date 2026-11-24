@@ -82535,7 +82535,7 @@ async function handleRollbackAgTask(input2) {
 function createAntigravityMcpServer(deps = {}) {
   const server = new McpServer({
     name: "antigravity-delegate",
-    version: "1.4.0"
+    version: "1.4.1"
   });
   const sharedDelegateSchema = {
     title: external_exports.string().min(3).max(120),

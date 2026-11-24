@@ -7,7 +7,7 @@
 **Claude Code 안에서 복사·붙여넣기 없이 Google Antigravity의 모든 성능을 100% 끌어내는 공식 협업 플러그인**
 
 [![CI](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.1)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#전체-커맨드--mcp-상세-레퍼런스)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#한눈에-보는-21개-슬래시-커맨드-지도)
 [![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
@@ -410,7 +410,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | :--- | :--- |
 | **무손실 Git Guard** | 작업 시작 직전 수정 중이던 파일과 원래 있던 새 파일(untracked) 목록을 자동 기록합니다. `/ag-rollback` 실행 시 Antigravity가 만든 파일만 골라 지우고 내 파일은 100% 살려둡니다. |
 | **경로 잠금 (Path Guard)** | `.git/`, `.env*`(비밀번호 파일), `node_modules/`, `.ag-bridge/config.json` 수정은 어떤 경우에도 원천 차단하며 `lockedPaths` 밖의 파일 탈출도 막습니다. |
-| **`.gitignore` 자동 보호** | 임시 작업 폴더인 `.ag-bridge/`를 프로젝트 `.gitignore`에 자동 등록해 실수로 GitHub에 올라가는 일을 방지합니다. |
+| **커밋되지 않는 브릿지 (추적 파일 무수정)** | 임시 작업 폴더 `.ag-bridge/`와 핸드오프 워크플로 파일이 실수로 커밋되지 않게 합니다. git 저장소에서는 로컬 전용 `.git/info/exclude`에 등록해 프로젝트의 추적 파일을 건드리지 않고, 저장소가 아니면 `.ag-bridge/`를 `.gitignore`에 등록합니다. |
 | **비밀 정보 자동 마스킹** | API 키, OAuth 인가 코드, 인증 토큰은 로그·리포트·에러 메시지에서 자동으로 `[REDACTED]`로 가려집니다. |
 
 ---
@@ -441,6 +441,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | **`NO_ANTIGRAVITY_PROVIDER`** | 로컬 Antigravity(`agy`)와 `GEMINI_API_KEY`가 모두 없음 | `agy` 설치 후 `/ag-login` 실행 **또는** `GEMINI_API_KEY` 설정 후 `/ag-status` 확인 |
 | **로그인 안 됨 / 모델 0개 표시** | `agy`는 설치됐지만 Google 계정 로그인이 아직 안 됨 | Claude Code에서 `/ag-login` 실행 (SSH 환경은 `/ag-login --manual`) |
 | **MCP 서버 연결 실패: `Cannot find module …/server/dist/index.js`** | v1.4.1 이전 버전을 GitHub에서 설치 — 빌드된 서버가 저장소에 없었고 마켓플레이스 설치는 빌드를 하지 않음 | 위 [업데이트 방법](#-업데이트-방법-복사해서-바로-실행)대로 플러그인 업데이트 — v1.4.1부터 미리 빌드된 번들이 들어 있음 |
+| **세션 뒤 `git status`에 ` M .gitignore`·`?? .agent/`가 보임** | v1.4.0 이하는 추적 파일 `.gitignore`에 `# Antigravity Claude Bridge` 블록을 덧붙이고 `.agent/workflows/claude-handoff.md`를 추적되지 않은 채로 남겼음 | v1.4.1 이상으로 업데이트하면 로컬 전용 `.git/info/exclude`를 쓰므로 다음 세션 시작 때 `.agent/`가 사라집니다. 그다음 `.gitignore`에서 `# Antigravity Claude Bridge` 3줄 블록을 지우세요(그 파일의 유일한 변경이면 `git restore .gitignore`). |
 | **업데이트했는데 새 커맨드가 안 보임** | `server/dist/` 재빌드 또는 플러그인 리로드 누락 | 위 [업데이트 블록](#-업데이트-방법-복사해서-바로-실행) 실행 후 Claude Code에서 `/reload-plugins` 입력 |
 | **`BRIDGE_BUSY`** | 현재 폴더에서 이전 위임 작업이 아직 `RUNNING` 중 | `/ag-jobs`로 진행 상황 확인하거나 `/ag-cancel`로 안전 중단 |
 | **Windows 공백 포함 폴더 경로 오류** | 경로에 큰따옴표 누락 | 경로 전체를 큰따옴표로 감싸세요: `claude --plugin-dir "C:\My Plugins\claude-antigravity-plugin"` |
@@ -474,7 +475,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 ```text
 claude-antigravity-plugin/
 ├── assets/                        # 히어로 배너 및 5종 벡터 도식(여정·커맨드지도·아키텍처·벤치마크·상태머신)
-├── .claude-plugin/                # plugin.json (v1.4.0) & marketplace.json
+├── .claude-plugin/                # plugin.json (v1.4.1) & marketplace.json
 ├── .mcp.json                      # 내장 Stdio MCP 서버 실행 정의
 ├── hooks/hooks.json               # SessionStart 자동 초기화 훅
 ├── skills/ag-delegate/SKILL.md    # 자율 위임 및 검수 스킬

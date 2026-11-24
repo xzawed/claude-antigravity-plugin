@@ -7,7 +7,7 @@
 **Use 100% of Google Antigravity's Superpowers Right Inside Claude Code — With Zero Manual Copy-Paste**
 
 [![CI](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/xzawed/claude-antigravity-plugin/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.4.0-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.0)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.4.1)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#full-command--mcp-reference)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#visual-map-of-all-21-commands)
 [![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)](./docs/05-verification/verification-report.md)
@@ -410,7 +410,7 @@ By default, the plugin runs safely (`agy_mode: "accept-edits"`, `agy_sandbox: tr
 | :--- | :--- |
 | **Lossless Git Guard** | Snapshots all modified, staged, unstaged, and pre-existing untracked files *before* Antigravity starts. `/ag-rollback` restores everything without ever deleting your own untracked notes or drafts. |
 | **Fail-Closed Path Guard** | Even before checking providers, blocks edits to `.git/`, `.env*`, `node_modules/`, and `.ag-bridge/config.json`, and stops `../` or symlink escapes outside `lockedPaths`. |
-| **Atomic Bridge & `.gitignore`** | Automatically adds `.ag-bridge/` to `.gitignore` so temporary handoff files are never accidentally committed to your repo. |
+| **Atomic Bridge, Never Committed** | Keeps `.ag-bridge/` and the handoff workflow file out of git *without editing your tracked files*: inside a repository they are listed in the local-only `.git/info/exclude`; outside one, `.ag-bridge/` goes to `.gitignore`. |
 | **Secret Redaction** | API keys, OAuth authorization codes, and tokens are automatically replaced with `[REDACTED]` in logs, reports, and error responses. |
 
 ---
@@ -441,6 +441,7 @@ Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) a
 | **`NO_ANTIGRAVITY_PROVIDER`** | Neither Antigravity (`agy`) nor `GEMINI_API_KEY` was found | Install `agy` and run `/ag-login`, **or** export `GEMINI_API_KEY` and run `/ag-status`. |
 | **Not logged in / 0 models returned** | `agy` is installed, but your Google account isn't signed in yet | Run `/ag-login` (or `/ag-login --manual` over SSH). |
 | **MCP server fails to connect: `Cannot find module …/server/dist/index.js`** | Installed from GitHub before v1.4.1, which did not ship the built server (marketplace installs run no build) | Update the plugin as shown in [How to Update](#-how-to-update-copy--paste) — v1.4.1+ ships a prebuilt bundle. |
+| **`git status` shows ` M .gitignore` and `?? .agent/` after a session** | v1.4.0 and earlier appended an `# Antigravity Claude Bridge` block to your tracked `.gitignore` and left `.agent/workflows/claude-handoff.md` untracked | Update to v1.4.1+: it uses the local `.git/info/exclude`, so `.agent/` disappears on the next session start. Then delete the 3-line `# Antigravity Claude Bridge` block from `.gitignore` (or `git restore .gitignore` if that was your only change there). |
 | **Plugin doesn't show new commands after updating** | `server/dist/` wasn't rebuilt or Claude Code hasn't reloaded plugins | Run the [Update block](#-how-to-update-copy--paste), then type `/reload-plugins` in Claude Code. |
 | **`BRIDGE_BUSY`** | Another delegation is currently `RUNNING` in this folder | Check `/ag-jobs` to monitor it, or stop it with `/ag-cancel`. |
 | **Windows path with spaces fails** | Folder path wasn't wrapped in quotes | Always wrap paths with spaces in quotes: `claude --plugin-dir "C:\My Plugins\claude-antigravity-plugin"`. |
@@ -474,7 +475,7 @@ Measured on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`) a
 ```text
 claude-antigravity-plugin/
 ├── assets/                        # Hero banner & 5 vector architecture/journey/command/benchmark diagrams
-├── .claude-plugin/                # plugin.json (v1.4.0) & marketplace.json
+├── .claude-plugin/                # plugin.json (v1.4.1) & marketplace.json
 ├── .mcp.json                      # Embedded Stdio MCP server definition
 ├── hooks/hooks.json               # SessionStart auto-initialization hook
 ├── skills/ag-delegate/SKILL.md    # Autonomous delegation & review skill

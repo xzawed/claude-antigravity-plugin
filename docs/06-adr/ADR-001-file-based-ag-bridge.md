@@ -32,5 +32,5 @@ Claude Code(내장 MCP 서버)와 로컬 Antigravity 에이전트(또는 내장 
   - 개발자가 `.ag-bridge/dispatch.md`와 `report.md`를 직접 열어 위임 내용과 스크린샷을 투명하게 검수할 수 있다.
   - Subscription 모드와 API 모드가 동일한 브릿지 포맷을 공유하므로 결과 회수 및 롤백 로직이 100% 일원화된다.
 - **트레이드오프 및 대응:**
-  - `.ag-bridge/`가 실수로 Git에 커밋될 위험 → `cli-init.ts`와 `bridge-fs.ts`가 `.gitignore` 등록을 자동 보장한다.
+  - `.ag-bridge/`가 실수로 Git에 커밋될 위험 → `cli-init.ts`와 `bridge-fs.ts`가 `.gitignore` 등록을 자동 보장한다. *(등록 위치는 [ADR-005](./ADR-005-local-git-exclude.md)가 대체 — git 저장소는 로컬 전용 `.git/info/exclude`, 아니면 `.gitignore`.)*
   - 비정상 종료 시 상태 잔류 위험 → `updatedAt` + `timeout_sec` 기반 Stale Lock 자동 감지/아카이브를 적용한다.
