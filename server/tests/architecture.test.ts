@@ -81,7 +81,19 @@ describe('module layering (ARC-001 §3, TC-U33)', () => {
     };
     for (const id of modules.keys()) visit(id, []);
 
-    expect(modules.get('cli-init')).toEqual(['bridge-fs']);
+    // Everything the hook reaches, directly or not: bridge-fs importing config would pull git-guard
+    // and exec-path into the hook bundle.
+    const reached = new Set<string>();
+    const reach = (id: string): void => {
+      for (const dep of modules.get(id) ?? []) {
+        if (!reached.has(dep)) {
+          reached.add(dep);
+          reach(dep);
+        }
+      }
+    };
+    reach('cli-init');
+    expect([...reached].sort()).toEqual(['bridge-fs', 'types']);
     expect(problems).toEqual([]);
   });
 });
