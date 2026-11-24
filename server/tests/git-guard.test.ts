@@ -189,6 +189,84 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(info).toEqual({ isGitRepo: false });
   });
 
+  // A repository delivered with its .git/ (an archive, a shared folder) can carry config and hooks
+  // that git runs on its own (measured: core.fsmonitor on status and stash create, the
+  // reference-transaction hook on update-ref). Git Guard's plumbing must not run them.
+  const markerScript = (dir: string, name: string): string => {
+    const marker = path.join(dir, `${name}.marker`).replace(/\\/g, '/');
+    const script = path.join(dir, '.git', `${name}.sh`);
+    fs.writeFileSync(script, `#!/bin/sh\necho ran >> "${marker}"\ncat >/dev/null\n`, { mode: 0o755 });
+    return script.replace(/\\/g, '/');
+  };
+
+  it('TC-S20: Git Guard never runs a core.fsmonitor command the repository configures', () => {
+    initRepo(tmpRoot);
+    git(tmpRoot, ['config', 'core.fsmonitor', markerScript(tmpRoot, 'fsmonitor')]);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2;\n', 'utf8');
+
+    expect(getGitInfo(tmpRoot).isDirty).toBe(true);
+    expect(createCheckpoint(tmpRoot, 'task-fsmonitor', 'best_effort').isStashSnapshot).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, 'fsmonitor.marker'))).toBe(false);
+  });
+
+  it('TC-S20b: Git Guard never runs the repository\'s hooks (reference-transaction on update-ref)', () => {
+    initRepo(tmpRoot);
+    fs.copyFileSync(
+      markerScript(tmpRoot, 'reftx'),
+      path.join(tmpRoot, '.git', 'hooks', 'reference-transaction'),
+    );
+    fs.chmodSync(path.join(tmpRoot, '.git', 'hooks', 'reference-transaction'), 0o755);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 3;\n', 'utf8');
+
+    const cp = createCheckpoint(tmpRoot, 'task-hooks', 'best_effort');
+    expect(cp.isStashSnapshot).toBe(true);
+    expect(git(tmpRoot, ['rev-parse', 'refs/ag-bridge/checkpoints/task-hooks'])).toBe(cp.checkpointRef);
+    expect(fs.existsSync(path.join(tmpRoot, 'reftx.marker'))).toBe(false);
+  });
+
+  it('TC-S20c: a rollback in a partial clone never runs the repository\'s transport command (lazy fetch)', () => {
+    // A partial clone fetches missing blobs on demand from its promisor remote; the repository's
+    // config picks that remote and core.sshCommand (Grok leg; measured: `reset --hard` ran it).
+    const seed = path.join(tmpRoot, 'seed');
+    fs.mkdirSync(seed);
+    initRepo(seed);
+    const oldRev = git(seed, ['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(seed, 'app.ts'), 'export const version = 2;\n', 'utf8');
+    git(seed, ['commit', '-qam', 'v2']);
+    const bare = path.join(tmpRoot, 'server.git');
+    git(tmpRoot, ['clone', '-q', '--bare', seed, bare]);
+    git(bare, ['config', 'uploadpack.allowFilter', 'true']);
+    const clone = path.join(tmpRoot, 'clone');
+    git(tmpRoot, ['clone', '-q', '--filter=blob:none', `file://${bare.replace(/\\/g, '/')}`, clone]);
+    git(clone, ['config', 'remote.origin.url', 'ssh://example.invalid/repo.git']);
+    // The fake ssh must not read stdin: git keeps the transport pipe open, so `cat` would deadlock.
+    const sshMarker = path.join(clone, 'ssh.marker').replace(/\\/g, '/');
+    const fakeSsh = path.join(clone, '.git', 'fake-ssh.sh');
+    fs.writeFileSync(fakeSsh, `#!/bin/sh\necho ran >> "${sshMarker}"\nexit 1\n`, { mode: 0o755 });
+    git(clone, ['config', 'core.sshCommand', fakeSsh.replace(/\\/g, '/')]);
+
+    const manifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'task-lazy',
+      title: 'Lazy fetch rollback',
+      mode: 'api',
+      status: 'VERIFIED',
+      lockedPaths: ['app.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: oldRev, // its app.ts blob is not in the partial clone
+      gitCheckpointIsStash: false,
+      gitUntrackedBaseline: [],
+      artifacts: [],
+    };
+    try {
+      rollbackCheckpoint(clone, manifest);
+    } catch {
+      // the missing blob cannot be fetched: the rollback fails closed
+    }
+    expect(fs.existsSync(path.join(clone, 'ssh.marker'))).toBe(false);
+  });
+
   it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {
     initRepo(tmpRoot);
     fs.writeFileSync(path.join(tmpRoot, 'extra.ts'), 'export const extra = 1;\n', 'utf8');
