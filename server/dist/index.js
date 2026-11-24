@@ -59806,6 +59806,17 @@ function realFoldersTo(workspaceRoot, rel, moveAside) {
     if (!st || st.isSymbolicLink() || !st.isDirectory()) fs3.mkdirSync(abs);
   }
 }
+function linkOnTheWay(workspaceRoot, rel) {
+  const parts = rel.split("/").filter((p) => p.length > 0).slice(0, -1);
+  for (let i2 = 1; i2 <= parts.length; i2++) {
+    try {
+      if (fs3.lstatSync(path3.join(workspaceRoot, parts.slice(0, i2).join("/"))).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 function regularFilesUnder(dir, prefix = "") {
   const out = [];
   for (const entry of fs3.readdirSync(dir, { withFileTypes: true })) {
@@ -59983,6 +59994,19 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
+  let runDir;
+  const moveAside = (rel, kind) => {
+    runDir ??= path3.join(recoveryRoot(workspaceRoot), taskId, `rollback-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
+    const dst = path3.join(runDir, kind, rel);
+    fs3.mkdirSync(path3.dirname(dst), { recursive: true });
+    const src = path3.join(workspaceRoot, rel);
+    try {
+      fs3.renameSync(src, dst);
+    } catch {
+      fs3.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+      fs3.rmSync(src, { recursive: true, force: true });
+    }
+  };
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === void 0;
   const baselineSet = new Set(baseline ?? []);
@@ -60003,6 +60027,20 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
         `Failed to unstage the files added since the checkpoint: ${unstageRes.stderr}`
       );
     }
+  }
+  const removedFromIndexRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", ref]);
+  if (!removedFromIndexRes.ok) {
+    throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
+  }
+  for (const rel of removedFromIndexRes.stdout.split("\0")) {
+    if (rel.length === 0 || isBridgePath(rel) || linkOnTheWay(workspaceRoot, rel)) continue;
+    let present = true;
+    try {
+      fs3.lstatSync(path3.join(workspaceRoot, rel));
+    } catch {
+      present = false;
+    }
+    if (present) moveAside(rel, "replaced");
   }
   const diffRes = tryRunGit(workspaceRoot, ["diff", "--name-only", "-z", "--no-renames", ref]);
   if (!diffRes.ok) {
@@ -60040,23 +60078,15 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
-  let runDir;
-  const moveAside = (rel, kind) => {
-    runDir ??= path3.join(recoveryRoot(workspaceRoot), taskId, `rollback-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
-    const dst = path3.join(runDir, kind, rel);
-    fs3.mkdirSync(path3.dirname(dst), { recursive: true });
-    const src = path3.join(workspaceRoot, rel);
-    try {
-      fs3.renameSync(src, dst);
-    } catch {
-      fs3.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
-      fs3.rmSync(src, { recursive: true, force: true });
-    }
-  };
   const removedUntrackedFiles = [];
+  const pathsBehindLinks = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
       if (baselineSet.has(relFile)) continue;
+      if (linkOnTheWay(workspaceRoot, relFile)) {
+        pathsBehindLinks.push(relFile);
+        continue;
+      }
       let present = true;
       try {
         fs3.lstatSync(path3.join(workspaceRoot, relFile));
@@ -60071,7 +60101,9 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   }
   const restoredUntrackedFiles = [];
   const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
-  if (manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir) && fs3.existsSync(snapshotDir)) {
+  const snapshotRecorded = manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir);
+  const untrackedSnapshotMissing = snapshotRecorded && !fs3.existsSync(snapshotDir);
+  if (snapshotRecorded && !untrackedSnapshotMissing) {
     for (const rel of regularFilesUnder(snapshotDir)) {
       const saved = path3.join(snapshotDir, rel);
       const current = path3.join(workspaceRoot, rel);
@@ -60097,6 +60129,8 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     removedUntrackedFiles,
     untrackedBaselineMissing,
     restoredUntrackedFiles,
+    untrackedSnapshotMissing,
+    pathsBehindLinks: pathsBehindLinks.sort(),
     ...runDir ? { quarantineDir: relativeTo(workspaceRoot, runDir) } : {},
     preRollbackHead,
     ...preRollbackRef ? { preRollbackRef } : {}
@@ -83064,12 +83098,27 @@ async function handleRollbackAgTask(input2) {
     ...rollbackRes.quarantineDir ? { quarantineDir: rollbackRes.quarantineDir } : {},
     preRollbackHead: rollbackRes.preRollbackHead,
     ...rollbackRes.preRollbackRef ? { preRollbackRef: rollbackRes.preRollbackRef } : {},
-    ...rollbackRes.untrackedBaselineMissing ? {
-      warnings: [
-        "Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed."
-      ]
-    } : {}
+    ...rollbackWarnings(rollbackRes).length > 0 ? { warnings: rollbackWarnings(rollbackRes) } : {}
   };
+}
+function rollbackWarnings(res) {
+  const warnings = [];
+  if (res.untrackedBaselineMissing) {
+    warnings.push(
+      "Untracked files were left in place: the checkpoint has no record of which untracked files existed before delegation, so none were removed."
+    );
+  }
+  if (res.untrackedSnapshotMissing) {
+    warnings.push(
+      "The checkpoint's copy of your untracked files is gone (recovery folders are kept for the last 10 tasks or 7 days), so files the agent edited or deleted were not put back."
+    );
+  }
+  if (res.pathsBehindLinks.length > 0) {
+    warnings.push(
+      `Left alone because a link (a junction) lies on the way to them, which may lead outside the workspace: ${res.pathsBehindLinks.join(", ")}.`
+    );
+  }
+  return warnings;
 }
 function createAntigravityMcpServer(deps = {}) {
   const server = new McpServer({

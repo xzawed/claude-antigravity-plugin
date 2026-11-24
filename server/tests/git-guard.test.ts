@@ -355,6 +355,48 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     }
   });
 
+  it('TC-S24h: rollback never moves or deletes files behind a link — a junction the agent made to a folder with files', () => {
+    // Antigravity review, measured: Windows git listed "docs/precious.txt" inside the junction's
+    // outside target, and rollback moved it out of that folder (main deleted it).
+    initRepo(tmpRoot);
+    const cp = createCheckpoint(tmpRoot, 'task-out', 'best_effort');
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-outside-'));
+    try {
+      fs.writeFileSync(path.join(outside, 'precious.txt'), 'OUTSIDE DATA\n', 'utf8');
+      fs.symlinkSync(outside, path.join(tmpRoot, 'link-out'), 'junction');
+
+      const res = rollbackCheckpoint(tmpRoot, manifestFor('task-out', cp, true));
+      expect(fs.readFileSync(path.join(outside, 'precious.txt'), 'utf8')).toBe('OUTSIDE DATA\n');
+      expect(res.removedUntrackedFiles).not.toContain('link-out/precious.txt');
+      if (process.platform === 'win32') expect(res.pathsBehindLinks).toEqual(['link-out/precious.txt']);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('TC-S24i: a file the agent re-created where it had removed a tracked one goes to recovery, not under reset', () => {
+    // Antigravity review, measured: after `git rm lib.ts` and a new lib.ts, reset --hard overwrote it.
+    initRepo(tmpRoot);
+    const cp = createCheckpoint(tmpRoot, 'task-rm', 'best_effort');
+    git(tmpRoot, ['rm', '-q', 'app.ts']);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'AGENT NEW APP\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-rm', cp, true));
+    expect(read('app.ts')).toBe('export const version = 1;\n');
+    expect(read(`${res.quarantineDir}/replaced/app.ts`)).toBe('AGENT NEW APP\n');
+  });
+
+  it("TC-S24j: when retention already removed a task's copy, rollback says it could not put the user's files back", () => {
+    withUserUntracked(false);
+    const cp = createCheckpoint(tmpRoot, 'task-gone', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'notes.txt'), 'AGENT EDIT\n', 'utf8');
+    fs.rmSync(path.join(tmpRoot, '.ag-bridge', 'recovery', 'task-gone', 'untracked'), { recursive: true, force: true });
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-gone', cp, true));
+    expect(res.untrackedSnapshotMissing).toBe(true);
+    expect(read('notes.txt')).toBe('AGENT EDIT\n');
+  });
+
   it('TC-S24d: untracked files over the snapshot cap (2,000 files or 50 MB) are not copied, and the checkpoint says so', () => {
     initRepo(tmpRoot);
     fs.writeFileSync(path.join(tmpRoot, 'big.bin'), Buffer.alloc(51 * 1024 * 1024));

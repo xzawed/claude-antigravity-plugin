@@ -325,6 +325,19 @@ function realFoldersTo(workspaceRoot: string, rel: string, moveAside: (rel: stri
   }
 }
 
+/** Whether a folder on the way to `rel` (not `rel` itself) is a link — a symlink or a junction. */
+function linkOnTheWay(workspaceRoot: string, rel: string): boolean {
+  const parts = rel.split('/').filter((p) => p.length > 0).slice(0, -1);
+  for (let i = 1; i <= parts.length; i++) {
+    try {
+      if (fs.lstatSync(path.join(workspaceRoot, parts.slice(0, i).join('/'))).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** Files under `dir`, as `/`-separated paths relative to it; links are skipped. */
 function regularFilesUnder(dir: string, prefix = ''): string[] {
   const out: string[] = [];
@@ -491,6 +504,10 @@ export interface RollbackResult {
   untrackedBaselineMissing: boolean;
   /** The user's untracked files put back from the checkpoint's snapshot. */
   restoredUntrackedFiles: string[];
+  /** The checkpoint copied the untracked files, but that copy is gone (retention), so none was put back. */
+  untrackedSnapshotMissing: boolean;
+  /** Untracked paths left alone because a link (a junction) lies on the way to them. */
+  pathsBehindLinks: string[];
   /** Where this rollback moved what it removed or replaced (workspace-relative), when it moved anything. */
   quarantineDir?: string;
   /** The commit HEAD was on before the rollback. */
@@ -560,6 +577,22 @@ export function rollbackCheckpoint(
     }
   }
 
+  // What rollback takes out of the work tree is moved under .ag-bridge/recovery/<taskId>/rollback-<time>/
+  // — `removed/` for the agent's files, `replaced/` for its versions of the user's — never deleted (TC-S24).
+  let runDir: string | undefined;
+  const moveAside = (rel: string, kind: 'removed' | 'replaced'): void => {
+    runDir ??= path.join(recoveryRoot(workspaceRoot), taskId, `rollback-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    const dst = path.join(runDir, kind, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const src = path.join(workspaceRoot, rel);
+    try {
+      fs.renameSync(src, dst);
+    } catch {
+      fs.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+  };
+
   // With no baseline (an older manifest, or one written by hand) nothing tells the user's
   // untracked files from the agent's: keep all (TC-S22).
   const baseline = manifest.gitUntrackedBaseline;
@@ -588,6 +621,24 @@ export function rollbackCheckpoint(
         `Failed to unstage the files added since the checkpoint: ${unstageRes.stderr}`,
       );
     }
+  }
+
+  // A file at a path the agent removed from git (`git rm`) and then wrote again is untracked now;
+  // reset --hard overwrote it with the checkpoint's version and kept no copy (Antigravity review,
+  // measured; TC-S24i). Move it aside first; reset then writes the checkpoint's file.
+  const removedFromIndexRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=D', ref]);
+  if (!removedFromIndexRes.ok) {
+    throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
+  }
+  for (const rel of removedFromIndexRes.stdout.split('\0')) {
+    if (rel.length === 0 || isBridgePath(rel) || linkOnTheWay(workspaceRoot, rel)) continue;
+    let present = true;
+    try {
+      fs.lstatSync(path.join(workspaceRoot, rel));
+    } catch {
+      present = false;
+    }
+    if (present) moveAside(rel, 'replaced');
   }
 
   // What the rollback reverts: every tracked path that differs from the checkpoint, the agent's
@@ -636,27 +687,18 @@ export function rollbackCheckpoint(
     }
   }
 
-  // What rollback takes out of the work tree is moved under .ag-bridge/recovery/<taskId>/rollback-<time>/
-  // — `removed/` for the agent's files, `replaced/` for its versions of the user's — never deleted (TC-S24).
-  let runDir: string | undefined;
-  const moveAside = (rel: string, kind: 'removed' | 'replaced'): void => {
-    runDir ??= path.join(recoveryRoot(workspaceRoot), taskId, `rollback-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-    const dst = path.join(runDir, kind, rel);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    const src = path.join(workspaceRoot, rel);
-    try {
-      fs.renameSync(src, dst);
-    } catch {
-      fs.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
-      fs.rmSync(src, { recursive: true, force: true });
-    }
-  };
-
-  // Only untracked files created after delegation began. A failed listing removes nothing.
+  // Only untracked files created after delegation began. A failed listing removes nothing. Nothing
+  // behind a link is touched: Windows git lists the files inside a junction's target, and rollback
+  // moved them out of the outside folder — main deleted them (Antigravity review, measured; TC-S24h).
   const removedUntrackedFiles: string[] = [];
+  const pathsBehindLinks: string[] = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
       if (baselineSet.has(relFile)) continue;
+      if (linkOnTheWay(workspaceRoot, relFile)) {
+        pathsBehindLinks.push(relFile);
+        continue;
+      }
       let present = true;
       try {
         fs.lstatSync(path.join(workspaceRoot, relFile));
@@ -675,7 +717,10 @@ export function rollbackCheckpoint(
   // the agent could rewrite — and every folder on the way is made a real folder first (TC-S24c, f).
   const restoredUntrackedFiles: string[] = [];
   const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
-  if (manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir) && fs.existsSync(snapshotDir)) {
+  const snapshotRecorded = manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir);
+  // retention may already have removed it (TC-S24j): say so rather than restore nothing silently
+  const untrackedSnapshotMissing = snapshotRecorded && !fs.existsSync(snapshotDir);
+  if (snapshotRecorded && !untrackedSnapshotMissing) {
     for (const rel of regularFilesUnder(snapshotDir)) {
       const saved = path.join(snapshotDir, rel);
       const current = path.join(workspaceRoot, rel);
@@ -704,6 +749,8 @@ export function rollbackCheckpoint(
     removedUntrackedFiles,
     untrackedBaselineMissing,
     restoredUntrackedFiles,
+    untrackedSnapshotMissing,
+    pathsBehindLinks: pathsBehindLinks.sort(),
     ...(runDir ? { quarantineDir: relativeTo(workspaceRoot, runDir) } : {}),
     preRollbackHead,
     ...(preRollbackRef ? { preRollbackRef } : {}),
