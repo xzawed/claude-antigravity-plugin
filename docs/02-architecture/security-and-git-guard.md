@@ -203,7 +203,11 @@ flowchart TD
 
 기본값을 조이는 값(예: `agy_mode=plan`, `agy_sandbox=true`)은 언제나 따른다.
 
-`subscription.agy_project`는 민감 키가 아니다. agy 도움말에 따르면 `--project`는 사용자 자신의 agy 프로젝트를 ID나 이름으로 고른다. 워크스페이스가 프로젝트를 정의한다는 재현이 나오면 다시 본다.
+민감 키가 아닌 것:
+- `subscription.agy_project`. agy 도움말에 따르면 `--project`는 "Project ID or project name"이다. 사용자 자신의 agy 프로젝트를 고른다.
+  - 두 레그가 "워크스페이스 밖 프로젝트로 돌릴 수 있다"고 지적했지만 실측이 없다. 두 레그 모두 이번 대조군에 실패했다.
+  - 다시 볼 조건: `--project`가 에이전트가 접근하는 폴더나 실행 디렉터리를 바꾼다는 실측. 이 실측에는 사용자 계정에 프로젝트를 만들어야 하므로 사용자 확인이 필요하다.
+- `subscription.trigger_method`. `clipboard`는 프롬프트를 클립보드에 넣고 알림만 띄운다(`defaultSubscriptionTrigger`). 실행은 사용자가 자기 Antigravity 세션에 붙여 넣을 때뿐이다.
 
 **규칙:**
 1. 설정 파일이 사용자 자신의 것이 아닐 수 있으면, 민감 키를 환경변수·기본값으로 되돌린다.
