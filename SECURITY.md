@@ -36,7 +36,7 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S20b`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S20c`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
@@ -56,7 +56,7 @@ This plugin delegates file edits, browser automation, and verification commands 
    - `maskSecrets()` redacts configured secrets plus Google API keys (`AIza...`), Google OAuth tokens (`ya29....`) & authorization codes (`4/0...`), OpenAI/Anthropic keys (`sk-...`), GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`), and `Bearer` headers across MCP responses, `report.md`, `agy-cli.log`, and `stderr`.
 4. **Lossless Rollback & Process Hygiene (`server/src/git-guard.ts`, `server/src/jobs.ts`, `server/src/sessions.ts`):**
    - Snapshots working trees via `git stash create` pinned under `refs/ag-bridge/checkpoints/<taskId>` without altering `HEAD` or the user's `git stash list`, and preserves pre-existing untracked files on rollback.
-   - Git Guard runs every git command with `-c core.fsmonitor=false -c core.hooksPath=/dev/null`. A repository delivered with its own `.git/` (an archive or a shared folder) therefore cannot make status, checkpoint or rollback run its fsmonitor program or hooks (`TC-S20`, `TC-S20b`). Clean/smudge filters stay on so checkpoints keep real content.
+   - Git Guard runs every git command with `-c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.allow=never`. A repository delivered with its own `.git/` (an archive or a shared folder) therefore cannot make status, checkpoint or rollback run its fsmonitor program or hooks. Nor can a partial clone's lazy fetch run its transport command such as `core.sshCommand` (`TC-S20` ~ `TC-S20c`). Clean/smudge filters stay on so checkpoints keep real content.
    - Automatically disposes pending auth sessions, background jobs, and persistent `stream-json` workers on MCP server exit.
 5. **Dependency Hygiene:**
    - All dependencies are audited via `npm --prefix server audit`, and GitHub Actions CI runs with least-privilege `permissions: contents: read`.
