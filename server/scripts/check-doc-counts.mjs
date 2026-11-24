@@ -24,16 +24,18 @@ const HISTORICAL = new Set([
 const GAP = '(?:[\\s*`-]|%20)*';
 // A whole number: not part of a longer number, a decimal such as "1.27", or a URL escape "%20".
 const NUM = '(?<![\\d.%])(\\d+)(?!\\.?\\d)';
-const COUNTER = '(?:개|종)?';
+// Instructions such as "run these 3 commands" or "the following 2 commands" are not totals.
+const NOT_INSTRUCTION = '(?<!\\b(?:these|those|following)\\s+)';
+const COUNTER = '(?:(?:개|종)의?)?';
 
 // Only slash commands and MCP tools are counted: "4-tool loop" (the API worker's functions),
 // "1 command block" and "Tool 1:" (an ordinal) are other things.
 const PATTERNS = [
-  // "21 slash commands", "21-commands", "**`21`** Slash Commands", "21개 슬래시 커맨드"
-  ['commands', new RegExp(`${NUM}${COUNTER}${GAP}(?:(?:slash|슬래시)${GAP}(?:commands?\\b|커맨드)|commands\\b|커맨드)`, 'gid')],
+  // "21 slash commands", "21-commands", "**`21`** Slash Commands", "21개(의) 슬래시 커맨드"
+  ['commands', new RegExp(`${NOT_INSTRUCTION}${NUM}${COUNTER}${GAP}(?:(?:slash|슬래시)${GAP}(?:commands?\\b|커맨드)|commands\\b|커맨드)`, 'gid')],
   // "Slash%20Commands-21", "커맨드 **`21`종**" (no \b: in "%20Commands" a digit precedes the noun)
   ['commands', new RegExp(`(?:(?<![a-z])commands|커맨드)${GAP}${NUM}`, 'gid')],
-  // "12 MCP Tools", "12 Exposed MCP Tools", "12개 MCP Tool"
+  // "12 MCP Tools", "12 Exposed MCP Tools", "12개 MCP Tool", "12개의 MCP Tool"
   ['tools', new RegExp(`${NUM}${COUNTER}${GAP}(?:exposed${GAP})?mcp${GAP}tools?\\b`, 'gid')],
   // "MCP%20Tools-12", "MCP 12종", "MCP Tool **`12`종**", "노출 MCP Tools 12종"
   ['tools', new RegExp(`(?<![a-z])mcp${GAP}(?:tools?${GAP})?${NUM}`, 'gid')],
@@ -104,7 +106,11 @@ if (isDirectRun) {
     }
   }
   if (problems.length > 0) {
-    console.error(`[doc-counts] FAIL\n  ${problems.join('\n  ')}`);
+    console.error(
+      `[doc-counts] FAIL\n  ${problems.join('\n  ')}\n` +
+        '  Fix the number, or — if it is not a count of this plugin\'s slash commands or MCP tools —\n' +
+        '  spell it out ("three commands") so it no longer reads as one.',
+    );
     process.exitCode = 1;
   } else {
     console.log(

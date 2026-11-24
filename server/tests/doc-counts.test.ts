@@ -41,6 +41,9 @@ describe('doc counts (G7)', () => {
       ['### 노출 MCP Tools 12종 (`antigravity-delegate` v1.4.0)', 'tools', 12],
       ['# 라이브 헬스체크 및 Stdio MCP 검증 스크립트 (MCP Tool 12종)', 'tools', 12],
       ['| `SPC-001` | MCP Tool 12종 입출력 스키마 |', 'tools', 12],
+      // the genitive particle (Grok leg): "21개의 …", "12개의 …"
+      ['21개의 슬래시 커맨드를 제공합니다', 'commands', 21],
+      ['12개의 MCP Tool이 노출됩니다', 'tools', 12],
     ];
     for (const [text, kind, value] of cases) {
       expect(findCountClaims(text), text).toEqual([{ kind, value }]);
@@ -65,6 +68,9 @@ describe('doc counts (G7)', () => {
       '`@google/genai` SDK와 4개 Tool(`read_file`, `write_file`, `list_dir`, `run_command`)',
       'Copy-paste 1 command block',
       '### 2.1 Tool 1: `delegate_to_antigravity`',
+      // instructions, not totals (Grok leg)
+      'Run these 3 commands to reset it',
+      'the following 2 commands fix it',
     ]) {
       expect(findCountClaims(text), text).toEqual([]);
     }
