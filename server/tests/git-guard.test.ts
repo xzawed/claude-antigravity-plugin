@@ -397,7 +397,9 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(read('notes.txt')).toBe('AGENT EDIT\n');
   });
 
-  it('TC-S24d: untracked files over the snapshot cap (2,000 files or 50 MB) are not copied, and the checkpoint says so', () => {
+  // A 51 MB file and 2,001 files on the Windows CI runners took 3.0–4.2 s, then 9.2 s against
+  // vitest's 5 s default (main 92836eb, Node 22): the test keeps an explicit limit.
+  it('TC-S24d: untracked files over the snapshot cap (2,000 files or 50 MB) are not copied, and the checkpoint says so', { timeout: 60_000 }, () => {
     initRepo(tmpRoot);
     fs.writeFileSync(path.join(tmpRoot, 'big.bin'), Buffer.alloc(51 * 1024 * 1024));
     const byBytes = createCheckpoint(tmpRoot, 'task-cap-mb', 'best_effort');
