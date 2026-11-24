@@ -59623,19 +59623,20 @@ function gitTimeoutMs() {
   const configured = Number(process.env.AG_GIT_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
 }
-function runGit(workspaceRoot, args) {
+function runGit(workspaceRoot, args, input2) {
   return execFileSync(requireExecutable("git"), [...NO_REPO_COMMANDS, ...args], {
     cwd: workspaceRoot,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [input2 === void 0 ? "ignore" : "pipe", "pipe", "pipe"],
+    input: input2,
     timeout: gitTimeoutMs(),
     // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
     maxBuffer: 64 * 1024 * 1024
   }).trimEnd();
 }
-function tryRunGit(workspaceRoot, args) {
+function tryRunGit(workspaceRoot, args, input2) {
   try {
-    const stdout = runGit(workspaceRoot, args);
+    const stdout = runGit(workspaceRoot, args, input2);
     return { ok: true, stdout, stderr: "", timedOut: false };
   } catch (err) {
     const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr ?? "") : err instanceof Error ? err.message : String(err);
@@ -59701,6 +59702,18 @@ function listUntrackedFiles(workspaceRoot) {
   }
   return res.stdout.split("\0").filter((file2) => file2.length > 0 && !isBridgePath(file2)).sort();
 }
+function checkpointManifestFields(cp) {
+  return {
+    gitCheckpointRef: cp.checkpointRef,
+    gitCheckpointIsStash: cp.isStashSnapshot,
+    gitUntrackedBaseline: cp.untrackedBaseline,
+    gitCheckpointHeadRef: cp.headRef
+  };
+}
+function symbolicHead(workspaceRoot) {
+  const res = tryRunGit(workspaceRoot, ["rev-parse", "--symbolic-full-name", "HEAD"]);
+  return res.ok ? res.stdout.trim() : void 0;
+}
 function createCheckpoint(workspaceRoot, taskId, policy) {
   const gitInfo = getGitInfo(workspaceRoot);
   if (!gitInfo.isGitRepo) {
@@ -59746,6 +59759,7 @@ function createCheckpoint(workspaceRoot, taskId, policy) {
       warning: `${why}; automatic rollback checkpoint is disabled.`
     };
   }
+  const headRef = symbolicHead(workspaceRoot);
   const stashRes = tryRunGit(workspaceRoot, ["stash", "create", `ag-bridge-checkpoint-${taskId}`]);
   if (!stashRes.ok) {
     throw new AgPluginError(
@@ -59766,13 +59780,15 @@ function createCheckpoint(workspaceRoot, taskId, policy) {
     return {
       checkpointRef: stashHash,
       isStashSnapshot: true,
-      untrackedBaseline
+      untrackedBaseline,
+      headRef
     };
   }
   return {
     checkpointRef: headRes.stdout.trim(),
     isStashSnapshot: false,
-    untrackedBaseline
+    untrackedBaseline,
+    headRef
   };
 }
 function rollbackCheckpoint(workspaceRoot, manifest) {
@@ -59789,10 +59805,52 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       "Workspace is not a Git repository; cannot perform Git rollback."
     );
   }
-  const beforeDiff = listGitChangedFiles(workspaceRoot);
   const ref = manifest.gitCheckpointRef;
+  const recordedHead = manifest.gitCheckpointHeadRef;
+  if (recordedHead !== void 0) {
+    const headNow = symbolicHead(workspaceRoot) ?? "(unknown)";
+    if (headNow !== recordedHead) {
+      const wayBack = recordedHead.startsWith("refs/heads/") ? `run \`git switch ${recordedHead.slice("refs/heads/".length)}\`` : "check out the commit it was taken on";
+      throw new AgPluginError(
+        "GIT_CHECKPOINT_FAILED",
+        `HEAD is on ${headNow}, but the checkpoint was taken on ${recordedHead}. Nothing was changed: ${wayBack}, then roll back again.`
+      );
+    }
+  }
+  const baseline = manifest.gitUntrackedBaseline;
+  const untrackedBaselineMissing = baseline === void 0;
+  const baselineSet = new Set(baseline ?? []);
+  if (baselineSet.size > 0) {
+    const indexRes = tryRunGit(workspaceRoot, ["ls-files", "-z"]);
+    if (!indexRes.ok) {
+      throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${indexRes.stderr}`);
+    }
+    const userFilesStaged = indexRes.stdout.split("\0").filter((file2) => baselineSet.has(file2));
+    if (userFilesStaged.length > 0) {
+      const unstageRes = tryRunGit(
+        workspaceRoot,
+        ["update-index", "-z", "--force-remove", "--stdin"],
+        userFilesStaged.join("\0")
+      );
+      if (!unstageRes.ok) {
+        throw new AgPluginError(
+          "GIT_CHECKPOINT_FAILED",
+          `Failed to unstage the user's untracked files before rollback: ${unstageRes.stderr}`
+        );
+      }
+    }
+  }
+  const diffRes = tryRunGit(workspaceRoot, ["diff", "--name-only", "-z", "--no-renames", ref]);
+  if (!diffRes.ok) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      `Failed to compare the work tree with checkpoint ${ref}: ${diffRes.stderr}`
+    );
+  }
+  const revertedTrackedFiles = diffRes.stdout.split("\0").filter((file2) => file2.length > 0 && !isBridgePath(file2)).sort();
   if (manifest.gitCheckpointIsStash) {
-    const resetRes = tryRunGit(workspaceRoot, ["reset", "--hard", "HEAD"]);
+    const snapshotBase = recordedHead !== void 0 ? `${ref}^1` : "HEAD";
+    const resetRes = tryRunGit(workspaceRoot, ["reset", "--hard", snapshotBase]);
     if (!resetRes.ok) {
       throw new AgPluginError(
         "GIT_CHECKPOINT_FAILED",
@@ -59818,11 +59876,8 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
-  const baseline = manifest.gitUntrackedBaseline;
-  const untrackedBaselineMissing = baseline === void 0;
   const removedUntrackedFiles = [];
   if (!untrackedBaselineMissing) {
-    const baselineSet = new Set(baseline);
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
       if (baselineSet.has(relFile)) {
         continue;
@@ -59835,8 +59890,6 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     }
   }
   tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
-  const removedSet = new Set(removedUntrackedFiles);
-  const revertedTrackedFiles = beforeDiff.filter((f3) => !removedSet.has(f3));
   return {
     restoredCheckpointRef: ref,
     revertedTrackedFiles,
@@ -81664,9 +81717,7 @@ async function handleStartAgTask(input2, deps = {}) {
     verifyUrl: input2.verifyUrl,
     createdAt: now,
     updatedAt: now,
-    gitCheckpointRef: checkpoint.checkpointRef,
-    gitCheckpointIsStash: checkpoint.isStashSnapshot,
-    gitUntrackedBaseline: checkpoint.untrackedBaseline,
+    ...checkpointManifestFields(checkpoint),
     artifacts: []
   };
   writeManifest(workspaceRoot, manifest);
@@ -82674,9 +82725,7 @@ async function handleDelegateToAntigravity(input2, deps = {}) {
     verifyUrl: input2.verifyUrl,
     createdAt: now,
     updatedAt: now,
-    gitCheckpointRef: checkpoint.checkpointRef,
-    gitCheckpointIsStash: checkpoint.isStashSnapshot,
-    gitUntrackedBaseline: checkpoint.untrackedBaseline,
+    ...checkpointManifestFields(checkpoint),
     artifacts: []
   };
   writeManifest(workspaceRoot, manifest);

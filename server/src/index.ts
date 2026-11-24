@@ -42,7 +42,7 @@ import {
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine } from './engines/base.js';
 import { queryAgyCapabilities, SubscriptionEngine } from './engines/subscription.js';
-import { createCheckpoint, getGitInfo, rollbackCheckpoint } from './git-guard.js';
+import { checkpointManifestFields, createCheckpoint, getGitInfo, rollbackCheckpoint } from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
   AgPluginError,
@@ -362,9 +362,7 @@ export async function handleDelegateToAntigravity(
     verifyUrl: input.verifyUrl,
     createdAt: now,
     updatedAt: now,
-    gitCheckpointRef: checkpoint.checkpointRef,
-    gitCheckpointIsStash: checkpoint.isStashSnapshot,
-    gitUntrackedBaseline: checkpoint.untrackedBaseline,
+    ...checkpointManifestFields(checkpoint),
     artifacts: [],
   };
 

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  checkpointManifestFields,
   createCheckpoint,
   getGitInfo,
   listGitChangedFiles,
@@ -108,20 +109,23 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     if (fakeNodeDir) fs.rmSync(fakeNodeDir, { recursive: true, force: true });
   });
 
-  const manifestFor = (taskId: string, cp: ReturnType<typeof createCheckpoint>, withBaseline: boolean): BridgeManifest => ({
-    schemaVersion: 1,
-    taskId,
-    title: taskId,
-    mode: 'api',
-    status: 'VERIFIED',
-    lockedPaths: ['.'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    gitCheckpointRef: cp.checkpointRef,
-    gitCheckpointIsStash: cp.isStashSnapshot,
-    ...(withBaseline ? { gitUntrackedBaseline: cp.untrackedBaseline } : {}),
-    artifacts: [],
-  });
+  // The checkpoint's fields go through the same mapping index.ts and jobs.ts use.
+  const manifestFor = (taskId: string, cp: ReturnType<typeof createCheckpoint>, withBaseline: boolean): BridgeManifest => {
+    const { gitUntrackedBaseline, ...fields } = checkpointManifestFields(cp);
+    return {
+      schemaVersion: 1,
+      taskId,
+      title: taskId,
+      mode: 'api',
+      status: 'VERIFIED',
+      lockedPaths: ['.'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...fields,
+      ...(withBaseline ? { gitUntrackedBaseline } : {}),
+      artifacts: [],
+    };
+  };
 
   it('TC-S22: a rollback whose checkpoint has no untracked baseline deletes no untracked file', () => {
     // Without a baseline nothing tells the user's own untracked files from the agent's; the old
@@ -161,6 +165,111 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(listUntrackedFiles(tmpRoot)).toBeUndefined(); // not a repository: git fails
     initRepo(tmpRoot);
     expect(listUntrackedFiles(tmpRoot)).toEqual([]);
+  });
+
+  // The agent can run git itself. A rollback must still return the user's state (Grok leg,
+  // measured: `git add -A` made reset --hard delete the user's untracked notes).
+  const withUserUntracked = (dirty: boolean): void => {
+    initRepo(tmpRoot);
+    if (dirty) fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2; // user edit\n', 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'notes.txt'), 'USER NOTES\n', 'utf8');
+  };
+
+  it("TC-S23: a user's untracked file that the agent staged and committed survives rollback", () => {
+    withUserUntracked(false);
+    const checkpointHead = git(tmpRoot, ['rev-parse', 'HEAD']);
+    const cp = createCheckpoint(tmpRoot, 'task-add-commit', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+    git(tmpRoot, ['add', '-A']);
+    git(tmpRoot, ['commit', '-qm', 'agent work']);
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-add-commit', cp, true));
+    expect(fs.existsSync(path.join(tmpRoot, 'notes.txt'))).toBe(true);
+    expect(fs.readFileSync(path.join(tmpRoot, 'notes.txt'), 'utf8')).toBe('USER NOTES\n');
+    expect(git(tmpRoot, ['ls-files', '--', 'notes.txt'])).toBe(''); // untracked again, as before
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 1;\n');
+    expect(git(tmpRoot, ['rev-parse', 'HEAD'])).toBe(checkpointHead);
+    expect(res.revertedTrackedFiles).toEqual(['app.ts']);
+  });
+
+  it("TC-S23b: a user's untracked file that the agent staged survives rollback of a dirty checkpoint", () => {
+    withUserUntracked(true);
+    const cp = createCheckpoint(tmpRoot, 'task-add-dirty', 'best_effort');
+    expect(cp.isStashSnapshot).toBe(true);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+    git(tmpRoot, ['add', '-A']);
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-add-dirty', cp, true));
+    expect(fs.existsSync(path.join(tmpRoot, 'notes.txt'))).toBe(true);
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 2; // user edit\n');
+    expect(res.revertedTrackedFiles).toEqual(['app.ts']);
+  });
+
+  it('TC-S23c: a dirty checkpoint rolls back cleanly after the agent committed on the same branch', () => {
+    // Measured before the fix: the snapshot was applied on top of the agent's commit, conflicted
+    // and left conflict markers in app.ts.
+    withUserUntracked(true);
+    const checkpointHead = git(tmpRoot, ['rev-parse', 'HEAD']);
+    const cp = createCheckpoint(tmpRoot, 'task-dirty-commit', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+    git(tmpRoot, ['commit', '-qam', 'agent work']);
+
+    rollbackCheckpoint(tmpRoot, manifestFor('task-dirty-commit', cp, true));
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 2; // user edit\n');
+    expect(git(tmpRoot, ['rev-parse', 'HEAD'])).toBe(checkpointHead);
+  });
+
+  it("TC-S23d: rollback refuses, changing nothing, when HEAD is no longer on the checkpoint's branch", () => {
+    // Measured before the fix: after the agent switched to the user's dev, reset --hard moved dev
+    // onto main's commit, taking the user's commit off the branch.
+    initRepo(tmpRoot);
+    const startBranch = git(tmpRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    git(tmpRoot, ['switch', '-q', '-c', 'dev']);
+    fs.writeFileSync(path.join(tmpRoot, 'dev.ts'), 'user dev work\n', 'utf8');
+    git(tmpRoot, ['add', 'dev.ts']);
+    git(tmpRoot, ['commit', '-qm', 'user dev commit']);
+    const devTip = git(tmpRoot, ['rev-parse', 'dev']);
+    git(tmpRoot, ['switch', '-q', startBranch]);
+    const cp = createCheckpoint(tmpRoot, 'task-switch', 'best_effort');
+    git(tmpRoot, ['switch', '-q', 'dev']); // the agent moves to the user's other branch
+
+    let thrown: unknown;
+    try {
+      rollbackCheckpoint(tmpRoot, manifestFor('task-switch', cp, true));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(AgPluginError);
+    expect((thrown as AgPluginError).code).toBe('GIT_CHECKPOINT_FAILED');
+    expect((thrown as Error).message).toContain('refs/heads/dev');
+    expect((thrown as Error).message).toContain(`refs/heads/${startBranch}`);
+    expect((thrown as Error).message).toContain(`git switch ${startBranch}`);
+    expect(git(tmpRoot, ['rev-parse', 'dev'])).toBe(devTip);
+    expect(fs.existsSync(path.join(tmpRoot, 'dev.ts'))).toBe(true);
+  });
+
+  it("TC-U36: rollback reports the tracked files it reverted, not the user's untouched untracked files", () => {
+    withUserUntracked(false);
+    const cp = createCheckpoint(tmpRoot, 'task-report', 'best_effort');
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 999;\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-report', cp, true));
+    expect(res.revertedTrackedFiles).toEqual(['app.ts']);
+    expect(fs.existsSync(path.join(tmpRoot, 'notes.txt'))).toBe(true);
+  });
+
+  it('TC-U36b: a file the agent renamed is reported under both names', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'lib.ts'), 'export const lib = 1;\n', 'utf8');
+    git(tmpRoot, ['add', 'lib.ts']);
+    git(tmpRoot, ['commit', '-qm', 'add lib']);
+    const cp = createCheckpoint(tmpRoot, 'task-rename', 'best_effort');
+    git(tmpRoot, ['mv', 'lib.ts', 'util.ts']);
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-rename', cp, true));
+    expect(res.revertedTrackedFiles).toEqual(['lib.ts', 'util.ts']);
+    expect(fs.existsSync(path.join(tmpRoot, 'lib.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, 'util.ts'))).toBe(false);
   });
 
   it('TC-U35: rollback removes an agent file with a non-ASCII name and keeps the user\'s', () => {

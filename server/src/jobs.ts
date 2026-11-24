@@ -24,7 +24,7 @@ import {
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine, ExecutionResult } from './engines/base.js';
 import { SubscriptionEngine } from './engines/subscription.js';
-import { createCheckpoint } from './git-guard.js';
+import { checkpointManifestFields, createCheckpoint } from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
   AgErrorCode,
@@ -326,9 +326,7 @@ export async function handleStartAgTask(
     verifyUrl: input.verifyUrl,
     createdAt: now,
     updatedAt: now,
-    gitCheckpointRef: checkpoint.checkpointRef,
-    gitCheckpointIsStash: checkpoint.isStashSnapshot,
-    gitUntrackedBaseline: checkpoint.untrackedBaseline,
+    ...checkpointManifestFields(checkpoint),
     artifacts: [],
   };
 

@@ -33,12 +33,13 @@ function gitTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GIT_TIMEOUT_MS;
 }
 
-function runGit(workspaceRoot: string, args: string[]): string {
+function runGit(workspaceRoot: string, args: string[], input?: string): string {
   // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).
   return execFileSync(requireExecutable('git'), [...NO_REPO_COMMANDS, ...args], {
     cwd: workspaceRoot,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    input,
     timeout: gitTimeoutMs(),
     // the 1 MiB default fails `ls-files` in a tree with tens of thousands of untracked files
     maxBuffer: 64 * 1024 * 1024,
@@ -48,9 +49,10 @@ function runGit(workspaceRoot: string, args: string[]): string {
 function tryRunGit(
   workspaceRoot: string,
   args: string[],
+  input?: string,
 ): { ok: boolean; stdout: string; stderr: string; timedOut: boolean } {
   try {
-    const stdout = runGit(workspaceRoot, args);
+    const stdout = runGit(workspaceRoot, args, input);
     return { ok: true, stdout, stderr: '', timedOut: false };
   } catch (err) {
     const stderr =
@@ -153,7 +155,26 @@ export interface CheckpointResult {
   isStashSnapshot: boolean;
   /** Untracked files before delegation; undefined when git could not list them. */
   untrackedBaseline: string[] | undefined;
+  /** What HEAD named at the checkpoint: `refs/heads/<branch>`, or `HEAD` when detached. */
+  headRef?: string;
   warning?: string;
+}
+
+/** The manifest fields a checkpoint fills — one mapping for every caller that writes a manifest. */
+export function checkpointManifestFields(
+  cp: CheckpointResult,
+): Pick<BridgeManifest, 'gitCheckpointRef' | 'gitCheckpointIsStash' | 'gitUntrackedBaseline' | 'gitCheckpointHeadRef'> {
+  return {
+    gitCheckpointRef: cp.checkpointRef,
+    gitCheckpointIsStash: cp.isStashSnapshot,
+    gitUntrackedBaseline: cp.untrackedBaseline,
+    gitCheckpointHeadRef: cp.headRef,
+  };
+}
+
+function symbolicHead(workspaceRoot: string): string | undefined {
+  const res = tryRunGit(workspaceRoot, ['rev-parse', '--symbolic-full-name', 'HEAD']);
+  return res.ok ? res.stdout.trim() : undefined;
 }
 
 export function createCheckpoint(
@@ -208,6 +229,7 @@ export function createCheckpoint(
       warning: `${why}; automatic rollback checkpoint is disabled.`,
     };
   }
+  const headRef = symbolicHead(workspaceRoot);
   const stashRes = tryRunGit(workspaceRoot, ['stash', 'create', `ag-bridge-checkpoint-${taskId}`]);
   if (!stashRes.ok) {
     throw new AgPluginError(
@@ -230,6 +252,7 @@ export function createCheckpoint(
       checkpointRef: stashHash,
       isStashSnapshot: true,
       untrackedBaseline,
+      headRef,
     };
   }
 
@@ -237,6 +260,7 @@ export function createCheckpoint(
     checkpointRef: headRes.stdout.trim(),
     isStashSnapshot: false,
     untrackedBaseline,
+    headRef,
   };
 }
 
@@ -267,11 +291,74 @@ export function rollbackCheckpoint(
     );
   }
 
-  const beforeDiff = listGitChangedFiles(workspaceRoot);
   const ref = manifest.gitCheckpointRef;
 
+  // reset --hard moves whichever branch is checked out: after the agent switched to the user's
+  // dev, it moved dev onto main's commit (measured; TC-S23d). Refuse before changing anything.
+  const recordedHead = manifest.gitCheckpointHeadRef;
+  if (recordedHead !== undefined) {
+    const headNow = symbolicHead(workspaceRoot) ?? '(unknown)';
+    if (headNow !== recordedHead) {
+      const wayBack = recordedHead.startsWith('refs/heads/')
+        ? `run \`git switch ${recordedHead.slice('refs/heads/'.length)}\``
+        : 'check out the commit it was taken on';
+      throw new AgPluginError(
+        'GIT_CHECKPOINT_FAILED',
+        `HEAD is on ${headNow}, but the checkpoint was taken on ${recordedHead}. Nothing was changed: ${wayBack}, then roll back again.`,
+      );
+    }
+  }
+
+  // With no baseline (an older manifest, or one written by hand) nothing tells the user's
+  // untracked files from the agent's: keep all (TC-S22).
+  const baseline = manifest.gitUntrackedBaseline;
+  const untrackedBaselineMissing = baseline === undefined;
+  const baselineSet = new Set(baseline ?? []);
+
+  // The user's untracked files were in no index at the checkpoint. Once the agent has staged or
+  // committed one (`git add -A`), reset --hard deletes it (Grok leg, measured; TC-S23, TC-S23b):
+  // take it back out of the index first, as it was.
+  if (baselineSet.size > 0) {
+    const indexRes = tryRunGit(workspaceRoot, ['ls-files', '-z']);
+    if (!indexRes.ok) {
+      throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${indexRes.stderr}`);
+    }
+    const userFilesStaged = indexRes.stdout.split('\0').filter((file) => baselineSet.has(file));
+    if (userFilesStaged.length > 0) {
+      const unstageRes = tryRunGit(
+        workspaceRoot,
+        ['update-index', '-z', '--force-remove', '--stdin'],
+        userFilesStaged.join('\0'),
+      );
+      if (!unstageRes.ok) {
+        throw new AgPluginError(
+          'GIT_CHECKPOINT_FAILED',
+          `Failed to unstage the user's untracked files before rollback: ${unstageRes.stderr}`,
+        );
+      }
+    }
+  }
+
+  // What the rollback reverts: every tracked path that differs from the checkpoint, the agent's
+  // commits included. `git status` named the user's untouched untracked files instead (TC-U36).
+  const diffRes = tryRunGit(workspaceRoot, ['diff', '--name-only', '-z', '--no-renames', ref]);
+  if (!diffRes.ok) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      `Failed to compare the work tree with checkpoint ${ref}: ${diffRes.stderr}`,
+    );
+  }
+  const revertedTrackedFiles = diffRes.stdout
+    .split('\0')
+    .filter((file) => file.length > 0 && !isBridgePath(file))
+    .sort();
+
   if (manifest.gitCheckpointIsStash) {
-    const resetRes = tryRunGit(workspaceRoot, ['reset', '--hard', 'HEAD']);
+    // Back to the commit the snapshot was taken on (its first parent), so it applies without a
+    // merge even after the agent committed (TC-S23c). An older manifest has no recorded branch to
+    // check, so it keeps resetting to the current HEAD.
+    const snapshotBase = recordedHead !== undefined ? `${ref}^1` : 'HEAD';
+    const resetRes = tryRunGit(workspaceRoot, ['reset', '--hard', snapshotBase]);
     if (!resetRes.ok) {
       throw new AgPluginError(
         'GIT_CHECKPOINT_FAILED',
@@ -298,15 +385,10 @@ export function rollbackCheckpoint(
     }
   }
 
-  // Remove only untracked files created after delegation began. With no baseline (an older
-  // manifest, or one written by hand) nothing tells the user's files from the agent's: keep all
-  // (TC-S22). A failed listing now removes nothing either.
-  const baseline = manifest.gitUntrackedBaseline;
-  const untrackedBaselineMissing = baseline === undefined;
+  // Remove only untracked files created after delegation began. A failed listing removes nothing.
   const removedUntrackedFiles: string[] = [];
 
   if (!untrackedBaselineMissing) {
-    const baselineSet = new Set(baseline);
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
       if (baselineSet.has(relFile)) {
         continue;
@@ -321,9 +403,6 @@ export function rollbackCheckpoint(
 
   // Clean up pinned ref if present
   tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
-
-  const removedSet = new Set(removedUntrackedFiles);
-  const revertedTrackedFiles = beforeDiff.filter((f) => !removedSet.has(f));
 
   return {
     restoredCheckpointRef: ref,
