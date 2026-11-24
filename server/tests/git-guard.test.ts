@@ -11,6 +11,7 @@ import {
   listUntrackedFiles,
   rollbackCheckpoint,
 } from '../src/git-guard.js';
+import { resolveExecutable } from '../src/exec-path.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
 function git(cwd: string, args: string[]): string {
@@ -311,26 +312,79 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(listGitChangedFiles(tmpRoot)).toEqual(['설정.json']);
   });
 
-  it('TC-U34: a git call that does not answer within the time limit is cut off', () => {
-    // Clean filters stay on by design (ARC-003 §8); a repository's filter can stall `git status`.
+  // A clean filter that stalls (clean filters stay on by design, ARC-003 §8). Without a time limit
+  // `git status` waits for it on every file it cleans: 16.6 s with `sleep 4` (measured).
+  const stallingFilter = (): void => {
     initRepo(tmpRoot);
     const slow = path.join(tmpRoot, '.git', 'slow-filter.sh');
-    fs.writeFileSync(slow, '#!/bin/sh\nsleep 4\ncat\n', { mode: 0o755 });
+    fs.writeFileSync(slow, '#!/bin/sh\nsleep 8\ncat\n', { mode: 0o755 });
     git(tmpRoot, ['config', 'filter.slow.clean', slow.replace(/\\/g, '/')]);
     fs.writeFileSync(path.join(tmpRoot, '.gitattributes'), 'app.ts filter=slow\n', 'utf8');
     fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 7;\n', 'utf8');
+  };
 
+  it('TC-U34: a git call that does not answer within the time limit is cut off', { timeout: 60_000 }, () => {
+    stallingFilter();
     process.env.AG_GIT_TIMEOUT_MS = '1000';
     try {
       const started = Date.now();
       const info = getGitInfo(tmpRoot);
-      expect(Date.now() - started).toBeLessThan(3000);
+      // the 1 s limit, plus ending what git left running (one PowerShell, seconds on CI runners)
+      expect(Date.now() - started).toBeLessThan(15_000);
       expect(info.isGitRepo).toBe(false);
       expect(info.error).toContain('1000 ms');
     } finally {
       delete process.env.AG_GIT_TIMEOUT_MS;
     }
   });
+
+  it.skipIf(process.platform !== 'win32')(
+    "TC-U34b: on Windows the time limit also ends the git that Git for Windows' launcher left running",
+    { timeout: 120_000 },
+    async (ctx) => {
+      // `git` on PATH is usually the launcher cmd\git.exe, as on the CI runners. The limit killed
+      // only the launcher; the real git ran on through its filters and held the folder (measured:
+      // still running after the cut, gone at 6.9 s).
+      const resolved = resolveExecutable('git') ?? '';
+      const launcher = /\\cmd\\git\.exe$/i.test(resolved)
+        ? resolved
+        : path.join(path.dirname(resolved), '..', '..', 'cmd', 'git.exe');
+      if (!resolved || !fs.existsSync(launcher)) {
+        ctx.skip(); // not Git for Windows
+        return;
+      }
+      stallingFilter();
+      const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+      const savedPath = process.env[key];
+      process.env[key] = `${path.dirname(launcher)}${path.delimiter}${savedPath ?? ''}`;
+      process.env.AG_GIT_TIMEOUT_MS = '1000';
+      let info: ReturnType<typeof getGitInfo>;
+      try {
+        info = getGitInfo(tmpRoot);
+      } finally {
+        if (savedPath === undefined) delete process.env[key];
+        else process.env[key] = savedPath;
+        delete process.env.AG_GIT_TIMEOUT_MS;
+      }
+      expect(info.isGitRepo).toBe(false);
+      // the real git AND the filter it started (measured: 2 in each of 4 runs) — not just the child
+      expect(info.error).toMatch(/ended (?:[2-9]|\d{2,}) processes/);
+
+      // nothing of git's still holds the folder
+      const returned = Date.now();
+      let freedAfter = -1;
+      while (Date.now() - returned < 2000) {
+        try {
+          fs.rmSync(tmpRoot, { recursive: true, force: true });
+          freedAfter = Date.now() - returned;
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      expect(freedAfter).toBeGreaterThanOrEqual(0);
+    },
+  );
 
   it('TC-U07: creates clean checkpoint and rolls back modified + newly created files', () => {
     initRepo(tmpRoot);
