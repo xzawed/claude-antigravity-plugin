@@ -41,18 +41,26 @@ function plantFakeGit(dir: string): void {
   }
 }
 
-/** Run `fn` with a relative entry prepended to PATH (measured: a bare `git` then runs a planted one). */
-function withRelativePathEntry<T>(entry: string, fn: () => T): T {
+/**
+ * Run `fn` the way the MCP server runs in production — its cwd is the opened workspace — with
+ * PATH replaced by `makePath(original)`. Measured: a bare `git` then runs a planted one once PATH
+ * holds ".".
+ */
+function servedFrom<T>(workspace: string, makePath: (original: string) => string, fn: () => T): T {
   const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const saved = process.env[key];
-  process.env[key] = `${entry}${path.delimiter}${saved ?? ''}`;
+  const savedPath = process.env[key];
+  const savedCwd = process.cwd();
+  process.env[key] = makePath(savedPath ?? '');
+  process.chdir(workspace);
   try {
     return fn();
   } finally {
-    if (saved === undefined) delete process.env[key];
-    else process.env[key] = saved;
+    process.chdir(savedCwd);
+    if (savedPath === undefined) delete process.env[key];
+    else process.env[key] = savedPath;
   }
 }
+const dotFirst = (original: string): string => `.${path.delimiter}${original}`;
 
 describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
   let tmpRoot: string;
@@ -146,7 +154,7 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
 
   it('TC-S14: a git the workspace ships never runs, even with "." on PATH (non-repo folder)', () => {
     plantFakeGit(tmpRoot);
-    const info = withRelativePathEntry('.', () => getGitInfo(tmpRoot));
+    const info = servedFrom(tmpRoot, dotFirst, () => getGitInfo(tmpRoot));
     expect(info).toEqual({ isGitRepo: false });
   });
 
@@ -154,9 +162,16 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     initRepo(tmpRoot);
     const realBranch = git(tmpRoot, ['symbolic-ref', '--short', 'HEAD']); // before planting
     plantFakeGit(tmpRoot);
-    const info = withRelativePathEntry('.', () => getGitInfo(tmpRoot));
+    const info = servedFrom(tmpRoot, dotFirst, () => getGitInfo(tmpRoot));
     expect(info.isGitRepo).toBe(true);
     expect(info.currentBranch).toBe(realBranch);
+  });
+
+  it('TC-S14c: with no absolute PATH entry holding git, Git Guard reports no repository instead of falling back to a bare name', () => {
+    initRepo(tmpRoot);
+    plantFakeGit(tmpRoot);
+    const info = servedFrom(tmpRoot, () => '.', () => getGitInfo(tmpRoot));
+    expect(info).toEqual({ isGitRepo: false });
   });
 
   it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {
