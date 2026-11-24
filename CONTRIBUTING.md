@@ -6,7 +6,7 @@ Thank you for your interest in contributing to `claude-antigravity-plugin`! Ever
 
 ## 1. Prerequisites
 
-- **Node.js** `>= 20.0.0` & **npm**
+- **Node.js** `>= 20.0.0` & **npm** (the plugin's runtime floor). The test runner, vitest 5, itself supports Node `>= 22.12`. CI still runs the suite on Node 20, and `server/tests/setup/node20-reporter-shim.ts` keeps failures readable there.
 - **Git**
 - Optional: **Claude Code CLI** (`claude`) and **Antigravity CLI** (`agy`) for live E2E testing
 
