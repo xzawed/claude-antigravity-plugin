@@ -35,7 +35,7 @@
 1. **보안 경계 준수 (`lockedPaths`)**
    - `api-worker.ts` 및 브릿지 파일 쓰기는 반드시 `path.resolve` + `realpath` 정규화 후 `lockedPaths` 범위 내인지 검증한다.
    - `.git/`, `.env*`, `.ag-bridge/config.json`에 대한 에이전트 쓰기는 어떠한 경우에도 차단한다.
-   - 프로그램은 `exec-path.ts`(`requireExecutable`·`resolveExecutable`·`windowsShell`)로 얻은 절대 경로로만 실행한다. 이름을 `spawn`/`execFileSync`에 그대로 넘기거나 `shell: true`를 쓰지 않는다 — `PATH`의 상대 항목이 워크스페이스를 가리킨다. 근거: [ARC-003 §6](docs/02-architecture/security-and-git-guard.md), 가드 `TC-S16`.
+   - 프로그램은 `exec-path.ts`(`requireExecutable`·`resolveExecutable`·`windowsShell`)로 얻은 절대 경로로만 실행한다. 이름을 `spawn`/`execFileSync`에 그대로 넘기거나 `shell: true`를 쓰지 않는다 — `PATH`의 상대 항목이 워크스페이스를 가리킨다. 근거: [ARC-003 §6](docs/02-architecture/security-and-git-guard.md), 가드 `TC-S16`. git은 `git-guard.ts`의 `runGit`으로만 실행한다. `runGit`은 저장소가 정의한 fsmonitor·훅을 끈 채 실행한다(ARC-003 §8, `TC-S20`).
    - `.ag-bridge/config.json`은 저장소가 커밋할 수 있다. 실행할 프로그램·비밀을 고르거나 안전 기본값을 푸는 설정 키는 `config.ts`의 `TRUST_SENSITIVE`에 넣는다. 그러면 git이 추적하거나 링크로 닿은 설정 파일에서는 무시된다. 근거: ARC-003 §7, 가드 `TC-S17`~`TC-S19d`.
 2. **원자적 상태 갱신 (Atomic Bridge I/O)**
    - `.ag-bridge/manifest.json` 등 상태 파일은 임시 파일(`.tmp`)에 기록 후 `rename`으로 원자적 교체한다.

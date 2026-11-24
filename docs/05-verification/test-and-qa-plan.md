@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.4.0` |
+| **버전** | `1.5.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -66,10 +66,11 @@
 | `TC-S13` | `detector.ts` | `PATH`의 상대 항목에 `agy`를 심어 둠 | 절대 경로 항목의 `agy`만 탐지 | `NFR-001` |
 | `TC-S14` ~ `TC-S14c` | `git-guard.ts` | 서버 cwd = 워크스페이스, 워크스페이스에 가짜 `git` + `PATH` 앞에 `.` (저장소 아님 / 저장소 / `PATH`가 `.`뿐) | 진짜 Git으로 판정(가짜 출력 0), `PATH`가 `.`뿐이면 저장소 없음으로 처리 — 이름으로 되돌아가지 않음 | `NFR-001` |
 | `TC-S15` | `exec-path.ts` / `subscription.ts` | `.cmd` 래퍼 셸: `ComSpec`이 절대/상대/없음, `SystemRoot`가 절대/상대 | 항상 절대 경로(`%ComSpec%` 또는 `%SystemRoot%\System32\cmd.exe`) | `NFR-001` |
-| `TC-S16` | `server/src/**` | 프로그램 이름 리터럴로 `spawn`/`execFile*` 호출, `command: '…'`, `shell: true`, `'cmd.exe'` 값 | 0건 | `NFR-001` |
+| `TC-S16` | `server/src/**` | 프로그램 이름 리터럴로 `spawn`/`execFile*` 호출, `command: '…'`, `shell: true`, `'cmd.exe'` 값, `git-guard.ts` 밖의 git 실행 | 0건 | `NFR-001` |
 | `TC-S17` ~ `TC-S17c` | `config.ts` / `path-guard.ts` | `app_path`가 상대 경로 / 워크스페이스 안 절대 경로 / 밖에서 안으로 이어지는 링크 / 안쪽 경로의 `\\?\` 표기(Windows) / 워크스페이스 밖 절대 경로 | 마지막 하나만 따름, 나머지는 `auto` + 무시 목록 | `NFR-001` |
 | `TC-S18` ~ `TC-S18f` | `config.ts` | 민감 키 8종을 안전하지 않은 값으로 둔 설정이 git 추적(소문자 / 다른 대소문자 / 서브모듈) · 링크 경유 / 사용자 자신의 비추적 파일; 기본값을 조이는 값; 환경변수 opt-in | 저장소 쪽은 기본값으로 되돌리고 무시 목록에 기록, 사용자 파일·조이는 값·환경변수는 그대로 | `NFR-001` |
 | `TC-S19` ~ `TC-S19d` | `detector.ts` / `index.ts` / `jobs.ts` / `sessions.ts` | 추적되는 설정 파일이 민감 키를 품은 채 `check_ag_environment` · 위임 · `start_ag_task` · `ag_session` 호출 | 권고·경고에 무시한 키와 해결 방법(`git rm --cached …`) 표시, 엔진은 안전한 기본값으로 실행 | `NFR-001` |
+| `TC-S20`, `TC-S20b` | `git-guard.ts` | 저장소 `.git/config`의 `core.fsmonitor` 프로그램 · `.git/hooks/reference-transaction` 훅이 있는 저장소에서 상태 확인·체크포인트 | 둘 다 실행되지 않음(표식 파일 없음), 체크포인트 ref는 정상 생성 | `NFR-001` |
 
 ---
 
