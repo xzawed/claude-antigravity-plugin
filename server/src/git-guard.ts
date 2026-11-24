@@ -6,11 +6,20 @@ import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './
 
 /**
  * Git Guard's plumbing runs no command the repository configures: a repository delivered with its
- * `.git/` can set `core.fsmonitor` (run by status and stash create) and ship hooks
- * (reference-transaction runs on update-ref) — measured. Clean/smudge filters stay on: checkpoints
- * must store real content (Git LFS). ARC-003 §8, TC-S20.
+ * `.git/` can set `core.fsmonitor` (run by status and stash create), ship hooks (reference-transaction
+ * runs on update-ref), and — as a partial clone — make `reset --hard` lazily fetch through a remote
+ * whose `core.sshCommand` it chose (all measured). Git Guard never needs the network, so every
+ * transport is refused. Clean/smudge filters stay on: checkpoints must store real content (Git
+ * LFS). ARC-003 §8, TC-S20 ~ TC-S20c.
  */
-const NO_REPO_COMMANDS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+const NO_REPO_COMMANDS = [
+  '-c',
+  'core.fsmonitor=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'protocol.allow=never',
+];
 
 function runGit(workspaceRoot: string, args: string[]): string {
   // By absolute path: a bare `git` runs a git the workspace ships once PATH holds "." (TC-S14).

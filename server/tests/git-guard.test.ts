@@ -224,6 +224,49 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(fs.existsSync(path.join(tmpRoot, 'reftx.marker'))).toBe(false);
   });
 
+  it('TC-S20c: a rollback in a partial clone never runs the repository\'s transport command (lazy fetch)', () => {
+    // A partial clone fetches missing blobs on demand from its promisor remote; the repository's
+    // config picks that remote and core.sshCommand (Grok leg; measured: `reset --hard` ran it).
+    const seed = path.join(tmpRoot, 'seed');
+    fs.mkdirSync(seed);
+    initRepo(seed);
+    const oldRev = git(seed, ['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(seed, 'app.ts'), 'export const version = 2;\n', 'utf8');
+    git(seed, ['commit', '-qam', 'v2']);
+    const bare = path.join(tmpRoot, 'server.git');
+    git(tmpRoot, ['clone', '-q', '--bare', seed, bare]);
+    git(bare, ['config', 'uploadpack.allowFilter', 'true']);
+    const clone = path.join(tmpRoot, 'clone');
+    git(tmpRoot, ['clone', '-q', '--filter=blob:none', `file://${bare.replace(/\\/g, '/')}`, clone]);
+    git(clone, ['config', 'remote.origin.url', 'ssh://example.invalid/repo.git']);
+    // The fake ssh must not read stdin: git keeps the transport pipe open, so `cat` would deadlock.
+    const sshMarker = path.join(clone, 'ssh.marker').replace(/\\/g, '/');
+    const fakeSsh = path.join(clone, '.git', 'fake-ssh.sh');
+    fs.writeFileSync(fakeSsh, `#!/bin/sh\necho ran >> "${sshMarker}"\nexit 1\n`, { mode: 0o755 });
+    git(clone, ['config', 'core.sshCommand', fakeSsh.replace(/\\/g, '/')]);
+
+    const manifest: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'task-lazy',
+      title: 'Lazy fetch rollback',
+      mode: 'api',
+      status: 'VERIFIED',
+      lockedPaths: ['app.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: oldRev, // its app.ts blob is not in the partial clone
+      gitCheckpointIsStash: false,
+      gitUntrackedBaseline: [],
+      artifacts: [],
+    };
+    try {
+      rollbackCheckpoint(clone, manifest);
+    } catch {
+      // the missing blob cannot be fetched: the rollback fails closed
+    }
+    expect(fs.existsSync(path.join(clone, 'ssh.marker'))).toBe(false);
+  });
+
   it('TC-U11: restores staged edits, unstaged edits, and deleted tracked files cleanly on rollback', () => {
     initRepo(tmpRoot);
     fs.writeFileSync(path.join(tmpRoot, 'extra.ts'), 'export const extra = 1;\n', 'utf8');
