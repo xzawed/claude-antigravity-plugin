@@ -86,9 +86,19 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-gitguard-'));
   });
 
-  afterEach(() => {
-    // retries: a filter process git left behind (TC-U34) may still hold the folder for a moment
-    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  afterEach(async () => {
+    // A filter process that git started before the time limit cut git off (TC-U34) keeps the
+    // folder busy until it ends. rmSync's own maxRetries failed EBUSY at once on Windows CI, so wait here.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code ?? '';
+        if (attempt >= 80 || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
   });
 
   afterAll(() => {

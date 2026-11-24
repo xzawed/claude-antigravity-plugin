@@ -135,6 +135,7 @@ flowchart TD
 - `execFileSync`는 MCP 서버 전체를 멈춘다. 그런데 저장소의 clean 필터(LFS 때문에 켜 둔다, §8)는 `git status`를 얼마든지 붙잡을 수 있다. 실측(`TC-U34`)에서 16.6초 동안 붙잡았다.
 - 그래서 git 명령 하나당 **120초**(환경변수 `AG_GIT_TIMEOUT_MS`로 조정)를 넘기면 끊는다. 결과에는 "저장소 아님"이 아니라 "Git did not answer within N ms"라고 남긴다.
 - 출력 버퍼는 64MiB까지 받는다.
+- 끊는 것은 git 프로세스뿐이다. git이 이미 띄운 필터 프로세스는 스스로 끝날 때까지 남는다. Windows CI에서는 그 프로세스가 저장소 폴더를 붙잡아 테스트 정리가 `EBUSY`로 실패했다(실측).
 
 ---
 
