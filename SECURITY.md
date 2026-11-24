@@ -36,11 +36,11 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S20c`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S21c`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
-   - Canonicalizes target paths with `path.resolve` + `fs.realpathSync` to block `../` traversal and symlink/junction escapes outside the workspace or `lockedPaths`.
+   - Canonicalizes target paths with `path.resolve` + `fs.realpathSync.native` (the path the OS opens) to block `../` traversal and symlink/junction escapes outside the workspace or `lockedPaths`. On Windows the OS real path also expands 8.3 short names (`ENV~1` is `.env`, `GIT~1` is `.git`), and a segment holding `:` (alternate data stream) or ending in a dot or space is refused (`TC-S21` ~ `TC-S21c`).
    - Unconditionally blocks writes to `.git/**`, `.env`, `.env.*`, `node_modules/**`, and `.ag-bridge/config.json`, and blocks reads of `.env*`, `.ssh`, `*.pem`, `*.key`, and SSH private keys.
    - A repository can commit its own `.ag-bridge/config.json`. Settings that pick a program or a secret, or weaken a safety default, are therefore taken only from the user's own untracked config. The list is `TRUST_SENSITIVE` in `server/src/config.ts`, with the reasons in [ARC-003 §7](./docs/02-architecture/security-and-git-guard.md). A config that git tracks (in any letter case) or that is reached through a link has them ignored, and `check_ag_environment` names each one. `app_path` must always be an absolute path outside the workspace (`TC-S17` ~ `TC-S19d`).
    - Strictly validates `taskId` (`assertSafeTaskId`) against `^[a-zA-Z0-9._-]{1,128}$` without `..` segments in `getArtifactsDir`, `readArchivedManifest`, and `archiveManifest` so `list_ag_artifacts`, `get_ag_job`, and `rollback_ag_task` cannot escape `.ag-bridge/`.
