@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `VER-001` |
-| **버전** | `1.7.0` |
+| **버전** | `1.8.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [구현 마스터 플랜](../04-implementation/implementation-plan.md) |
@@ -45,6 +45,8 @@
 | `TC-U09` | `git-guard.ts` | Git 저장소가 아닌 임시 폴더에서 `best_effort` 모드 실행 | 경고와 함께 `gitCheckpointRef: undefined`로 정상 진행 | `PLN-002` |
 | `TC-U10` | `cli-init.ts` | `--silent`로 최초 실행 후 `claude-handoff.md` 동기화 | 종료 코드 `0`, `.ag-bridge/config.json` 및 템플릿 생성 | `FR-001` |
 | `TC-U33` | `server/src/**` | 계층표에 없는 새 모듈, 윗 계층 import, 순환 import, `cli-init`이 `bridge-fs` 외 모듈 import | 0건 — 계층 규칙은 [ARC-001 §3](../02-architecture/system-architecture.md) | `ARC-001` |
+| `TC-U34` | `git-guard.ts` | 저장소의 clean 필터가 `git status`를 붙잡음, `AG_GIT_TIMEOUT_MS=1000` | 3초 안에 끊기고 `error`에 "1000 ms" 명시(저장소 아님으로 오인 안 함) | `ARC-003` |
+| `TC-U35`, `TC-U35b` | `git-guard.ts` | 사용자의 `사용자 메모.txt`가 있는 상태에서 에이전트가 `에이전트결과.txt` 생성 후 롤백; 추적되는 `설정.json` 수정 | 에이전트 파일만 삭제·사용자 파일 보존, 변경 목록에 이름 그대로 표시(`-z`) | `ARC-003` |
 
 ---
 
@@ -73,6 +75,7 @@
 | `TC-S19` ~ `TC-S19d` | `detector.ts` / `index.ts` / `jobs.ts` / `sessions.ts` | 추적되는 설정 파일이 민감 키를 품은 채 `check_ag_environment` · 위임 · `start_ag_task` · `ag_session` 호출 | 권고·경고에 무시한 키와 해결 방법(`git rm --cached …`) 표시, 엔진은 안전한 기본값으로 실행 | `NFR-001` |
 | `TC-S20` ~ `TC-S20c` | `git-guard.ts` | 저장소 `.git/config`의 `core.fsmonitor` 프로그램 · `.git/hooks/reference-transaction` 훅이 있는 저장소에서 상태 확인·체크포인트; 원격을 `ssh://`+`core.sshCommand`로 바꾼 부분 클론에서 없는 blob이 필요한 롤백 | 어느 것도 실행되지 않음(표식 파일 없음), 체크포인트 ref는 정상 생성, 지연 fetch가 필요한 롤백은 실패로 끝남 | `NFR-001` |
 | `TC-S21` ~ `TC-S21c` | `path-guard.ts` (Windows) | `.env`·`.git`·`node_modules`의 8.3 짧은 이름(`ENV~1`·`GIT~1`·`NODE_M~1`, 8.3이 꺼진 볼륨이면 건너뜀), `.env::$DATA`·`App.tsx:hidden`(대체 데이터 스트림), `.git.`·`.env `·`ui. `(끝 점/공백) | 모두 거부(`PROTECTED_PATH_BLOCKED` 또는 `PATH_TRAVERSAL_BLOCKED`), 일반 점 포함 이름(`App.test.tsx`)은 그대로 허용 | `NFR-001` |
+| `TC-S22`, `TC-S22b` | `git-guard.ts` | 기준선 없는 매니페스트로 롤백(사용자의 untracked 파일 존재); 저장소가 아닌 폴더에서 untracked 목록 요청 | untracked 파일을 하나도 지우지 않고 `untrackedBaselineMissing`; 목록 실패는 `[]`가 아니라 `undefined` | `NFR-001` |
 
 ---
 

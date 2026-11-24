@@ -124,6 +124,26 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(res.untrackedBaselineMissing).toBe(true);
   });
 
+  it.skipIf(process.platform === 'linux')(
+    'TC-S22c: on a case-insensitive file system a tracked file renamed only in case survives rollback',
+    () => {
+      // Antigravity leg, measured: with core.ignorecase=false (a repository brought from Linux),
+      // `ls-files --others` lists the tracked Foo.txt as untracked "foo.txt" once its case differs.
+      git(tmpRoot, ['init']);
+      git(tmpRoot, ['config', 'user.email', 'test@example.com']);
+      git(tmpRoot, ['config', 'user.name', 'Test User']);
+      git(tmpRoot, ['config', 'core.ignorecase', 'false']);
+      fs.writeFileSync(path.join(tmpRoot, 'Foo.txt'), 'tracked\n', 'utf8');
+      git(tmpRoot, ['add', 'Foo.txt']);
+      git(tmpRoot, ['commit', '-qm', 'init']);
+      const cp = createCheckpoint(tmpRoot, 'task-case', 'best_effort');
+      fs.renameSync(path.join(tmpRoot, 'Foo.txt'), path.join(tmpRoot, 'foo.txt')); // the agent's case-only rename
+
+      rollbackCheckpoint(tmpRoot, manifestFor('task-case', cp, true));
+      expect(fs.readdirSync(tmpRoot).filter((n) => n.toLowerCase() === 'foo.txt')).toHaveLength(1);
+    },
+  );
+
   it('TC-S22b: a failed untracked-file listing is not mistaken for "no untracked files"', () => {
     expect(listUntrackedFiles(tmpRoot)).toBeUndefined(); // not a repository: git fails
     initRepo(tmpRoot);

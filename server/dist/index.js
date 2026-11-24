@@ -59688,7 +59688,14 @@ function listGitChangedFiles(workspaceRoot) {
   return Array.from(files).sort();
 }
 function listUntrackedFiles(workspaceRoot) {
-  const res = tryRunGit(workspaceRoot, ["ls-files", "-z", "--others", "--exclude-standard"]);
+  const foldCase = process.platform === "win32" || process.platform === "darwin";
+  const res = tryRunGit(workspaceRoot, [
+    ...foldCase ? ["-c", "core.ignorecase=true"] : [],
+    "ls-files",
+    "-z",
+    "--others",
+    "--exclude-standard"
+  ]);
   if (!res.ok) {
     return void 0;
   }

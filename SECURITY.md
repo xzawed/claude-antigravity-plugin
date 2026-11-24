@@ -56,6 +56,8 @@ This plugin delegates file edits, browser automation, and verification commands 
    - `maskSecrets()` redacts configured secrets plus Google API keys (`AIza...`), Google OAuth tokens (`ya29....`) & authorization codes (`4/0...`), OpenAI/Anthropic keys (`sk-...`), GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`), and `Bearer` headers across MCP responses, `report.md`, `agy-cli.log`, and `stderr`.
 4. **Lossless Rollback & Process Hygiene (`server/src/git-guard.ts`, `server/src/jobs.ts`, `server/src/sessions.ts`):**
    - Snapshots working trees via `git stash create` pinned under `refs/ag-bridge/checkpoints/<taskId>` without altering `HEAD` or the user's `git stash list`, and preserves pre-existing untracked files on rollback.
+   - Rollback deletes untracked files only against a recorded baseline. If git could not list them at checkpoint time, no checkpoint is made. A manifest without a baseline makes rollback remove no untracked file and warn (`TC-S22`, `TC-S22b`).
+   - Each git command is cut off after 120 s (`AG_GIT_TIMEOUT_MS`), so a stalled filter cannot freeze the server (`TC-U34`).
    - Git Guard runs every git command with `-c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.allow=never`. A repository delivered with its own `.git/` (an archive or a shared folder) therefore cannot make status, checkpoint or rollback run its fsmonitor program or hooks. Nor can a partial clone's lazy fetch run its transport command such as `core.sshCommand` (`TC-S20` ~ `TC-S20c`). Clean/smudge filters stay on so checkpoints keep real content.
    - Automatically disposes pending auth sessions, background jobs, and persistent `stream-json` workers on MCP server exit.
 5. **Dependency Hygiene:**

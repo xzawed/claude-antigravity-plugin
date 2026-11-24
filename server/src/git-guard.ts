@@ -128,7 +128,17 @@ export function listGitChangedFiles(workspaceRoot: string): string[] {
  * a baseline recorded as [] would make a later rollback delete every untracked file (TC-S22b).
  */
 export function listUntrackedFiles(workspaceRoot: string): string[] | undefined {
-  const res = tryRunGit(workspaceRoot, ['ls-files', '-z', '--others', '--exclude-standard']);
+  // Windows and macOS file systems ignore case, but a repository brought from Linux can still say
+  // core.ignorecase=false; git then lists a tracked file whose case changed as untracked, and the
+  // rollback deleted it (Antigravity leg, measured; TC-S22c).
+  const foldCase = process.platform === 'win32' || process.platform === 'darwin';
+  const res = tryRunGit(workspaceRoot, [
+    ...(foldCase ? ['-c', 'core.ignorecase=true'] : []),
+    'ls-files',
+    '-z',
+    '--others',
+    '--exclude-standard',
+  ]);
   if (!res.ok) {
     return undefined;
   }

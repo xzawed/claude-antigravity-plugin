@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.5.0` |
+| **버전** | `1.6.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -118,11 +118,21 @@ flowchart TD
 ### 5.3 안전 롤백 전략 (`rollback(manifest)`)
 1. `manifest.gitCheckpointRef` 유효성 확인 (없으면 `ROLLBACK_NO_CHECKPOINT` 반환).
 2. 추적 파일 복원:
-   - **Clean 기준(`isStashSnapshot === false`):** `git reset --hard <ref>` 대신 `git checkout <ref> -- .` 또는 `git restore --source=<ref> --staged --worktree .` 수행.
-   - **Dirty 기준(`isStashSnapshot === true`):** `git checkout HEAD -- .` 후 `git stash apply --index <ref>`(또는 스냅샷 트리 복원 `git read-tree` + `git checkout-index`)로 위임 직전의 미커밋 상태까지 원복.
+   - **Clean 기준(`isStashSnapshot === false`):** `git reset --hard <ref>`.
+   - **Dirty 기준(`isStashSnapshot === true`):** `git reset --hard HEAD` 후 `git stash apply --index <ref>`(실패하면 `--index` 없이)로 위임 직전의 미커밋 상태까지 원복.
 3. 신규 Untracked 파일 정리:
-   - 현재 untracked 파일 목록(`git ls-files --others --exclude-standard`)에서 `manifest.gitUntrackedBaseline`에 **없던 파일**만 선별 삭제(위임 전부터 사용자가 갖고 있던 untracked 파일은 100% 보존).
-4. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제(또는 롤백 완료 마킹) 및 복구된 파일 목록 반환.
+   - 현재 untracked 파일 목록(`git ls-files -z --others --exclude-standard`)에서 `manifest.gitUntrackedBaseline`에 **없던 파일**만 선별 삭제한다. 위임 전부터 사용자가 갖고 있던 untracked 파일은 보존한다.
+   - `-z`로 읽는다. 그러지 않으면 git이 한글 같은 비ASCII 이름을 `"\354\202\254…"`처럼 인용한다. 그래서 그 이름이 어떤 파일도 가리키지 못하고, 에이전트가 만든 `에이전트결과.txt`가 남았다(실측, `TC-U35`).
+   - **기준선을 모르면 지우지 않는다.**
+     - 목록을 얻지 못하면(오류·시간 초과·출력 초과) `listUntrackedFiles`는 "없음"(`[]`)이 아니라 "모름"(`undefined`)을 돌려준다(`TC-S22b`). 체크포인트 생성 때 모르면 체크포인트를 만들지 않는다.
+     - 매니페스트에 기준선이 없으면(이전 버전) untracked 파일을 하나도 지우지 않고 경고한다(`TC-S22`).
+     - 예전에는 "모름"을 "없음"으로 다뤘다. 그래서 체크포인트 때 목록이 실패하면 롤백이 모든 untracked 파일을 지울 수 있었다. 실측으로는 untracked 2만 개(경로 1.3MB)에서 이전 목록이 출력 한도(1MiB)를 넘겨 0개를 돌려줬다.
+4. 정리 완료 후 해당 `refs/ag-bridge/checkpoints/<taskId>` ref 삭제 및 복구된 파일 목록 반환.
+
+### 5.4 git 호출 시간 제한
+- `execFileSync`는 MCP 서버 전체를 멈춘다. 그런데 저장소의 clean 필터(LFS 때문에 켜 둔다, §8)는 `git status`를 얼마든지 붙잡을 수 있다. 실측(`TC-U34`)에서 16.6초 동안 붙잡았다.
+- 그래서 git 명령 하나당 **120초**(환경변수 `AG_GIT_TIMEOUT_MS`로 조정)를 넘기면 끊는다. 결과에는 "저장소 아님"이 아니라 "Git did not answer within N ms"라고 남긴다.
+- 출력 버퍼는 64MiB까지 받는다.
 
 ---
 
