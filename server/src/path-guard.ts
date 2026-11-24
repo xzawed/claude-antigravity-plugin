@@ -24,29 +24,11 @@ function isInsideRoot(rootPath: string, candidatePath: string): boolean {
   return candCmp.startsWith(prefix);
 }
 
-function resolveRealPathOrNearestParent(targetPath: string): string {
-  let current = path.resolve(targetPath);
-  const trailingSegments: string[] = [];
-
-  while (!fs.existsSync(current)) {
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return path.resolve(targetPath);
-    }
-    trailingSegments.unshift(path.basename(current));
-    current = parent;
-  }
-
-  const realExisting = fs.realpathSync(current);
-  return trailingSegments.length > 0
-    ? path.join(realExisting, ...trailingSegments)
-    : realExisting;
-}
-
 /**
  * The OS's real path (`fs.realpathSync.native`) of `targetPath`, or of its nearest existing parent
  * with the rest appended. Unlike the JS implementation it normalizes Windows `\\?\` prefixes and 8.3
- * short names (measured), so two spellings of one folder compare equal.
+ * short names (measured), so two spellings of one file compare equal. Every check below compares
+ * these paths: with the JS realpath, ENV~1 read .env and GIT~1 passed as a lockedPath (TC-S21).
  */
 function nativeRealPathOrNearestParent(targetPath: string): string {
   let current = path.resolve(targetPath);
@@ -72,6 +54,30 @@ export function isInsideWorkspace(workspaceRoot: string, candidatePath: string):
     nativeRealPathOrNearestParent(workspaceRoot),
     nativeRealPathOrNearestParent(candidatePath),
   );
+}
+
+/**
+ * Windows opens one file under spellings a string check misses: it strips a trailing dot or space
+ * from a name, and `name:stream` opens an alternate data stream (`.env::$DATA` is .env's content —
+ * measured). Such segments are refused outright (TC-S21b, TC-S21c).
+ */
+function assertNoWindowsAlias(posixRel: string, what: string): void {
+  if (!IS_WINDOWS) {
+    return;
+  }
+  for (const segment of posixRel.split('/')) {
+    if (segment.includes(':') || /[. ]$/.test(segment)) {
+      throw new AgPluginError(
+        'PATH_TRAVERSAL_BLOCKED',
+        `${what}: "${posixRel}" uses a Windows path alias (an alternate data stream, or a name ending in a dot or space).`,
+      );
+    }
+  }
+}
+
+/** The workspace root as the OS names it (long names, real case). */
+function realWorkspaceRoot(workspaceRoot: string): string {
+  return fs.realpathSync.native(path.resolve(workspaceRoot));
 }
 
 function isProtectedWritePath(posixRel: string): boolean {
@@ -123,7 +129,7 @@ export function validateLockedPathsConfig(workspaceRoot: string, lockedPaths: st
     );
   }
 
-  const realRoot = fs.realpathSync(path.resolve(workspaceRoot));
+  const realRoot = realWorkspaceRoot(workspaceRoot);
   const normalizedScopes: string[] = [];
 
   for (const rawScope of lockedPaths) {
@@ -139,8 +145,9 @@ export function validateLockedPathsConfig(workspaceRoot: string, lockedPaths: st
         `lockedPath "${scope}" resolves outside the workspace root.`,
       );
     }
+    assertNoWindowsAlias(toPosixRelative(realRoot, resolved), 'lockedPath');
 
-    const realScope = resolveRealPathOrNearestParent(resolved);
+    const realScope = nativeRealPathOrNearestParent(resolved);
     if (!isInsideRoot(realRoot, realScope)) {
       throw new AgPluginError(
         'INVALID_LOCKED_PATHS',
@@ -178,7 +185,7 @@ export function assertWritablePath(
     );
   }
 
-  const realRoot = fs.realpathSync(path.resolve(workspaceRoot));
+  const realRoot = realWorkspaceRoot(workspaceRoot);
   const resolvedTarget = path.resolve(realRoot, targetPath);
 
   if (!isInsideRoot(realRoot, resolvedTarget)) {
@@ -187,8 +194,9 @@ export function assertWritablePath(
       `Write denied: "${targetPath}" resolves outside the workspace root.`,
     );
   }
+  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), 'Write denied');
 
-  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
+  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
   if (!isInsideRoot(realRoot, realTarget)) {
     throw new AgPluginError(
       'PATH_TRAVERSAL_BLOCKED',
@@ -213,7 +221,7 @@ export function assertWritablePath(
     if (!isInsideRoot(realRoot, resolvedScope)) {
       return false;
     }
-    const realScope = resolveRealPathOrNearestParent(resolvedScope);
+    const realScope = nativeRealPathOrNearestParent(resolvedScope);
     if (!isInsideRoot(realRoot, realScope)) {
       return false;
     }
@@ -242,7 +250,7 @@ export function assertReadablePath(workspaceRoot: string, targetPath: string): s
     throw new AgPluginError('PATH_TRAVERSAL_BLOCKED', 'Target path is empty or contains null bytes.');
   }
 
-  const realRoot = fs.realpathSync(path.resolve(workspaceRoot));
+  const realRoot = realWorkspaceRoot(workspaceRoot);
   const resolvedTarget = path.resolve(realRoot, targetPath);
 
   if (!isInsideRoot(realRoot, resolvedTarget)) {
@@ -251,8 +259,9 @@ export function assertReadablePath(workspaceRoot: string, targetPath: string): s
       `Read denied: "${targetPath}" resolves outside the workspace root.`,
     );
   }
+  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), 'Read denied');
 
-  const realTarget = resolveRealPathOrNearestParent(resolvedTarget);
+  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
   if (!isInsideRoot(realRoot, realTarget)) {
     throw new AgPluginError(
       'PATH_TRAVERSAL_BLOCKED',
