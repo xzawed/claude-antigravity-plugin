@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { assertSafeTaskId, getBridgeDir } from './bridge-fs.js';
 import { requireExecutable } from './exec-path.js';
 import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './types.js';
 
@@ -211,19 +212,185 @@ export interface CheckpointResult {
   untrackedBaseline: string[] | undefined;
   /** What HEAD named at the checkpoint: `refs/heads/<branch>`, or `HEAD` when detached. */
   headRef?: string;
+  /** Workspace-relative folder holding a copy of the untracked files, when they fit the cap. */
+  untrackedSnapshotDir?: string;
   warning?: string;
 }
 
 /** The manifest fields a checkpoint fills — one mapping for every caller that writes a manifest. */
 export function checkpointManifestFields(
   cp: CheckpointResult,
-): Pick<BridgeManifest, 'gitCheckpointRef' | 'gitCheckpointIsStash' | 'gitUntrackedBaseline' | 'gitCheckpointHeadRef'> {
+): Pick<
+  BridgeManifest,
+  'gitCheckpointRef' | 'gitCheckpointIsStash' | 'gitUntrackedBaseline' | 'gitCheckpointHeadRef' | 'gitUntrackedSnapshotDir'
+> {
   return {
     gitCheckpointRef: cp.checkpointRef,
     gitCheckpointIsStash: cp.isStashSnapshot,
     gitUntrackedBaseline: cp.untrackedBaseline,
     gitCheckpointHeadRef: cp.headRef,
+    gitUntrackedSnapshotDir: cp.untrackedSnapshotDir,
   };
+}
+
+/*
+ * Rollback recovery (ARC-003 §5.5). Three reviewers settled it over two rounds: what rollback removes
+ * is moved under .ag-bridge/recovery/<taskId>/ instead of deleted, the user's untracked files are
+ * copied aside at the checkpoint when they fit a cap, and the state before reverting is recorded.
+ * Measured on Windows NVMe: copying 2,000 files of 25 KB took 2.5 s (git objects: 18.6 s); 20,000
+ * small files took 20 s to copy, hence the cap.
+ */
+const SNAPSHOT_MAX_FILES = 2_000;
+const SNAPSHOT_MAX_BYTES = 50 * 1024 * 1024;
+
+export interface RecoveryRetention {
+  maxTasks: number;
+  maxAgeMs: number;
+  maxBytes: number;
+}
+
+/** Kept: the last 10 tasks or 7 days, whichever is fewer, and no more than 250 MB in all. */
+export const RECOVERY_RETENTION: RecoveryRetention = {
+  maxTasks: 10,
+  maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+  maxBytes: 250 * 1024 * 1024,
+};
+
+const recoveryRoot = (workspaceRoot: string): string => path.join(getBridgeDir(workspaceRoot), 'recovery');
+const relativeTo = (workspaceRoot: string, abs: string): string =>
+  path.relative(workspaceRoot, abs).split(path.sep).join('/');
+const snapshotDirFor = (workspaceRoot: string, taskId: string): string =>
+  path.join(recoveryRoot(workspaceRoot), assertSafeTaskId(taskId), 'untracked');
+
+/** Copy the user's untracked files aside; over the cap (or on any copy error) nothing is kept and a warning says so. */
+function snapshotUntracked(
+  workspaceRoot: string,
+  taskId: string,
+  baseline: string[],
+): { dir?: string; warning?: string } {
+  const files: string[] = [];
+  let bytes = 0;
+  for (const rel of baseline) {
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(path.join(workspaceRoot, rel));
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue; // a link or a nested repository is left alone
+    files.push(rel);
+    bytes += st.size;
+  }
+  if (files.length > SNAPSHOT_MAX_FILES || bytes > SNAPSHOT_MAX_BYTES) {
+    return {
+      warning:
+        `The ${files.length} untracked files (${(bytes / 1024 / 1024).toFixed(1)} MB) were not snapshotted: they exceed ` +
+        `the ${SNAPSHOT_MAX_FILES}-file / ${SNAPSHOT_MAX_BYTES / 1024 / 1024} MB cap, so a rollback cannot undo an agent's edit or delete of one.`,
+    };
+  }
+  if (files.length === 0) return {};
+  const dir = snapshotDirFor(workspaceRoot, taskId);
+  try {
+    for (const rel of files) {
+      const dst = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(path.join(workspaceRoot, rel), dst);
+    }
+  } catch (err) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    const why = err instanceof Error ? err.message : String(err);
+    return { warning: `The untracked files were not snapshotted (${why}), so a rollback cannot undo an agent's edit or delete of one.` };
+  }
+  return { dir: relativeTo(workspaceRoot, dir) };
+}
+
+/**
+ * Make every folder on the way to `rel` a real folder inside the workspace: a link the agent put in
+ * place of one (a junction out of the workspace) is moved aside first, so nothing is written or
+ * moved through it (TC-S24f).
+ */
+function realFoldersTo(workspaceRoot: string, rel: string, moveAside: (rel: string) => void): void {
+  const parts = rel.split('/').slice(0, -1);
+  for (let i = 1; i <= parts.length; i++) {
+    const partRel = parts.slice(0, i).join('/');
+    const abs = path.join(workspaceRoot, partRel);
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.lstatSync(abs);
+    } catch {
+      st = undefined;
+    }
+    if (st && (st.isSymbolicLink() || !st.isDirectory())) moveAside(partRel);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) fs.mkdirSync(abs);
+  }
+}
+
+/** Files under `dir`, as `/`-separated paths relative to it; links are skipped. */
+function regularFilesUnder(dir: string, prefix = ''): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...regularFilesUnder(path.join(dir, entry.name), rel));
+    else if (entry.isFile()) out.push(rel);
+  }
+  return out;
+}
+
+function bytesUnder(dir: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += bytesUnder(abs);
+    else if (entry.isFile()) total += fs.statSync(abs).size;
+  }
+  return total;
+}
+
+/**
+ * Delete the recovery folders (and pre-rollback refs) of tasks beyond the retention policy: the
+ * newest `maxTasks` that are younger than `maxAgeMs` are kept, then the oldest are dropped until the
+ * total fits `maxBytes`. The task at hand is always kept. Returns the task ids pruned.
+ */
+export function pruneRecoveryArtifacts(
+  workspaceRoot: string,
+  keepTaskId?: string,
+  policy: RecoveryRetention = RECOVERY_RETENTION,
+  now: number = Date.now(),
+): string[] {
+  const root = recoveryRoot(workspaceRoot);
+  let entries: Array<{ id: string; mtimeMs: number; bytes: number }>;
+  try {
+    entries = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => {
+        const dir = path.join(root, e.name);
+        return { id: e.name, mtimeMs: fs.statSync(dir).mtimeMs, bytes: bytesUnder(dir) };
+      });
+  } catch {
+    return [];
+  }
+  entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const kept = entries.filter((e) => e.id === keepTaskId);
+  const pruned: string[] = [];
+  for (const e of entries) {
+    if (e.id === keepTaskId) continue;
+    if (kept.length < policy.maxTasks && now - e.mtimeMs <= policy.maxAgeMs) kept.push(e);
+    else pruned.push(e.id);
+  }
+  let total = kept.reduce((sum, e) => sum + e.bytes, 0);
+  while (total > policy.maxBytes) {
+    const oldest = [...kept].reverse().find((e) => e.id !== keepTaskId);
+    if (!oldest) break;
+    kept.splice(kept.indexOf(oldest), 1);
+    total -= oldest.bytes;
+    pruned.push(oldest.id);
+  }
+  for (const id of pruned) {
+    fs.rmSync(path.join(root, id), { recursive: true, force: true });
+    tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/pre-rollback/${id}`]);
+  }
+  return pruned;
 }
 
 function symbolicHead(workspaceRoot: string): string | undefined {
@@ -302,19 +469,17 @@ export function createCheckpoint(
         `Failed to pin git checkpoint ref ${refName}: ${pinRes.stderr}`,
       );
     }
-    return {
-      checkpointRef: stashHash,
-      isStashSnapshot: true,
-      untrackedBaseline,
-      headRef,
-    };
   }
 
+  const snapshot = snapshotUntracked(workspaceRoot, taskId, untrackedBaseline);
+  pruneRecoveryArtifacts(workspaceRoot, taskId);
   return {
-    checkpointRef: headRes.stdout.trim(),
-    isStashSnapshot: false,
+    checkpointRef: stashHash || headRes.stdout.trim(),
+    isStashSnapshot: Boolean(stashHash),
     untrackedBaseline,
     headRef,
+    untrackedSnapshotDir: snapshot.dir,
+    ...(snapshot.warning ? { warning: snapshot.warning } : {}),
   };
 }
 
@@ -324,6 +489,14 @@ export interface RollbackResult {
   removedUntrackedFiles: string[];
   /** The checkpoint recorded no untracked baseline, so no untracked file was removed. */
   untrackedBaselineMissing: boolean;
+  /** The user's untracked files put back from the checkpoint's snapshot. */
+  restoredUntrackedFiles: string[];
+  /** Where this rollback moved what it removed or replaced (workspace-relative), when it moved anything. */
+  quarantineDir?: string;
+  /** The commit HEAD was on before the rollback. */
+  preRollbackHead: string;
+  /** A ref holding the uncommitted tracked changes the rollback undid, when there were any. */
+  preRollbackRef?: string;
 }
 
 export function rollbackCheckpoint(
@@ -363,33 +536,57 @@ export function rollbackCheckpoint(
     }
   }
 
+  // Record the state before reverting, so the rollback itself can be undone (TC-S24e): the commit
+  // HEAD is on, and — when there are uncommitted tracked changes — a `stash create` of them.
+  const taskId = assertSafeTaskId(manifest.taskId);
+  const preHeadRes = tryRunGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD']);
+  const preStashRes = tryRunGit(workspaceRoot, ['stash', 'create', `ag-bridge-pre-rollback-${taskId}`]);
+  if (!preHeadRes.ok || !preStashRes.ok) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr || preStashRes.stderr}`,
+    );
+  }
+  const preRollbackHead = preHeadRes.stdout.trim();
+  let preRollbackRef: string | undefined;
+  if (preStashRes.stdout.trim()) {
+    preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
+    const pinRes = tryRunGit(workspaceRoot, ['update-ref', preRollbackRef, preStashRes.stdout.trim()]);
+    if (!pinRes.ok) {
+      throw new AgPluginError(
+        'GIT_CHECKPOINT_FAILED',
+        `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`,
+      );
+    }
+  }
+
   // With no baseline (an older manifest, or one written by hand) nothing tells the user's
   // untracked files from the agent's: keep all (TC-S22).
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === undefined;
   const baselineSet = new Set(baseline ?? []);
 
-  // The user's untracked files were in no index at the checkpoint. Once the agent has staged or
-  // committed one (`git add -A`), reset --hard deletes it (Grok leg, measured; TC-S23, TC-S23b):
-  // take it back out of the index first, as it was.
-  if (baselineSet.size > 0) {
-    const indexRes = tryRunGit(workspaceRoot, ['ls-files', '-z']);
-    if (!indexRes.ok) {
-      throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${indexRes.stderr}`);
-    }
-    const userFilesStaged = indexRes.stdout.split('\0').filter((file) => baselineSet.has(file));
-    if (userFilesStaged.length > 0) {
-      const unstageRes = tryRunGit(
-        workspaceRoot,
-        ['update-index', '-z', '--force-remove', '--stdin'],
-        userFilesStaged.join('\0'),
+  // Everything now in the index that the checkpoint does not have leaves the index first:
+  // - the user's untracked files the agent staged or committed (`git add -A`) — reset --hard deleted
+  //   them (Grok leg, measured; TC-S23, TC-S23b);
+  // - the files the agent created and staged or committed — reset --hard deleted them for good;
+  //   left in the work tree, they go to the recovery folder with the rest (TC-S24b).
+  const addedRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=A', ref]);
+  if (!addedRes.ok) {
+    throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${addedRes.stderr}`);
+  }
+  const addedSinceCheckpoint = addedRes.stdout.split('\0').filter((file) => file.length > 0 && !isBridgePath(file));
+  if (addedSinceCheckpoint.length > 0) {
+    const unstageRes = tryRunGit(
+      workspaceRoot,
+      ['update-index', '-z', '--force-remove', '--stdin'],
+      addedSinceCheckpoint.join('\0'),
+    );
+    if (!unstageRes.ok) {
+      throw new AgPluginError(
+        'GIT_CHECKPOINT_FAILED',
+        `Failed to unstage the files added since the checkpoint: ${unstageRes.stderr}`,
       );
-      if (!unstageRes.ok) {
-        throw new AgPluginError(
-          'GIT_CHECKPOINT_FAILED',
-          `Failed to unstage the user's untracked files before rollback: ${unstageRes.stderr}`,
-        );
-      }
     }
   }
 
@@ -439,29 +636,76 @@ export function rollbackCheckpoint(
     }
   }
 
-  // Remove only untracked files created after delegation began. A failed listing removes nothing.
-  const removedUntrackedFiles: string[] = [];
+  // What rollback takes out of the work tree is moved under .ag-bridge/recovery/<taskId>/rollback-<time>/
+  // — `removed/` for the agent's files, `replaced/` for its versions of the user's — never deleted (TC-S24).
+  let runDir: string | undefined;
+  const moveAside = (rel: string, kind: 'removed' | 'replaced'): void => {
+    runDir ??= path.join(recoveryRoot(workspaceRoot), taskId, `rollback-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    const dst = path.join(runDir, kind, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const src = path.join(workspaceRoot, rel);
+    try {
+      fs.renameSync(src, dst);
+    } catch {
+      fs.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+  };
 
+  // Only untracked files created after delegation began. A failed listing removes nothing.
+  const removedUntrackedFiles: string[] = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
-      if (baselineSet.has(relFile)) {
-        continue;
+      if (baselineSet.has(relFile)) continue;
+      let present = true;
+      try {
+        fs.lstatSync(path.join(workspaceRoot, relFile));
+      } catch {
+        present = false;
       }
-      const fullPath = path.resolve(workspaceRoot, relFile);
-      if (fs.existsSync(fullPath)) {
-        fs.rmSync(fullPath, { recursive: true, force: true });
+      if (present) {
+        moveAside(relFile, 'removed');
         removedUntrackedFiles.push(relFile);
       }
     }
   }
 
+  // The user's untracked files the agent edited or deleted come back from the snapshot; the agent's
+  // version goes to `replaced/`. Only this task's own snapshot folder is read — the manifest is data
+  // the agent could rewrite — and every folder on the way is made a real folder first (TC-S24c, f).
+  const restoredUntrackedFiles: string[] = [];
+  const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
+  if (manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir) && fs.existsSync(snapshotDir)) {
+    for (const rel of regularFilesUnder(snapshotDir)) {
+      const saved = path.join(snapshotDir, rel);
+      const current = path.join(workspaceRoot, rel);
+      realFoldersTo(workspaceRoot, rel, (partRel) => moveAside(partRel, 'replaced'));
+      let st: fs.Stats | undefined;
+      try {
+        st = fs.lstatSync(current);
+      } catch {
+        st = undefined;
+      }
+      if (st?.isFile() && fs.readFileSync(current).equals(fs.readFileSync(saved))) continue;
+      if (st) moveAside(rel, 'replaced');
+      fs.copyFileSync(saved, current);
+      restoredUntrackedFiles.push(rel);
+    }
+    restoredUntrackedFiles.sort();
+  }
+
   // Clean up pinned ref if present
   tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
+  pruneRecoveryArtifacts(workspaceRoot, taskId);
 
   return {
     restoredCheckpointRef: ref,
     revertedTrackedFiles,
     removedUntrackedFiles,
     untrackedBaselineMissing,
+    restoredUntrackedFiles,
+    ...(runDir ? { quarantineDir: relativeTo(workspaceRoot, runDir) } : {}),
+    preRollbackHead,
+    ...(preRollbackRef ? { preRollbackRef } : {}),
   };
 }

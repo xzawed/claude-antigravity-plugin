@@ -455,6 +455,10 @@ export async function handleRollbackAgTask(
     restoredCheckpointRef: rollbackRes.restoredCheckpointRef,
     revertedTrackedFiles: rollbackRes.revertedTrackedFiles,
     removedUntrackedFiles: rollbackRes.removedUntrackedFiles,
+    restoredUntrackedFiles: rollbackRes.restoredUntrackedFiles,
+    ...(rollbackRes.quarantineDir ? { quarantineDir: rollbackRes.quarantineDir } : {}),
+    preRollbackHead: rollbackRes.preRollbackHead,
+    ...(rollbackRes.preRollbackRef ? { preRollbackRef: rollbackRes.preRollbackRef } : {}),
     ...(rollbackRes.untrackedBaselineMissing
       ? {
           warnings: [

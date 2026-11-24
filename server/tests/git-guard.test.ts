@@ -283,6 +283,23 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(res.quarantineDir).toMatch(/^\.ag-bridge\/recovery\/task-q\/rollback-/);
     expect(read(`${res.quarantineDir}/removed/gen/agent.txt`)).toBe('AGENT WORK\n');
     expect(read('notes.txt')).toBe('USER NOTES\n');
+    expect(res.restoredUntrackedFiles).toEqual([]); // untouched user files are not "restored"
+  });
+
+  it("TC-S24g: a manifest pointing at another snapshot folder restores nothing from it (the manifest is the agent's to rewrite)", () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'notes.txt'), 'USER NOTES\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-own', 'best_effort');
+    const planted = path.join(tmpRoot, '.ag-bridge', 'recovery', 'task-other', 'untracked');
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, 'notes.txt'), 'PLANTED\n', 'utf8');
+    fs.writeFileSync(path.join(planted, 'extra.txt'), 'PLANTED\n', 'utf8');
+
+    const manifest = { ...manifestFor('task-own', cp, true), gitUntrackedSnapshotDir: '.ag-bridge/recovery/task-other/untracked' };
+    const res = rollbackCheckpoint(tmpRoot, manifest);
+    expect(res.restoredUntrackedFiles).toEqual([]);
+    expect(read('notes.txt')).toBe('USER NOTES\n');
+    expect(fs.existsSync(path.join(tmpRoot, 'extra.txt'))).toBe(false);
   });
 
   it('TC-S24b: a file the agent created and then staged or committed goes to recovery too, not deleted by reset', () => {
@@ -416,7 +433,9 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(fs.existsSync(path.join(tmpRoot, 'notes.txt'))).toBe(true);
   });
 
-  it('TC-U36b: a file the agent renamed is reported under both names', () => {
+  it('TC-U36b: a file the agent renamed is reverted under its old name; its new name goes to recovery', () => {
+    // Since TC-S24b, what the agent added (the new name included) leaves the index before reset
+    // and is moved to recovery instead of deleted, so it is reported as removed, not reverted.
     initRepo(tmpRoot);
     fs.writeFileSync(path.join(tmpRoot, 'lib.ts'), 'export const lib = 1;\n', 'utf8');
     git(tmpRoot, ['add', 'lib.ts']);
@@ -425,9 +444,11 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     git(tmpRoot, ['mv', 'lib.ts', 'util.ts']);
 
     const res = rollbackCheckpoint(tmpRoot, manifestFor('task-rename', cp, true));
-    expect(res.revertedTrackedFiles).toEqual(['lib.ts', 'util.ts']);
+    expect(res.revertedTrackedFiles).toEqual(['lib.ts']);
+    expect(res.removedUntrackedFiles).toEqual(['util.ts']);
     expect(fs.existsSync(path.join(tmpRoot, 'lib.ts'))).toBe(true);
     expect(fs.existsSync(path.join(tmpRoot, 'util.ts'))).toBe(false);
+    expect(read(`${res.quarantineDir}/removed/util.ts`)).toBe('export const lib = 1;\n');
   });
 
   it('TC-U35: rollback removes an agent file with a non-ASCII name and keeps the user\'s', () => {
