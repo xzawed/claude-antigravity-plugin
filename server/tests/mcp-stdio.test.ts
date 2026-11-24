@@ -339,4 +339,101 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
       await client.close();
     }
   }, 20_000);
+
+  it('TC-I09: streams notifications/progress over live Stdio MCP when client provides progressToken', async () => {
+    const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-fake-bin-'));
+    const secretToken = ['AIza', 'SyProgressLeakCheck1234567890abcd'].join('');
+    const fakeScript = path.join(fakeBinDir, 'fake-agy.mjs');
+    fs.writeFileSync(
+      fakeScript,
+      [
+        `const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');`,
+        `emit({ event: 'init', conversation_id: 'conv-prog-1', init: { model: 'gemini-4-neon-high', permission_mode: 'accept-edits' } });`,
+        `setTimeout(() => {`,
+        `  emit({ event: 'step_update', step_update: { title: 'Inspecting layout with key ${secretToken}', usage: { input_tokens: 120, output_tokens: 30, total_tokens: 150 } } });`,
+        `}, 40);`,
+        `setTimeout(() => {`,
+        `  emit({ event: 'result', result: { conversation_id: 'conv-prog-1', status: 'SUCCESS', response: 'Progress verified.', num_turns: 1, duration_seconds: 0.2, usage: { input_tokens: 200, output_tokens: 50, total_tokens: 250 } } });`,
+        `}, 80);`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const isWin = process.platform === 'win32';
+    const fakeAgyPath = path.join(fakeBinDir, isWin ? 'agy.cmd' : 'agy');
+    if (isWin) {
+      fs.writeFileSync(fakeAgyPath, `@echo off\r\n"${process.execPath}" "${fakeScript}" %*\r\n`, 'utf8');
+    } else {
+      fs.writeFileSync(fakeAgyPath, `#!/bin/sh\nexec "${process.execPath}" "${fakeScript}" "$@"\n`, {
+        mode: 0o755,
+      });
+    }
+
+    // Untracked workspace config pointing app_path to fakeAgyPath outside tmpRoot (passes TC-S17)
+    fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpRoot, '.ag-bridge', 'config.json'),
+      JSON.stringify({
+        execution_mode: 'subscription',
+        subscription: {
+          app_path: fakeAgyPath,
+          trigger_method: 'cli_only',
+          poll_interval_ms: 100,
+          agy_stream_heartbeat: true,
+        },
+      }),
+      'utf8',
+    );
+
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [distIndex],
+      cwd: tmpRoot,
+      stderr: 'pipe',
+    });
+    const client = new Client({ name: 'test-mcp-client-progress', version: '1.5.0' });
+    await client.connect(transport);
+
+    const received: Array<{ progress: number; total?: number; message?: string }> = [];
+    try {
+      const delCall = await client.callTool(
+        {
+          name: 'delegate_to_antigravity',
+          arguments: {
+            title: 'Live MCP progress streaming test',
+            instructions: 'Verify notifications/progress streaming.',
+            modeOverride: 'subscription',
+            disableSlashCommands: true,
+            workspaceRoot: tmpRoot,
+          },
+        },
+        undefined,
+        {
+          onprogress: (p) => {
+            received.push({ progress: p.progress, total: p.total, message: p.message });
+          },
+        },
+      );
+
+      const parsed = JSON.parse(
+        ((delCall.content as Array<{ text?: string }>)[0]?.text) ?? '{}',
+      ) as { ok: boolean; status: string };
+      expect(parsed.ok).toBe(true);
+      expect(parsed.status).toBe('VERIFIED');
+
+      // Expect dispatch (0), init (1), step_update (2), result (3)
+      expect(received.length).toBeGreaterThanOrEqual(3);
+      for (let i = 1; i < received.length; i++) {
+        expect(received[i].progress).toBeGreaterThanOrEqual(received[i - 1].progress);
+      }
+      const joined = received.map((r) => r.message ?? '').join('\n');
+      expect(joined).toContain('session initialized');
+      expect(joined).toContain('[REDACTED]');
+      expect(joined).not.toContain(secretToken);
+      expect(joined).toContain('Antigravity finished');
+    } finally {
+      await client.close();
+      fs.rmSync(fakeBinDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }, 20_000);
 });

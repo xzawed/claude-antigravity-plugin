@@ -39,6 +39,7 @@
 
 ### 2.1 Tool 1: `delegate_to_antigravity`
 Git 체크포인트를 생성하고, `.ag-bridge/`에 작업을 디스패치한 뒤 감지된 엔진(`subscription` 또는 `api`)으로 Antigravity에 작업을 위임하고 완료 보고서 및 토큰 사용량/실행 메트릭을 반환한다. `agy` CLI가 제공하는 모든 주요 플래그(모델, 추론 강도, 에이전트, 대화 이어가기, `--dangerously-skip-permissions`, 추가 디렉터리, 프로젝트/원격 에이전트, JSON 스키마 등)를 1:1 지원한다.
+- **실시간 MCP Progress Notification (`notifications/progress`):** 클라이언트가 요청 `_meta.progressToken`을 전달하면 Subscription 엔진(`agy --output-format stream-json`의 `init`·`step_update`·`result` 이벤트)과 API 워커(턴별 진행 및 도구 호출)의 진행 상황을 비밀 마스킹(`maskSecrets`) 후 `notifications/progress`로 실시간 전송하며, 클라이언트 요청 취소(`extra.signal`)도 엔진에 전파한다.
 
 #### Input Schema (Zod / JSON Schema)
 | 필드 | 타입 | 필수 | 설명 및 제약 |

@@ -61122,6 +61122,54 @@ function formatTokenUsageMarkdown(metrics) {
   return `${lines.join("\n")}
 `;
 }
+function safeEmitProgress(ctx, event) {
+  if (!ctx.onProgress) return;
+  try {
+    ctx.onProgress({
+      progress: event.progress,
+      ...event.total !== void 0 ? { total: event.total } : {},
+      message: maskSecrets(event.message)
+    });
+  } catch {
+  }
+}
+function formatStreamEventProgress(ev, stepCount) {
+  const eventType = typeof ev.event === "string" ? ev.event : void 0;
+  if (eventType === "init" && ev.init && typeof ev.init === "object") {
+    const initObj = ev.init;
+    const parts = [];
+    if (typeof initObj.model === "string") parts.push(`model=${initObj.model}`);
+    if (typeof initObj.permission_mode === "string") parts.push(`mode=${initObj.permission_mode}`);
+    const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+    return {
+      progress: stepCount,
+      message: `Antigravity session initialized${suffix}`
+    };
+  }
+  if (eventType === "step_update" && ev.step_update && typeof ev.step_update === "object") {
+    const stepObj = ev.step_update;
+    const label = typeof stepObj.title === "string" && stepObj.title.trim() || typeof stepObj.summary === "string" && stepObj.summary.trim() || typeof stepObj.tool_name === "string" && `tool:${stepObj.tool_name.trim()}` || typeof stepObj.step_type === "string" && stepObj.step_type.trim() || typeof stepObj.status === "string" && stepObj.status.trim() || "working";
+    const usage = parseUsageObject(stepObj.usage);
+    const tokenNote = usage && usage.totalTokens > 0 ? ` (${usage.totalTokens} tokens)` : "";
+    return {
+      progress: stepCount,
+      message: `Step ${stepCount}: ${maskSecrets(label).slice(0, 160)}${tokenNote}`
+    };
+  }
+  if (eventType === "result" && ev.result && typeof ev.result === "object") {
+    const resObj = ev.result;
+    const status = typeof resObj.status === "string" ? resObj.status : "DONE";
+    const turns = typeof resObj.num_turns === "number" ? `, turns=${resObj.num_turns}` : "";
+    const usage = parseUsageObject(resObj.usage);
+    const tokens = usage && usage.totalTokens > 0 ? `, tokens=${usage.totalTokens}` : "";
+    return {
+      progress: stepCount,
+      total: stepCount,
+      message: `Antigravity finished (status=${status}${turns}${tokens})`
+    };
+  }
+  return null;
+}
 function attachStreamJsonHeartbeat(stream, options) {
   const minInterval = options.minHeartbeatIntervalMs ?? 2e3;
   let buffer = "";
@@ -61614,12 +61662,23 @@ async function tryCliTrigger(ctx) {
         }
       }
       let heartbeatHandle = null;
+      let streamStepCount = 0;
       if (useStreamHeartbeat && child.stdout) {
         heartbeatHandle = attachStreamJsonHeartbeat(child.stdout, {
           workspaceRoot: ctx.workspaceRoot,
           taskId: ctx.manifest.taskId,
           logFilePath,
-          autoFinalizeOnResult: true
+          autoFinalizeOnResult: true,
+          onEvent: (ev) => {
+            const eventType = typeof ev.event === "string" ? ev.event : void 0;
+            if (eventType === "init" || eventType === "step_update" || eventType === "result") {
+              streamStepCount += 1;
+              const progressEvent = formatStreamEventProgress(ev, streamStepCount);
+              if (progressEvent) {
+                safeEmitProgress(ctx, progressEvent);
+              }
+            }
+          }
         });
       }
       if (useStreamHeartbeat && child.stderr) {
@@ -61842,6 +61901,10 @@ var SubscriptionEngine = class {
         `Preserved custom claude-handoff.md at ${syncRes.skippedCustomPaths.join(", ")} (use --force-template to overwrite).`
       );
     }
+    safeEmitProgress(ctx, {
+      progress: 0,
+      message: `Dispatching task ${ctx.manifest.taskId} to Antigravity (${ctx.detection.subscription.cliBinary ?? "subscription"})...`
+    });
     const triggerOutcome = await this.triggerFn(ctx);
     if (triggerOutcome.warning) {
       warnings.push(triggerOutcome.warning);
@@ -81753,6 +81816,14 @@ ${formatTokenUsageMarkdown(metrics2)}`;
             errorMessage: "Task was cancelled by user request."
           };
         }
+        try {
+          ctx.onProgress?.({
+            progress: turn - 1,
+            total: maxTurns,
+            message: `API worker turn ${turn}/${maxTurns}: calling ${model}`
+          });
+        } catch {
+        }
         const turnResp = await callModelWithRetry();
         turnsExecuted = turn;
         addTurnUsage(turnResp.usage);
@@ -81801,6 +81872,14 @@ ${formatTokenUsageMarkdown(metrics2)}`;
             updatedAt: (/* @__PURE__ */ new Date()).toISOString()
           };
           writeManifest(ctx.workspaceRoot, verifiedManifest);
+          try {
+            ctx.onProgress?.({
+              progress: maxTurns,
+              total: maxTurns,
+              message: `API worker completed in ${turnsExecuted} turn(s)`
+            });
+          } catch {
+          }
           return {
             status: "VERIFIED",
             reportMarkdown: report2,
@@ -81809,6 +81888,15 @@ ${formatTokenUsageMarkdown(metrics2)}`;
             metrics: metrics2,
             warnings
           };
+        }
+        try {
+          const toolNames = calls.map((c) => c.name).join(", ");
+          ctx.onProgress?.({
+            progress: turn,
+            total: maxTurns,
+            message: `API worker turn ${turn}/${maxTurns}: running ${toolNames}`
+          });
+        } catch {
         }
         contents.push({
           role: "model",
@@ -83200,7 +83288,7 @@ function extractAgyOptions2(input2) {
     rawPrompt: input2.rawPrompt
   };
 }
-async function handleDelegateToAntigravity(input2, deps = {}) {
+async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
   const workspaceRoot = path15.resolve(input2.workspaceRoot ?? process.cwd());
   const pluginRoot = deps.pluginRoot ?? getDefaultPluginRoot();
   const warnings = [];
@@ -83266,7 +83354,9 @@ async function handleDelegateToAntigravity(input2, deps = {}) {
     acceptanceCriteria,
     detection,
     agyOptions: extractAgyOptions2(input2),
-    timeoutSecOverride: input2.timeoutSec
+    timeoutSecOverride: input2.timeoutSec,
+    abortSignal: runtimeOptions?.abortSignal,
+    onProgress: runtimeOptions?.onProgress
   });
   return {
     ok: execRes.status === "VERIFIED",
@@ -83379,9 +83469,25 @@ function createAntigravityMcpServer(deps = {}) {
     "delegate_to_antigravity",
     "Create a Git safety checkpoint, dispatch any task to Antigravity (full `agy` CLI feature set including native `/boost`, `/browser`, `/swarm`, `/goal`, models, effort, agents, conversation resume, `--json-schema`, sandbox, and `--dangerously-skip-permissions`, or Gemini API fallback), and wait for the verification report, structured output, artifacts, and token usage metrics.",
     sharedDelegateSchema,
-    async (args) => {
+    async (args, extra) => {
       try {
-        const result = await handleDelegateToAntigravity(args, deps);
+        const progressToken = extra._meta?.progressToken;
+        const onProgress = progressToken !== void 0 ? (ev) => {
+          void extra.sendNotification({
+            method: "notifications/progress",
+            params: {
+              progressToken,
+              progress: ev.progress,
+              ...ev.total !== void 0 ? { total: ev.total } : {},
+              message: maskSecrets(ev.message)
+            }
+          }).catch(() => {
+          });
+        } : void 0;
+        const result = await handleDelegateToAntigravity(args, deps, {
+          onProgress,
+          abortSignal: extra.signal
+        });
         return toJsonToolResponse(result, !result.ok);
       } catch (err) {
         const code = err instanceof AgPluginError ? err.code : "INTERNAL_ERROR";

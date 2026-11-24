@@ -22,7 +22,12 @@ import {
   ExecutionMetrics,
   TokenUsage,
 } from '../types.js';
-import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
+import {
+  ExecutionContext,
+  ExecutionEngine,
+  ExecutionProgressEvent,
+  ExecutionResult,
+} from './base.js';
 
 export interface StreamCaptureState {
   metrics: ExecutionMetrics;
@@ -183,6 +188,66 @@ export function formatTokenUsageMarkdown(metrics?: ExecutionMetrics): string {
     );
   }
   return `${lines.join('\n')}\n`;
+}
+
+function safeEmitProgress(ctx: ExecutionContext, event: ExecutionProgressEvent): void {
+  if (!ctx.onProgress) return;
+  try {
+    ctx.onProgress({
+      progress: event.progress,
+      ...(event.total !== undefined ? { total: event.total } : {}),
+      message: maskSecrets(event.message),
+    });
+  } catch {
+    // Best-effort notification: never fail delegation on progress callback error
+  }
+}
+
+export function formatStreamEventProgress(
+  ev: Record<string, unknown>,
+  stepCount: number,
+): ExecutionProgressEvent | null {
+  const eventType = typeof ev.event === 'string' ? ev.event : undefined;
+  if (eventType === 'init' && ev.init && typeof ev.init === 'object') {
+    const initObj = ev.init as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof initObj.model === 'string') parts.push(`model=${initObj.model}`);
+    if (typeof initObj.permission_mode === 'string') parts.push(`mode=${initObj.permission_mode}`);
+    const suffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+    return {
+      progress: stepCount,
+      message: `Antigravity session initialized${suffix}`,
+    };
+  }
+  if (eventType === 'step_update' && ev.step_update && typeof ev.step_update === 'object') {
+    const stepObj = ev.step_update as Record<string, unknown>;
+    const label =
+      (typeof stepObj.title === 'string' && stepObj.title.trim()) ||
+      (typeof stepObj.summary === 'string' && stepObj.summary.trim()) ||
+      (typeof stepObj.tool_name === 'string' && `tool:${stepObj.tool_name.trim()}`) ||
+      (typeof stepObj.step_type === 'string' && stepObj.step_type.trim()) ||
+      (typeof stepObj.status === 'string' && stepObj.status.trim()) ||
+      'working';
+    const usage = parseUsageObject(stepObj.usage);
+    const tokenNote = usage && usage.totalTokens > 0 ? ` (${usage.totalTokens} tokens)` : '';
+    return {
+      progress: stepCount,
+      message: `Step ${stepCount}: ${maskSecrets(label).slice(0, 160)}${tokenNote}`,
+    };
+  }
+  if (eventType === 'result' && ev.result && typeof ev.result === 'object') {
+    const resObj = ev.result as Record<string, unknown>;
+    const status = typeof resObj.status === 'string' ? resObj.status : 'DONE';
+    const turns = typeof resObj.num_turns === 'number' ? `, turns=${resObj.num_turns}` : '';
+    const usage = parseUsageObject(resObj.usage);
+    const tokens = usage && usage.totalTokens > 0 ? `, tokens=${usage.totalTokens}` : '';
+    return {
+      progress: stepCount,
+      total: stepCount,
+      message: `Antigravity finished (status=${status}${turns}${tokens})`,
+    };
+  }
+  return null;
 }
 
 export interface StreamHeartbeatOptions {
@@ -815,12 +880,23 @@ async function tryCliTrigger(
       }
 
       let heartbeatHandle: { stop: () => void; state: StreamCaptureState } | null = null;
+      let streamStepCount = 0;
       if (useStreamHeartbeat && child.stdout) {
         heartbeatHandle = attachStreamJsonHeartbeat(child.stdout, {
           workspaceRoot: ctx.workspaceRoot,
           taskId: ctx.manifest.taskId,
           logFilePath,
           autoFinalizeOnResult: true,
+          onEvent: (ev) => {
+            const eventType = typeof ev.event === 'string' ? ev.event : undefined;
+            if (eventType === 'init' || eventType === 'step_update' || eventType === 'result') {
+              streamStepCount += 1;
+              const progressEvent = formatStreamEventProgress(ev, streamStepCount);
+              if (progressEvent) {
+                safeEmitProgress(ctx, progressEvent);
+              }
+            }
+          },
         });
       }
       if (useStreamHeartbeat && child.stderr) {
@@ -1096,6 +1172,10 @@ export class SubscriptionEngine implements ExecutionEngine {
     }
 
     // 2. Trigger local Antigravity via 3-tier fallback
+    safeEmitProgress(ctx, {
+      progress: 0,
+      message: `Dispatching task ${ctx.manifest.taskId} to Antigravity (${ctx.detection.subscription.cliBinary ?? 'subscription'})...`,
+    });
     const triggerOutcome = await this.triggerFn(ctx);
     if (triggerOutcome.warning) {
       warnings.push(triggerOutcome.warning);

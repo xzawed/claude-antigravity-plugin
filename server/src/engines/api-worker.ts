@@ -671,6 +671,15 @@ export class ApiWorkerEngine implements ExecutionEngine {
             errorMessage: 'Task was cancelled by user request.',
           };
         }
+        try {
+          ctx.onProgress?.({
+            progress: turn - 1,
+            total: maxTurns,
+            message: `API worker turn ${turn}/${maxTurns}: calling ${model}`,
+          });
+        } catch {
+          // ignore best-effort progress callback error
+        }
         const turnResp = await callModelWithRetry();
         turnsExecuted = turn;
         addTurnUsage(turnResp.usage);
@@ -732,6 +741,16 @@ export class ApiWorkerEngine implements ExecutionEngine {
           };
           writeManifest(ctx.workspaceRoot, verifiedManifest);
 
+          try {
+            ctx.onProgress?.({
+              progress: maxTurns,
+              total: maxTurns,
+              message: `API worker completed in ${turnsExecuted} turn(s)`,
+            });
+          } catch {
+            // ignore best-effort progress callback error
+          }
+
           return {
             status: 'VERIFIED',
             reportMarkdown: report,
@@ -740,6 +759,17 @@ export class ApiWorkerEngine implements ExecutionEngine {
             metrics,
             warnings,
           };
+        }
+
+        try {
+          const toolNames = calls.map((c) => c.name).join(', ');
+          ctx.onProgress?.({
+            progress: turn,
+            total: maxTurns,
+            message: `API worker turn ${turn}/${maxTurns}: running ${toolNames}`,
+          });
+        } catch {
+          // ignore best-effort progress callback error
         }
 
         // Record model function calls in history
