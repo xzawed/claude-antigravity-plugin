@@ -248,6 +248,22 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(fs.existsSync(path.join(tmpRoot, 'dev.ts'))).toBe(true);
   });
 
+  it('TC-S23e: rollback never deletes a file .gitignore covers — the user\'s .env, or build output from the task', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, '.gitignore'), '.env\ndist/\n', 'utf8');
+    git(tmpRoot, ['add', '.gitignore']);
+    git(tmpRoot, ['commit', '-qm', 'ignore']);
+    fs.writeFileSync(path.join(tmpRoot, '.env'), 'SECRET=1\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'task-ignored', 'best_effort');
+    fs.mkdirSync(path.join(tmpRoot, 'dist'));
+    fs.writeFileSync(path.join(tmpRoot, 'dist', 'bundle.js'), 'built\n', 'utf8');
+
+    const res = rollbackCheckpoint(tmpRoot, manifestFor('task-ignored', cp, true));
+    expect(fs.readFileSync(path.join(tmpRoot, '.env'), 'utf8')).toBe('SECRET=1\n');
+    expect(fs.existsSync(path.join(tmpRoot, 'dist', 'bundle.js'))).toBe(true);
+    expect(res.removedUntrackedFiles).toEqual([]);
+  });
+
   it("TC-U36: rollback reports the tracked files it reverted, not the user's untouched untracked files", () => {
     withUserUntracked(false);
     const cp = createCheckpoint(tmpRoot, 'task-report', 'best_effort');
