@@ -44,8 +44,9 @@ function readModules(): Map<string, string[]> {
       if (!entry.name.endsWith('.ts')) continue;
       const id = path.relative(srcDir, full).split(path.sep).join('/').replace(/\.ts$/, '');
       const code = fs.readFileSync(full, 'utf8');
-      const deps = [...code.matchAll(/from\s+'(\.{1,2}\/[^']+)\.js'/g)].map((m) =>
-        path.posix.normalize(path.posix.join(path.posix.dirname(id), m[1])),
+      // `… from './x.js'`, a side-effect `import './x.js'`, and a dynamic `import('./x.js')`.
+      const deps = [...code.matchAll(/\b(?:from|import)\s*\(?\s*(['"])(\.{1,2}\/[^'"]+)\.js\1/g)].map((m) =>
+        path.posix.normalize(path.posix.join(path.posix.dirname(id), m[2])),
       );
       modules.set(id, [...new Set(deps)]);
     }
