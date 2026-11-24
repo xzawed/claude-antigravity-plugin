@@ -259,6 +259,9 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
       // agy runs an agent the workspace defines in .agents/agents/ (measured: headless `--agent`
       // listed "available: probe-ws-agent" only in the folder that had one)
       agy_agent: 'repo-agent',
+      // --project brings that agy project's folders into the session: from folder W, `--project f1`
+      // listed f1's .agents agent and ran f1's SessionStart hook (measured with a local test project)
+      agy_project: 'f1',
       agy_model: 'gemini-x', // not sensitive: always honored
       timeout_sec: 120, // not sensitive: always honored
     },
@@ -353,11 +356,12 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     expect(cfg.subscription.agy_settings).toBeUndefined();
     expect(cfg.subscription.agy_remote_agent).toBeUndefined();
     expect(cfg.subscription.agy_agent).toBeUndefined();
+    expect(cfg.subscription.agy_project).toBeUndefined();
     expect(cfg.api.apiKey).toBeUndefined();
     expect(cfg.api.api_key_env).toBe('GEMINI_API_KEY');
     expect(cfg.subscription.agy_model).toBe('gemini-x');
     expect(cfg.subscription.timeout_sec).toBe(120);
-    expect(cfg.ignoredSettings).toHaveLength(9);
+    expect(cfg.ignoredSettings).toHaveLength(10);
   });
 
   it('TC-S18b: the same settings in the user\'s own (untracked) config are honored', () => {
@@ -371,6 +375,7 @@ describe('workspace config trust (TC-S17 ~ TC-S19)', () => {
     expect(cfg.subscription.agy_sandbox).toBe(false);
     expect(cfg.subscription.agy_mode).toBe('auto');
     expect(cfg.subscription.agy_agent).toBe('repo-agent');
+    expect(cfg.subscription.agy_project).toBe('f1');
     expect(cfg.api.api_key_env).toBe('GITHUB_TOKEN');
     expect(cfg.ignoredSettings ?? []).toEqual([]);
   });
