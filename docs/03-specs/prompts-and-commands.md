@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `SPC-003` |
-| **버전** | `1.4.0` |
+| **버전** | `1.5.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-23` |
 | **관련 문서** | [사용자/에이전트 플로우](../01-planning/user-flows.md), [MCP API 명세](./mcp-tools-api.md), [PRD](../01-planning/PRD.md) |
@@ -36,7 +36,7 @@
 | `commands/ag-update.md` | Claude Code | `/ag-update` Antigravity CLI 변경 이력 조회(`changelog`) 및 업데이트(`update`) |
 | `commands/ag-config.md` | Claude Code | `/ag-config` 실행 모드·모델·추론 강도·권한(`skip-permissions`)·샌드박스·타임아웃 설정 커맨드 |
 | `commands/ag-status.md` | Claude Code | `/ag-status` 연결 상태, `agy` 권한/모델 설정, 최근 토큰 사용량 및 환경 진단 표 출력 커맨드 |
-| `commands/ag-models.md` | Claude Code | `/ag-models` 실시간 `agy models`/`agy agents` 목록 및 지원 권한/플래그 조회 커맨드 |
+| `commands/ag-models.md` | Claude Code | `/ag-models` 실시간 `agy` 모델·에이전트 목록 및 지원 권한/플래그 조회 커맨드 |
 | `commands/ag-usage.md` | Claude Code | `/ag-usage` 워크스페이스 누적 및 최근 작업별 토큰 사용량(`input`/`output`/`thinking`/`cacheRead`/`total`) 리포트 커맨드 |
 | `templates/claude-handoff.md` | Antigravity (로컬 구독) | 대상 워크스페이스 `.agent/workflows/claude-handoff.md`로 배포되는 실행 지침서 |
 
@@ -126,7 +126,7 @@ description: >-
 
 ### 3.4 `commands/ag-models.md` (`/ag-models`)
 - **사용법:** `/ag-models`
-- **실행 흐름:** `list_ag_capabilities({})`를 호출해 실시간 감지된 `agy models` 목록, `agy agents`, 지원 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도(`effort`), 지원 CLI 플래그, 현재 기본값을 정리해 출력한다.
+- **실행 흐름:** `list_ag_capabilities({})`를 호출해 실시간 감지된 `agy` 모델 목록, 에이전트 목록(워크스페이스 정의 포함), 지원 권한 모드(`--dangerously-skip-permissions` 포함), 추론 강도(`effort`), 지원 CLI 플래그, 현재 기본값을 정리해 출력한다.
 
 ### 3.5 `commands/ag-usage.md` (`/ag-usage`)
 - **사용법:** `/ag-usage [limit]`

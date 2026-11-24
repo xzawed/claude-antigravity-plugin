@@ -465,7 +465,7 @@ Antigravity가 5분짜리 프론트엔드 작업을 처리하는 동안 기다�
 | **`list_ag_artifacts`** | `taskId?`, `includeReport?`, `includeLogTail?`, `logTailLines?` | `.ag-bridge/artifacts/` 스크린샷·로그·리포트·JSON 분류 및 마스킹 미리보기 |
 | **`ag_cli_admin`** | `action` (`mcp_*\|remote_*\|changelog\|update`), `name?`, `commandOrUrl?`, `args?`, `dryRun?` | `agy mcp`, `.mcp.json` 동기화, `agy remote-control`, `agy changelog`, `agy update` 안전 실행 |
 | **`check_ag_environment`** | `workspaceRoot?` | 해석 모드, `agy`/앱 경로, 활성 `agyConfig`, 마스킹된 API 키 상태, Git/Bridge 상태 진단 |
-| **`list_ag_capabilities`** | `workspaceRoot?` | `agy models` · `agy agents` 병렬 실시간 조회 및 지원 권한·추론 강도·플래그 반환 |
+| **`list_ag_capabilities`** | `workspaceRoot?` | `agy` 모델·에이전트(워크스페이스 정의 포함) 병렬 실시간 조회 및 지원 권한·추론 강도·플래그 반환 |
 | **`get_ag_usage`** | `workspaceRoot?`, `limit?` | 현재 + `history/*.json` 누적/작업별 토큰 사용량 및 소요 시간 집계 |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | `gitCheckpointRef`로 무손실 원복 (기존 untracked 파일 보존) |
 

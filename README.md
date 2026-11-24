@@ -465,7 +465,7 @@ Recorded on real hardware (Windows 11 · Node.js `v24.14.1` · live `agy.exe`). 
 | **`list_ag_artifacts`** | `taskId?`, `includeReport?`, `includeLogTail?`, `logTailLines?` | Lists screenshots, logs, reports, and JSON artifacts under `.ag-bridge/artifacts/` with masked previews. |
 | **`ag_cli_admin`** | `action` (`mcp_*\|remote_*\|changelog\|update`), `name?`, `commandOrUrl?`, `args?`, `dryRun?` | Safe `shell: false` wrapper for `agy mcp`, `.mcp.json` sync, `agy remote-control`, `agy changelog`, and `agy update`. |
 | **`check_ag_environment`** | `workspaceRoot?` | Diagnoses resolved mode, `agy`/app paths, active `agyConfig`, redacted API key status, Git Guard, and latest bridge/usage state. |
-| **`list_ag_capabilities`** | `workspaceRoot?` | Queries live `agy models` & `agy agents` in parallel and reports supported permission modes, effort levels, and flags. |
+| **`list_ag_capabilities`** | `workspaceRoot?` | Queries live `agy` models and agents (including the workspace's own) in parallel and reports supported permission modes, effort levels, and flags. |
 | **`get_ag_usage`** | `workspaceRoot?`, `limit?` | Aggregates cumulative and per-task token usage & duration across current + `history/*.json`. |
 | **`rollback_ag_task`** | `taskId?`, `workspaceRoot?` | Restores tracked, staged, unstaged, and deleted files to `gitCheckpointRef` while preserving pre-existing untracked files. |
 
