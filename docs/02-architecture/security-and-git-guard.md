@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.8.0` |
+| **버전** | `1.9.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -198,15 +198,16 @@ flowchart TD
   - agy는 워크스페이스가 `.agents/agents/`에 정의한 에이전트를 그대로 실행한다. 그 에이전트는 자기 프롬프트와 도구 정책(`commandExecutionPolicy`), 훅을 갖는다.
   - 실측: `.agents/agents/probe-ws-agent.md`가 있는 새 폴더에서 헤드리스 `agy -p … --agent no-such-agent-xyz`는 `(available: probe-ws-agent)`로 답했다. 파일이 없는 대조 폴더에서는 `(no custom agents are available)`였다.
   - 저장소가 에이전트와 `agy_agent`를 함께 커밋하면, 모든 위임이 사용자가 고른 것처럼 그 에이전트로 돈다.
+- `subscription.agy_project` (값이 있으면)
+  - `--project`는 그 agy 프로젝트의 폴더를 세션에 끌어들인다. 그 폴더의 `.agents/` 에이전트가 로드되고 훅이 실행된다.
+  - 실측(사용자 확인을 받아 만든 로컬 테스트 프로젝트 `f1`, 폴더 F1): 폴더 W에서 `agy -p … --agent no-such-agent-xyz`는 `(no custom agents are available)`로 답했다. 같은 명령에 `--project f1`을 붙이면 `(available: f1-only-agent)`였다. W에서 `--project` 없이 돌리면 F1의 `SessionStart` 훅이 실행되지 않았고, `--project`를 붙이면 실행됐다.
+  - 프로젝트 이름의 기본값은 폴더 이름이라 짐작하기 쉽다. 저장소가 커밋한 설정이 사용자의 다른 프로젝트를 위임에 끌어들일 수 있다.
 - `api.apiKey` (값이 있으면)
 - `api.api_key_env` (`GEMINI_API_KEY`가 아닌 값)
 
 기본값을 조이는 값(예: `agy_mode=plan`, `agy_sandbox=true`)은 언제나 따른다.
 
 민감 키가 아닌 것:
-- `subscription.agy_project`. agy 도움말에 따르면 `--project`는 "Project ID or project name"이다. 사용자 자신의 agy 프로젝트를 고른다.
-  - 두 레그가 "워크스페이스 밖 프로젝트로 돌릴 수 있다"고 지적했지만 실측이 없다. 두 레그 모두 이번 대조군에 실패했다.
-  - 다시 볼 조건: `--project`가 에이전트가 접근하는 폴더나 실행 디렉터리를 바꾼다는 실측. 이 실측에는 사용자 계정에 프로젝트를 만들어야 하므로 사용자 확인이 필요하다.
 - `subscription.trigger_method`. `clipboard`는 프롬프트를 클립보드에 넣고 알림만 띄운다(`defaultSubscriptionTrigger`). 실행은 사용자가 자기 Antigravity 세션에 붙여 넣을 때뿐이다.
 
 **규칙:**

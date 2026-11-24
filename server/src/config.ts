@@ -144,6 +144,8 @@ const TRUST_SENSITIVE: Array<[TrustSection, string, (value: unknown) => boolean]
   ['subscription', 'agy_remote_agent', (v) => v === true],
   // agy runs agents the workspace defines in .agents/agents/ — their prompt, tool policy and hooks
   ['subscription', 'agy_agent', (v) => v !== undefined],
+  // --project brings that project's folders into the session: their agents load, their hooks run
+  ['subscription', 'agy_project', (v) => v !== undefined],
   ['api', 'apiKey', (v) => v !== undefined],
   ['api', 'api_key_env', (v) => v !== undefined && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env],
 ];

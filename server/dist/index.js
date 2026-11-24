@@ -60229,6 +60229,8 @@ var TRUST_SENSITIVE = [
   ["subscription", "agy_remote_agent", (v) => v === true],
   // agy runs agents the workspace defines in .agents/agents/ — their prompt, tool policy and hooks
   ["subscription", "agy_agent", (v) => v !== void 0],
+  // --project brings that project's folders into the session: their agents load, their hooks run
+  ["subscription", "agy_project", (v) => v !== void 0],
   ["api", "apiKey", (v) => v !== void 0],
   ["api", "api_key_env", (v) => v !== void 0 && v !== DEFAULT_BRIDGE_CONFIG.api.api_key_env]
 ];
