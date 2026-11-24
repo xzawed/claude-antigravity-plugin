@@ -18,7 +18,21 @@ import {
 import { runCliInit } from '../src/cli-init.js';
 import { AgPluginError, BridgeManifest } from '../src/types.js';
 
-describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10)', () => {
+// Creating symlinks needs Developer Mode or elevation on Windows; skip that case where it can't run.
+const canSymlink = (() => {
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-symlink-probe-'));
+  try {
+    fs.writeFileSync(path.join(probe, 'target'), '');
+    fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+})();
+
+describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10, TC-S08 ~ TC-S10)', () => {
   let tmpRoot: string;
   let gitHome: string;
   let savedCeiling: string | undefined;
@@ -152,6 +166,52 @@ describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10)', () => {
     expect(countLines(path.join(main, '.git', 'info', 'exclude'), '.ag-bridge/')).toBe(1);
     expect(fs.existsSync(path.join(linked, '.gitignore'))).toBe(false);
     expect(porcelain(linked)).toBe('');
+  });
+
+  it('TC-S08: the SessionStart hook bundle cannot execute programs (no child_process in dist/cli-init.js)', () => {
+    // The hook runs in every folder Claude Code opens. Spawning a bare `git` there runs a binary
+    // planted in that folder when PATH holds a relative entry such as "." (measured on Windows).
+    const bundle = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'dist', 'cli-init.js'), 'utf8');
+    expect(bundle).not.toMatch(/["'](node:)?child_process["']/);
+  });
+
+  it('TC-S09: a .git file that points at a non-git directory is not written through', () => {
+    const elsewhere = path.join(tmpRoot, 'elsewhere');
+    const workspace = path.join(tmpRoot, 'ws');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.git'), `gitdir: ${elsewhere}\n`);
+
+    const res = ensureGitignoreEntry(workspace);
+
+    expect(res.file).toBe('gitignore');
+    expect(fs.existsSync(path.join(elsewhere, 'info'))).toBe(false);
+  });
+
+  it('TC-S10: a .git/info that links outside the repository is not written through', () => {
+    initRepo(tmpRoot);
+    const outsideDir = path.join(gitHome, 'outside-info');
+    fs.mkdirSync(outsideDir);
+    const infoDir = path.join(tmpRoot, '.git', 'info');
+    fs.rmSync(infoDir, { recursive: true, force: true });
+    fs.symlinkSync(outsideDir, infoDir, 'junction'); // a junction needs no privilege on Windows
+
+    ensureGitignoreEntry(tmpRoot);
+
+    expect(fs.readdirSync(outsideDir)).toEqual([]);
+  });
+
+  it.skipIf(!canSymlink)('TC-S11: a symlinked .git/info/exclude is not followed', () => {
+    initRepo(tmpRoot);
+    const outside = path.join(gitHome, 'outside.txt');
+    fs.writeFileSync(outside, 'untouched\n');
+    const exclude = path.join(tmpRoot, '.git', 'info', 'exclude');
+    fs.rmSync(exclude, { force: true });
+    fs.symlinkSync(outside, exclude);
+
+    ensureGitignoreEntry(tmpRoot);
+
+    expect(fs.readFileSync(outside, 'utf8')).toBe('untouched\n');
   });
 
   it('TC-U05: rejects concurrent dispatch with BRIDGE_BUSY when active task is within timeout', () => {

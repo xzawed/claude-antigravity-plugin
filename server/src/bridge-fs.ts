@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -154,24 +153,87 @@ function hasBridgeEntry(lines: string[]): boolean {
   return lines.some((line) => line === '.ag-bridge' || line === '.ag-bridge/' || line === '/.ag-bridge/');
 }
 
-/**
- * Absolute path of the repository's `info/exclude` for a workspace, or null when the workspace
- * is not inside a git work tree (or git is unavailable). `git rev-parse --git-path` resolves
- * subdirectories, linked worktrees and submodules to the right file.
- */
-export function resolveGitExcludePath(workspaceRoot: string): string | null {
+function lstatOrNull(target: string): fs.Stats | null {
   try {
-    const out = execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], {
-      cwd: workspaceRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5_000,
-      windowsHide: true,
-    }).trim();
-    return out ? path.resolve(workspaceRoot, out) : null;
+    return fs.lstatSync(target);
   } catch {
     return null;
   }
+}
+
+/** A real (non-linked) directory that holds HEAD — what git itself would accept as a git dir. */
+function isGitDir(dir: string): boolean {
+  return Boolean(lstatOrNull(dir)?.isDirectory()) && fs.existsSync(path.join(dir, 'HEAD'));
+}
+
+/** `.git` file (linked worktree, submodule) → the common git dir that owns `info/`. */
+function commonDirFromGitFile(dotGitFile: string): string | null {
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGitFile, 'utf8'));
+  if (!match) {
+    return null;
+  }
+  const gitDir = path.resolve(path.dirname(dotGitFile), match[1]);
+  if (!isGitDir(gitDir)) {
+    return null;
+  }
+  const commondirFile = path.join(gitDir, 'commondir');
+  if (!fs.existsSync(commondirFile)) {
+    return gitDir;
+  }
+  const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, 'utf8').trim());
+  return isGitDir(commonDir) ? commonDir : null;
+}
+
+/**
+ * Absolute path of the repository's `info/exclude` for a workspace, or null when the workspace
+ * is not inside a git work tree or that file is not safe to write (ADR-005).
+ *
+ * Resolved WITHOUT running git: the SessionStart hook runs in every folder Claude Code opens, and
+ * a bare `git` spawned there executes a binary planted in that folder when PATH holds a relative
+ * entry such as "." (measured on Windows). Walks up to the nearest `.git` (honouring
+ * GIT_CEILING_DIRECTORIES), follows `.git` files and `commondir` for worktrees and submodules,
+ * and refuses links: a `.git`, `info` or `exclude` that is a symlink or junction yields null.
+ */
+export function resolveGitExcludePath(workspaceRoot: string): string | null {
+  const caseFold = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const ceilings = (process.env.GIT_CEILING_DIRECTORIES ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => caseFold(path.resolve(dir)));
+
+  let commonDir: string | null = null;
+  for (let dir = path.resolve(workspaceRoot); ; ) {
+    const dotGit = path.join(dir, '.git');
+    const stat = lstatOrNull(dotGit);
+    if (stat) {
+      if (stat.isDirectory()) {
+        commonDir = isGitDir(dotGit) ? dotGit : null;
+      } else if (stat.isFile()) {
+        commonDir = commonDirFromGitFile(dotGit);
+      }
+      break; // a linked `.git` is never followed
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || ceilings.includes(caseFold(parent))) {
+      break;
+    }
+    dir = parent;
+  }
+  if (!commonDir) {
+    return null;
+  }
+
+  const infoDir = path.join(commonDir, 'info');
+  const infoStat = lstatOrNull(infoDir);
+  if (infoStat && !infoStat.isDirectory()) {
+    return null;
+  }
+  const excludePath = path.join(infoDir, 'exclude');
+  const excludeStat = lstatOrNull(excludePath);
+  if (excludeStat && !excludeStat.isFile()) {
+    return null;
+  }
+  return excludePath;
 }
 
 /** True when git ignores `.ag-bridge/` through `.gitignore` or the repository's `info/exclude`. */
@@ -210,6 +272,12 @@ export function ensureGitignoreEntry(workspaceRoot: string): {
 
   const gitignorePath = path.join(workspaceRoot, '.gitignore');
   const block = '# Antigravity Claude Bridge (local session artifacts)\n.ag-bridge/\n';
+
+  const gitignoreStat = lstatOrNull(gitignorePath);
+  if (gitignoreStat && !gitignoreStat.isFile()) {
+    // Never append through a symlink the workspace controls; report the bridge as unprotected.
+    return { updated: false, protected: false, file: 'gitignore' };
+  }
 
   if (!fs.existsSync(gitignorePath)) {
     fs.writeFileSync(gitignorePath, block, 'utf8');
