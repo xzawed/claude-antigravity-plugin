@@ -19,8 +19,10 @@ import {
   attachStreamJsonHeartbeat,
   buildCliInvocationArgs,
   buildCliSpawnSpec,
+  parseAgyAgentProbe,
   parseAgyAgentsOutput,
   parseAgyModelsOutput,
+  queryAgyCapabilities,
   SubscriptionEngine,
 } from '../src/engines/subscription.js';
 import {
@@ -767,6 +769,118 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;
     }
+  });
+
+  // `agy agents` prints nothing when its output is not a terminal (measured: 0 bytes through a pipe
+  // or a file), so the agents list was always []. Asked for an agent it does not have, agy names the
+  // ones it has before any session starts (measured: conversation_id "", 0 tokens, no hook ran).
+  const probeResult = (name: string, available: string): string =>
+    JSON.stringify({
+      event: 'result',
+      result: {
+        conversation_id: '',
+        status: 'ERROR',
+        response: '',
+        error: `unknown agent "${name}" (${available})`,
+        duration_seconds: 0.0343233,
+        num_turns: 0,
+        usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 },
+        finished_reason: 'error',
+      },
+    });
+
+  it('TC-U37: reads the agents agy names when asked for one it does not have', () => {
+    expect(parseAgyAgentProbe(probeResult('x', 'available: alpha-agent, beta agent'))).toEqual([
+      'alpha-agent',
+      'beta agent',
+    ]);
+    expect(parseAgyAgentProbe(probeResult('x', 'no custom agents are available'))).toEqual([]);
+    // text mode prints the same error on stderr
+    expect(parseAgyAgentProbe('error: unknown agent "x" (available: alpha-agent, beta agent)\n')).toEqual([
+      'alpha-agent',
+      'beta agent',
+    ]);
+    // a run that started a session, or failed for another reason, is not a listing
+    const ran = { event: 'result', result: { conversation_id: 'c1', status: 'SUCCESS', num_turns: 1, response: 'ok', error: '' } };
+    expect(parseAgyAgentProbe(JSON.stringify(ran))).toBeUndefined();
+    const ranThenListed = {
+      event: 'result',
+      result: { conversation_id: 'c1', status: 'ERROR', num_turns: 1, error: 'unknown agent "x" (available: alpha-agent)' },
+    };
+    expect(parseAgyAgentProbe(JSON.stringify(ranThenListed))).toBeUndefined();
+    const other = { event: 'result', result: { conversation_id: '', status: 'ERROR', num_turns: 0, error: 'not signed in' } };
+    expect(parseAgyAgentProbe(JSON.stringify(other))).toBeUndefined();
+    expect(parseAgyAgentProbe('')).toBeUndefined();
+  });
+
+  it('TC-U37b: when `agy agents` prints nothing, capabilities probe agy in the workspace for its agents', async () => {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-fake-agy-'));
+    const log = path.join(binDir, 'calls.jsonl');
+    const fake = [
+      "const fs = require('fs');",
+      'const args = process.argv.slice(2);',
+      "fs.appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');",
+      "if (args[0] === 'models') { process.stdout.write('gemini-x\\tGemini X\\n'); process.exit(0); }",
+      "if (args[0] === 'agents') process.exit(0); // agy prints nothing through a pipe",
+      "const i = args.indexOf('--agent');",
+      "if (args.includes('-p') && i >= 0) {",
+      "  const error = 'unknown agent \"' + args[i + 1] + '\" (available: alpha-agent, beta agent)';",
+      "  process.stderr.write('error: ' + error + '\\n');",
+      "  process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error, num_turns: 0 } }) + '\\n');",
+      '  process.exit(1);',
+      '}',
+      'process.exit(2);',
+    ].join('\n');
+    let cli: string;
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(binDir, 'fake-agy.cjs'), fake);
+      cli = path.join(binDir, 'agy.cmd');
+      fs.writeFileSync(cli, `@"${process.execPath}" "${path.join(binDir, 'fake-agy.cjs')}" %*\r\n`);
+    } else {
+      cli = path.join(binDir, 'agy');
+      fs.writeFileSync(cli, `#!${process.execPath}\n${fake}\n`, { mode: 0o755 });
+    }
+    process.env.FAKE_AGY_LOG = log;
+    try {
+      const readCalls = (): Array<{ args: string[]; cwd: string }> =>
+        fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { args: string[]; cwd: string });
+
+      const cap = await queryAgyCapabilities(cli, process.platform, { cwd: tmpRoot, probeAgents: true });
+      expect(cap.agents).toEqual(['alpha-agent', 'beta agent']);
+      const probe = readCalls().find((c) => c.args.includes('--agent'));
+      expect(probe).toBeDefined();
+      expect(fs.realpathSync(probe!.cwd)).toBe(fs.realpathSync(tmpRoot));
+      expect(probe!.args).toEqual(
+        expect.arrayContaining(['-p', '--mode', 'plan', '--output-format', 'stream-json', '--print-timeout']),
+      );
+      expect(probe!.args[probe!.args.indexOf('--agent') + 1]).toMatch(/^__ag_bridge_agent_probe_[0-9a-f]{12}__$/);
+
+      // ag_auth only needs the models: no probe there
+      fs.rmSync(log);
+      await queryAgyCapabilities(cli, process.platform);
+      expect(readCalls().some((c) => c.args.includes('--agent'))).toBe(false);
+    } finally {
+      delete process.env.FAKE_AGY_LOG;
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it('TC-U37c: list_ag_capabilities asks for the agents of the workspace it was given', async () => {
+    let seen: unknown;
+    await handleListCapabilities(tmpRoot, {
+      detectorDeps: {
+        platform: 'win32',
+        env: {},
+        homedir: 'C:\\Users\\tester',
+        existsSync: () => false,
+        findBinary: (b) => (b === 'agy' ? 'C:\\bin\\agy.exe' : undefined),
+      },
+      queryCapabilitiesFn: (_cli, _platform, opts) => {
+        seen = opts;
+        return { models: [], agents: [], warnings: [] };
+      },
+    });
+    expect(seen).toEqual({ cwd: path.resolve(tmpRoot), probeAgents: true });
   });
 
   it('API worker recovers from transient 429 retry, nudges build verification, slices read_file, and blocks .env reads', async () => {
