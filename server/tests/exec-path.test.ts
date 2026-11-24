@@ -63,6 +63,16 @@ describe('exec-path: programs come from absolute PATH entries only (TC-S12, TC-S
     ).toBeUndefined();
   });
 
+  it('TC-S12f: an unset POSIX PATH falls back to /usr/bin:/bin as execvp does; an empty one (= the cwd) finds nothing', () => {
+    const present = (p: string): boolean => p === '/usr/bin/git';
+    expect(resolveExecutable('git', { platform: 'linux', env: {}, isCandidate: present })).toBe('/usr/bin/git');
+    expect(resolveExecutable('git', { platform: 'linux', env: { PATH: '' }, isCandidate: present })).toBeUndefined();
+    // Windows has no such default: an empty search found only the cwd, which is never searched here.
+    expect(
+      resolveExecutable('git', { platform: 'win32', env: {}, isCandidate: () => true }),
+    ).toBeUndefined();
+  });
+
   it('TC-S12e: the default probe skips directories and, on POSIX, files without the execute bit', () => {
     const isWin = process.platform === 'win32';
     const fileName = isWin ? 'ag-probe-tool.exe' : 'ag-probe-tool';

@@ -483,7 +483,7 @@ claude-antigravity-plugin/
 ├── templates/claude-handoff.md    # Antigravity 핸드오프 워크플로우 템플릿
 ├── server/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
-│   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, config.ts, detector.ts, engines/
+│   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, exec-path.ts, config.ts, detector.ts, engines/
 │   ├── scripts/verify-plugin.mjs  # 라이브 헬스체크 및 12-Tool Stdio MCP 검증 스크립트
 │   └── tests/                     # 9 스위트 / 57개 자동화 테스트
 ├── README.md                      # 영문 공식 가이드

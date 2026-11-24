@@ -36,7 +36,7 @@ If you discover a security vulnerability (such as a `lockedPaths` or `taskId` tr
 
 ## Security Architecture & Boundaries (`v1.4.1`)
 
-This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S11`):
+This plugin delegates file edits, browser automation, and verification commands to external/autonomous agents. Its defense-in-depth controls are documented in [docs/02-architecture/security-and-git-guard.md](./docs/02-architecture/security-and-git-guard.md) and enforced by automated security tests (`TC-S01` ~ `TC-S16`):
 
 1. **Fail-Closed `lockedPaths` & `taskId` Isolation (`server/src/path-guard.ts`, `server/src/bridge-fs.ts`):**
    - Validates `lockedPaths` **before** provider detection so protected paths are rejected even when no provider is configured.
@@ -46,6 +46,7 @@ This plugin delegates file edits, browser automation, and verification commands 
 2. **Restricted Verification Shell & Safe Subprocess Spawning (`server/src/engines/api-worker.ts`, `server/src/cli-admin.ts`, `server/src/engines/subscription.ts`):**
    - `run_command` validates commands against a strict build/typecheck/lint/test allowlist and rejects shell metacharacters and destructive binaries (`rm`, `git`, `curl`, `wget`, `powershell`, `bash`, `sudo`).
    - All subprocess executions default to `shell: false` (with quoted `cmd.exe /d /s /c` wrapping only for Windows `.cmd`/`.bat` shims).
+   - Every helper program (`git`, `taskkill`, clipboard and notification tools, `powershell`, `osascript`, and the `cmd.exe` wrapper itself) is launched by **absolute path**, resolved from fully qualified `PATH` directories only (`server/src/exec-path.ts`). A relative entry such as `.` or `node_modules\.bin` resolves inside the opened workspace, where a cloned repository could ship a same-named binary; `agy`/`antigravity` discovery skips such entries too (`TC-S12` ~ `TC-S16`).
    - `ag_cli_admin` validates server names, rejects CR/LF/NUL control characters in `mcp_add` arguments/env/headers, defaults `mcp_sync_from_claude` to `dryRun: true`, and skips self-registration of `antigravity-delegate` to prevent recursive loops.
    - Strips `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` from API worker child environments.
 3. **Authentication, Permissions & Secret Redaction (`server/src/auth.ts`, `server/src/config.ts`):**

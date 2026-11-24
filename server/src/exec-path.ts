@@ -30,9 +30,13 @@ function isFullyQualifiedWin32(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }
 
+/** What POSIX execvp searches when PATH is unset (`_PATH_DEFPATH`). Windows has no equivalent. */
+const POSIX_DEFAULT_PATH = '/usr/bin:/bin';
+
 /** PATH's fully qualified directories, in order. Relative and empty entries are dropped. */
 export function absolutePathDirs(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
-  const raw = envValue(env, 'PATH');
+  // Unset PATH on POSIX: search what execvp would. Set-but-empty means "the cwd" there: nothing.
+  const raw = envValue(env, 'PATH') ?? (platform === 'win32' ? '' : POSIX_DEFAULT_PATH);
   if (!raw) {
     return [];
   }

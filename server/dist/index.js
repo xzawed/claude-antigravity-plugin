@@ -59797,8 +59797,9 @@ function envValue(env, name) {
 function isFullyQualifiedWin32(p) {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }
+var POSIX_DEFAULT_PATH = "/usr/bin:/bin";
 function absolutePathDirs(platform, env) {
-  const raw = envValue(env, "PATH");
+  const raw = envValue(env, "PATH") ?? (platform === "win32" ? "" : POSIX_DEFAULT_PATH);
   if (!raw) {
     return [];
   }

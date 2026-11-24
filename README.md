@@ -483,7 +483,7 @@ claude-antigravity-plugin/
 ├── templates/claude-handoff.md    # Antigravity handoff workflow template
 ├── server/
 │   ├── src/                       # index.ts, auth.ts, jobs.ts, sessions.ts, artifacts.ts, cli-admin.ts,
-│   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, config.ts, detector.ts, engines/
+│   │                              # bridge-fs.ts, git-guard.ts, path-guard.ts, exec-path.ts, config.ts, detector.ts, engines/
 │   ├── scripts/verify-plugin.mjs  # Live healthcheck & 12-tool Stdio MCP verifier
 │   └── tests/                     # 9 suites / 57 automated tests
 ├── README.md                      # English guide (this file)
