@@ -41,7 +41,7 @@ import {
   getDefaultDetectorDeps,
 } from './detector.js';
 import { ApiWorkerEngine } from './engines/api-worker.js';
-import { ExecutionEngine } from './engines/base.js';
+import { ExecutionEngine, ProgressCallback } from './engines/base.js';
 import { AgyCapabilityQuery, queryAgyCapabilities, SubscriptionEngine } from './engines/subscription.js';
 import { checkpointManifestFields, createCheckpoint, getGitInfo, rollbackCheckpoint } from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
@@ -304,9 +304,15 @@ function extractAgyOptions(input: DelegateToolInput): AgyCliOptions {
   };
 }
 
+export interface DelegateRuntimeOptions {
+  onProgress?: ProgressCallback;
+  abortSignal?: AbortSignal;
+}
+
 export async function handleDelegateToAntigravity(
   input: DelegateToolInput,
   deps: ServerDependencies = {},
+  runtimeOptions?: DelegateRuntimeOptions,
 ): Promise<DelegateToolOutput> {
   const workspaceRoot = path.resolve(input.workspaceRoot ?? process.cwd());
   const pluginRoot = deps.pluginRoot ?? getDefaultPluginRoot();
@@ -395,6 +401,8 @@ export async function handleDelegateToAntigravity(
     detection,
     agyOptions: extractAgyOptions(input),
     timeoutSecOverride: input.timeoutSec,
+    abortSignal: runtimeOptions?.abortSignal,
+    onProgress: runtimeOptions?.onProgress,
   });
 
   return {
@@ -522,9 +530,31 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     'delegate_to_antigravity',
     'Create a Git safety checkpoint, dispatch any task to Antigravity (full `agy` CLI feature set including native `/boost`, `/browser`, `/swarm`, `/goal`, models, effort, agents, conversation resume, `--json-schema`, sandbox, and `--dangerously-skip-permissions`, or Gemini API fallback), and wait for the verification report, structured output, artifacts, and token usage metrics.',
     sharedDelegateSchema,
-    async (args) => {
+    async (args, extra) => {
       try {
-        const result = await handleDelegateToAntigravity(args, deps);
+        const progressToken = extra._meta?.progressToken;
+        const onProgress: ProgressCallback | undefined =
+          progressToken !== undefined
+            ? (ev) => {
+                void extra
+                  .sendNotification({
+                    method: 'notifications/progress',
+                    params: {
+                      progressToken,
+                      progress: ev.progress,
+                      ...(ev.total !== undefined ? { total: ev.total } : {}),
+                      message: maskSecrets(ev.message),
+                    },
+                  })
+                  .catch(() => {
+                    // Best-effort notification: ignore transport/client errors
+                  });
+              }
+            : undefined;
+        const result = await handleDelegateToAntigravity(args, deps, {
+          onProgress,
+          abortSignal: extra.signal,
+        });
         return toJsonToolResponse(result, !result.ok);
       } catch (err) {
         const code = err instanceof AgPluginError ? err.code : 'INTERNAL_ERROR';

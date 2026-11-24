@@ -54,6 +54,7 @@
 | `TC-U41` | `sessions.ts` · `index.ts` | Git 저장소에서 `ag_session start` 후 파일 수정 → `rollback_ag_task({ taskId: checkpointTaskId })`; 응답 없는 턴 타임아웃 | 세션 체크포인트가 `.ag-bridge/history/`에 기록되어 원복 가능, 턴 타임아웃 시 자식 프로세스 종료 및 세션 정리(응답 어긋남 방지) | `FR-005`, `ARC-002` |
 | `TC-U42` | `artifacts.ts` | `.ag-bridge/artifacts/` 아래 공백 등 비표준 이름 폴더 존재 시 `list_ag_artifacts({})` 호출 | 비표준 폴더를 건너뛰고 유효한 작업 아티팩트 정상 반환 | `FR-008` |
 | `TC-U43`, `TC-U43b` | `check-version-sync.mjs` | 저장소 버전 선언 6곳(`plugin.json`·`package.json`·`package-lock.json`·`index.ts`·`mcp-tools-api.md`) 일치 여부 및 `--tag vX.Y.Z` 비교 | 모든 선언 일치 시 PASS, 한 곳이라도 드리프트하거나 태그가 어긋나면 FAIL (CI & `.github/workflows/release.yml`) | `NFR-007` |
+| `TC-U44` | `subscription.ts` · `api-worker.ts` | `formatStreamEventProgress`의 `init`/`step_update`/`result` 매핑(비밀 마스킹 포함) 및 API 워커 멀티턴 `onProgress` 콜백 수신 | 진행률이 단조 증가하며 API 키 패턴은 `[REDACTED]`로 마스킹되고 턴/도구 호출 요약이 정상 전달됨 | `SPC-001`, `NFR-002` |
 
 ---
 
@@ -99,6 +100,7 @@
 | `TC-I03` | **Subscription 타임아웃** | `timeout_sec: 2` 설정 후 상태 미변경 유지 | 2초 후 `FAILED(TASK_TIMEOUT)` 반환, 체크포인트 유지 |
 | `TC-I04` | **API Worker 전체 파이프라인 (Mock Gemini)** | `@google/genai` 모킹: Turn 1 `list_dir` → Turn 2 `write_file(locked)` → Turn 3 `write_file(out-of-scope 거부)` → Turn 4 `run_command("npx tsc --noEmit")` → Turn 5 최종 응답 | 허용 파일만 생성, 범위 외 쓰기 차단, `report.md` 생성 및 `VERIFIED` 반환 |
 | `TC-I05` | **API Worker `max_turns` 초과** | `max_turns: 3`, 매 턴 Function Call만 반환하는 Mock | `max_turns` 도달 시 무한 루프 방지, `FAILED(MAX_TURNS_EXCEEDED)` 반환 |
+| `TC-I09` | **MCP Progress Notification 실시간 스트리밍** | 라이브 Stdio MCP 클라이언트가 `onprogress`(`_meta.progressToken`)를 지정해 `delegate_to_antigravity` 호출 (Mock `agy` `stream-json` 출력에 비밀 문자열 포함) | `notifications/progress` 이벤트(`init`·`step_update`·`result`)가 단조 증가하며 실시간 수신되고 비밀은 `[REDACTED]`로 마스킹됨 |
 
 ---
 

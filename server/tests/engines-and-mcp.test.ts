@@ -19,12 +19,14 @@ import {
   attachStreamJsonHeartbeat,
   buildCliInvocationArgs,
   buildCliSpawnSpec,
+  formatStreamEventProgress,
   parseAgyAgentProbe,
   parseAgyAgentsOutput,
   parseAgyModelsOutput,
   queryAgyCapabilities,
   SubscriptionEngine,
 } from '../src/engines/subscription.js';
+import type { ExecutionProgressEvent } from '../src/engines/base.js';
 import {
   handleCheckEnvironment,
   handleDelegateToAntigravity,
@@ -1167,6 +1169,98 @@ describe('engines & MCP pipeline (TC-S04, TC-I02 ~ TC-I05)', () => {
       const diskReport = fs.readFileSync(path.join(tmpRoot, '.ag-bridge', 'report.md'), 'utf8');
       expect(diskReport).not.toContain(dummyKey);
       expect(diskReport).toContain('[REDACTED]');
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+    }
+  });
+
+  it('TC-U44: formats stream-json events into masked progress updates and emits API worker turn progress', async () => {
+    const secret = ['AIza', 'SyUnitProgressSecret1234567890abc'].join('');
+    const initEv = formatStreamEventProgress(
+      { event: 'init', init: { model: 'gemini-4-neon-high', permission_mode: 'accept-edits' } },
+      1,
+    );
+    expect(initEv).toEqual({
+      progress: 1,
+      message: 'Antigravity session initialized (model=gemini-4-neon-high, mode=accept-edits)',
+    });
+
+    const stepEv = formatStreamEventProgress(
+      {
+        event: 'step_update',
+        step_update: { title: `Applying patch with ${secret}`, usage: { total_tokens: 420 } },
+      },
+      2,
+    );
+    expect(stepEv?.progress).toBe(2);
+    expect(stepEv?.message).toContain('[REDACTED]');
+    expect(stepEv?.message).not.toContain(secret);
+    expect(stepEv?.message).toContain('420 tokens');
+
+    const resEv = formatStreamEventProgress(
+      {
+        event: 'result',
+        result: { status: 'SUCCESS', num_turns: 3, usage: { total_tokens: 1200 } },
+      },
+      3,
+    );
+    expect(resEv).toEqual({
+      progress: 3,
+      total: 3,
+      message: 'Antigravity finished (status=SUCCESS, turns=3, tokens=1200)',
+    });
+
+    // API worker emits turn-by-turn progress updates through handleDelegateToAntigravity runtimeOptions
+    let turn = 0;
+    const apiEngine = new ApiWorkerEngine({
+      retryBaseDelayMs: 1,
+      adapterFactory: () => ({
+        generateTurn: async () => {
+          turn += 1;
+          if (turn === 1) {
+            return { functionCalls: [{ name: 'list_dir', args: { path: '.' } }] };
+          }
+          return { text: 'Summary complete.' };
+        },
+      }),
+    });
+
+    const progressLog: ExecutionProgressEvent[] = [];
+    const prevKey = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = secret;
+    try {
+      const res = await handleDelegateToAntigravity(
+        {
+          title: 'API progress callback test',
+          instructions: 'Inspect workspace and summarize.',
+          lockedPaths: ['src/ui/'],
+          modeOverride: 'api',
+          workspaceRoot: tmpRoot,
+        },
+        {
+          pluginRoot,
+          apiWorkerEngine: apiEngine,
+          detectorDeps: {
+            platform: 'linux',
+            env: { GEMINI_API_KEY: secret },
+            homedir: '/home/tester',
+            existsSync: () => false,
+            findBinary: () => undefined,
+          },
+        },
+        {
+          onProgress: (ev) => progressLog.push(ev),
+        },
+      );
+
+      expect(res.ok).toBe(true);
+      expect(progressLog.length).toBeGreaterThanOrEqual(4);
+      expect(progressLog.some((p) => p.message.includes('running list_dir'))).toBe(true);
+      expect(progressLog[progressLog.length - 1].message).toContain('completed in 2 turn(s)');
+      for (let i = 1; i < progressLog.length; i++) {
+        expect(progressLog[i].progress).toBeGreaterThanOrEqual(progressLog[i - 1].progress);
+      }
     } finally {
       if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = prevKey;

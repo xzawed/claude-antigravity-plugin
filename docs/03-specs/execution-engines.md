@@ -15,6 +15,14 @@
 두 실행 엔진은 동일한 전략 인터페이스를 구현하여 `index.ts`가 실행 모드 세부 구현에 결합되지 않도록 한다.
 
 ```typescript
+export interface ExecutionProgressEvent {
+  progress: number;
+  total?: number;
+  message: string;
+}
+
+export type ProgressCallback = (event: ExecutionProgressEvent) => void;
+
 export interface ExecutionContext {
   workspaceRoot: string;
   pluginRoot: string;
@@ -25,6 +33,8 @@ export interface ExecutionContext {
   detection: EnvironmentDetectionResult;
   agyOptions?: AgyCliOptions;
   timeoutSecOverride?: number;
+  abortSignal?: AbortSignal;
+  onProgress?: ProgressCallback;
 }
 
 export interface ExecutionResult {
