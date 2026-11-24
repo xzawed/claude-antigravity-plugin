@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `ARC-003` |
-| **버전** | `1.7.0` |
+| **버전** | `1.8.0` |
 | **상태** | `Approved` |
 | **최종 수정일** | `2026-11-24` |
 | **관련 문서** | [PRD](../01-planning/PRD.md), [브릿지 프로토콜](./bridge-protocol.md), [테스트 & QA 계획](../05-verification/test-and-qa-plan.md) |
@@ -194,10 +194,16 @@ flowchart TD
 - `subscription.agy_mode=auto`
 - `subscription.agy_settings` (값이 있으면)
 - `subscription.agy_remote_agent=true`
+- `subscription.agy_agent` (값이 있으면)
+  - agy는 워크스페이스가 `.agents/agents/`에 정의한 에이전트를 그대로 실행한다. 그 에이전트는 자기 프롬프트와 도구 정책(`commandExecutionPolicy`), 훅을 갖는다.
+  - 실측: `.agents/agents/probe-ws-agent.md`가 있는 새 폴더에서 헤드리스 `agy -p … --agent no-such-agent-xyz`는 `(available: probe-ws-agent)`로 답했다. 파일이 없는 대조 폴더에서는 `(no custom agents are available)`였다.
+  - 저장소가 에이전트와 `agy_agent`를 함께 커밋하면, 모든 위임이 사용자가 고른 것처럼 그 에이전트로 돈다.
 - `api.apiKey` (값이 있으면)
 - `api.api_key_env` (`GEMINI_API_KEY`가 아닌 값)
 
 기본값을 조이는 값(예: `agy_mode=plan`, `agy_sandbox=true`)은 언제나 따른다.
+
+`subscription.agy_project`는 민감 키가 아니다. agy 도움말에 따르면 `--project`는 사용자 자신의 agy 프로젝트를 ID나 이름으로 고른다. 워크스페이스가 프로젝트를 정의한다는 재현이 나오면 다시 본다.
 
 **규칙:**
 1. 설정 파일이 사용자 자신의 것이 아닐 수 있으면, 민감 키를 환경변수·기본값으로 되돌린다.
@@ -214,6 +220,7 @@ flowchart TD
 
 **알려진 한계:**
 - git 기록 없이 압축 파일로 받은 폴더에서는 추적 여부를 알 수 없다. 이때도 규칙 2의 `app_path` 검사는 적용된다.
+- agy는 `--agent`가 없어도 워크스페이스의 `.agents/`(skills·rules·agents 매니페스트)를 자체 규칙대로 읽는다(agy 변경 기록). 이 규칙이 막는 것은 저장소의 설정이 에이전트를 *고르는* 일뿐이다.
 - 저장소가 넣은 다른 파일을 agy가 지시로 읽는 일은 이 규칙의 범위 밖이다. 예를 들어 저장소가 고쳐 둔 `.agent/workflows/claude-handoff.md`는 사용자 수정본으로 보고 덮어쓰지 않는다. 이런 지시를 다루는 것은 설정 신뢰가 아니라 에이전트의 프롬프트 주입 방어다.
 
 ---
