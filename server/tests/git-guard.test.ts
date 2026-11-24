@@ -342,14 +342,18 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     "TC-U34b: on Windows the time limit also ends the git that Git for Windows' launcher left running",
     { timeout: 120_000 },
     async (ctx) => {
-      // `git` on PATH is usually the launcher cmd\git.exe, as on the CI runners. The limit killed
-      // only the launcher; the real git ran on through its filters and held the folder (measured:
-      // still running after the cut, gone at 6.9 s).
+      // `git` on PATH is usually a launcher: <root>\cmd\git.exe (the default install's PATH entry) or
+      // <root>\bin\git.exe (the CI runners'). The limit killed only the launcher; the real git ran on
+      // through its filters and held the folder (measured: still running after the cut, gone at
+      // 6.9 s). Find <root>\cmd\git.exe from wherever git resolves — <root>\cmd, <root>\bin, or
+      // <root>\mingw64\bin (Git Bash) — so this runs on CI too (it was skipped there at first).
       const resolved = resolveExecutable('git') ?? '';
-      const launcher = /\\cmd\\git\.exe$/i.test(resolved)
-        ? resolved
-        : path.join(path.dirname(resolved), '..', '..', 'cmd', 'git.exe');
-      if (!resolved || !fs.existsSync(launcher)) {
+      const launcher = [
+        resolved,
+        path.join(path.dirname(resolved), '..', 'cmd', 'git.exe'),
+        path.join(path.dirname(resolved), '..', '..', 'cmd', 'git.exe'),
+      ].find((p) => resolved && /\\cmd\\git\.exe$/i.test(path.normalize(p)) && fs.existsSync(p));
+      if (!launcher) {
         ctx.skip(); // not Git for Windows
         return;
       }
