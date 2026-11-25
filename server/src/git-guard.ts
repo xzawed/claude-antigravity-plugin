@@ -1277,3 +1277,104 @@ export function removeTaskWorktree(
     ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
   };
 }
+
+export interface GitPullResult {
+  ok: boolean;
+  alreadyUpToDate: boolean;
+  previousHead?: string;
+  currentHead?: string;
+  output: string;
+  error?: string;
+}
+
+/**
+ * Fast-forward pull a clean local git repository (used exclusively by `/ag-update plugin` for
+ * local-clone plugin installs). Keeps repo hooks, fsmonitor, and submodule recursion disabled.
+ */
+export function pullFastForwardRepo(repoDir: string): GitPullResult {
+  const info = getGitInfo(repoDir);
+  if (!info.isGitRepo) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      output: '',
+      error: info.error ?? 'Plugin directory is not a Git repository.',
+    };
+  }
+  if (info.isDirty) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      output: '',
+      error:
+        'Local plugin checkout has uncommitted changes. Commit, stash, or discard them before running `/ag-update plugin`.',
+    };
+  }
+
+  const prevHeadRes = tryRunGit(repoDir, ['rev-parse', '--short', 'HEAD']);
+  const previousHead = prevHeadRes.ok ? prevHeadRes.stdout.trim() : undefined;
+
+  let gitBin: string;
+  try {
+    gitBin = requireExecutable('git');
+  } catch (err) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      previousHead,
+      output: '',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const res = spawnSync(
+    gitBin,
+    [
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'submodule.recurse=false',
+      'pull',
+      '--ff-only',
+    ],
+    {
+      cwd: repoDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 60_000,
+      windowsHide: true,
+    },
+  );
+
+  const combinedOutput = [(res.stdout ?? '').trim(), (res.stderr ?? '').trim()]
+    .filter(Boolean)
+    .join('\n');
+
+  if (res.error || res.status !== 0) {
+    const errMsg =
+      (res.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
+        ? 'Timed out waiting for `git pull --ff-only` after 60s.'
+        : combinedOutput || res.error?.message || `git pull --ff-only exited with status ${res.status ?? 'unknown'}.`;
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      previousHead,
+      output: combinedOutput,
+      error: errMsg,
+    };
+  }
+
+  const nextHeadRes = tryRunGit(repoDir, ['rev-parse', '--short', 'HEAD']);
+  const currentHead = nextHeadRes.ok ? nextHeadRes.stdout.trim() : undefined;
+  const alreadyUpToDate = Boolean(previousHead && currentHead && previousHead === currentHead);
+
+  return {
+    ok: true,
+    alreadyUpToDate,
+    previousHead,
+    currentHead,
+    output: combinedOutput || (alreadyUpToDate ? 'Already up to date.' : 'Updated via fast-forward pull.'),
+  };
+}

@@ -554,7 +554,23 @@ export type AgCliAdminAction =
   | 'remote_start'
   | 'remote_stop'
   | 'changelog'
-  | 'update';
+  | 'update'
+  | 'plugin_status'
+  | 'plugin_update';
+
+export type PluginInstallMethod = 'marketplace' | 'git_clone' | 'unknown';
+
+export interface PluginUpdateInfo {
+  currentVersion: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  installMethod: PluginInstallMethod;
+  pluginRoot: string;
+  releaseUrl?: string;
+  updated?: boolean;
+  reloadRequired?: boolean;
+  nextSteps: string[];
+}
 
 export interface AgCliAdminToolInput {
   action: AgCliAdminAction;
@@ -576,6 +592,7 @@ export interface AgCliAdminToolOutput {
   exitCode?: number;
   output: string;
   syncedServers?: Array<{ name: string; status: 'planned' | 'synced' | 'skipped' | 'failed'; detail: string }>;
+  pluginUpdate?: PluginUpdateInfo;
   warnings: string[];
   errorCode?: AgErrorCode;
   errorMessage?: string;

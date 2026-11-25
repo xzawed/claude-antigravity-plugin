@@ -75,59 +75,39 @@ flowchart LR
 
 ---
 
-### 1단계 — 다운로드 · 빌드 · 자동 점검 (수정 없이 통째로 복사)
+### 1단계 — Claude Code 마켓플레이스에서 바로 설치 *(가장 쉬움 · 30초 · 빌드 불필요)*
 
-사용 중인 컴퓨터(OS)의 명령어 블록을 **그대로 복사해 터미널에 붙여넣고 Enter**를 누르세요. `~/.claude/plugins/claude-antigravity-plugin` 경로에 자동으로 설치됩니다.
-
-#### 🍎 macOS / 🐧 Linux (터미널)
-
-```bash
-git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin" \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
-```
-
-#### 🪟 Windows (PowerShell)
-
-```powershell
-git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
-```
-
-> ✅ **성공 확인:** 마지막 줄에 `[verify] ALL LIVE VERIFICATION CHECKS PASSED.`와 함께 12개 MCP Tool이 출력되면 준비 끝입니다!
-
----
-
-### 2단계 — Claude Code에 플러그인 등록 (아래 3가지 중 1개 선택)
-
-#### 방법 A — 마켓플레이스로 영구 설치 *(가장 추천)*
-
-`claude`를 실행한 뒤 채팅 입력창에 아래 두 줄을 차례로 붙여넣으세요:
+저장소에 미리 빌드된 자체완결 서버 번들(`server/dist/index.js`)이 포함되어 있으므로 `git clone`이나 `npm install` 없이 **`claude` 채팅창에 아래 두 줄만 붙여넣으면 끝납니다**:
 
 ```text
-/plugin marketplace add ~/.claude/plugins/claude-antigravity-plugin
+/plugin marketplace add xzawed/claude-antigravity-plugin
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-> 💡 **로컬 클론·빌드 없이 GitHub에서 바로 등록할 경우:** 저장소에 미리 빌드된 자체완결 서버 번들(`server/dist/index.js`)이 들어 있어 마켓플레이스 설치만으로 바로 동작합니다:
-> `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`
+> ✨ **자동 업데이트까지 한 번에 켜기 (강력 추천):** 설치 직후 Claude Code에서 `/plugin` → **Marketplaces** → `claude-antigravity-plugin` → **Enable auto-update**를 켜두면, 앞으로 새 버전이 나올 때마다 Claude Code가 자동으로 최신 버전을 받아옵니다.
 
-#### 방법 B — `--plugin-dir`로 즉시 실행 *(빠른 체험 · 개발용)*
+<details>
+<summary>🛠️ 대안 설치 방법 (로컬 Git 클론 · <code>--plugin-dir</code> 개발용 · MCP 단독 연결)</summary>
+
+#### 방법 B — 로컬 클론 + `--plugin-dir` *(개발 · 기여 · 빠른 체험용)*
+
+이미 번들이 커밋되어 있어 `git clone`만으로 바로 실행됩니다(`npm install`·`build`는 소스 수정 시에만 필요):
 
 **macOS / Linux:**
 
 ```bash
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin"
 claude --plugin-dir "$HOME/.claude/plugins/claude-antigravity-plugin"
 ```
 
 **Windows PowerShell:**
 
 ```powershell
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 ```
+
+*(선택: 로컬 클론에서 전체 자가 점검을 실행하려면 `npm --prefix ... run verify`를 실행하세요.)*
 
 #### 방법 C — MCP 서버만 단독 연결 *(슬래시 커맨드 없이 MCP Tool 12종만 사용)*
 
@@ -143,9 +123,11 @@ claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigr
 claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
+</details>
+
 ---
 
-### 3단계 — Claude Code 안에서 바로 Antigravity 로그인 (`/ag-login`)
+### 2단계 — Claude Code 안에서 바로 Antigravity 로그인 (`/ag-login`)
 
 따로 터미널을 열 필요가 없습니다! Claude Code 채팅창에 아래 한 단어만 입력하세요:
 
@@ -159,7 +141,7 @@ claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\cl
   - **macOS / Linux:** `export GEMINI_API_KEY="발급받은-API-키"`
   - **Windows PowerShell:** `$env:GEMINI_API_KEY = "발급받은-API-키"` *(영구 저장: `setx GEMINI_API_KEY "발급받은-API-키"`)*
 
-### 4단계 — 정상 연결 확인
+### 3단계 — 정상 연결 확인
 
 Claude Code 채팅창에 입력합니다:
 
@@ -171,51 +153,61 @@ Claude Code 채팅창에 입력합니다:
 
 ---
 
-## 🔄 업데이트 방법 (복사해서 바로 실행)
+## 🔄 업데이트 방법 (자동 또는 1단어로 끝!)
 
-새 버전이 나오면 아래 블록을 그대로 복사·실행하는 것만으로 30초 안에 최신 기능을 받을 수 있습니다.
+### 방법 1 — 자동 업데이트 켜기 *(가장 쉬움 · 최초 1회 설정으로 끝)*
 
-### 1. 플러그인(`claude-antigravity-plugin`) 최신 버전 업데이트
+Claude Code 채팅창에서 `/plugin`을 입력한 뒤:
+1. **Marketplaces** 탭으로 이동
+2. **`claude-antigravity-plugin`** 선택
+3. **Enable auto-update** 활성화
 
-**GitHub에서 바로 설치했다면** (`/plugin marketplace add xzawed/claude-antigravity-plugin`) 빌드할 것이 없습니다 — 마켓플레이스를 새로 고치고 플러그인을 업데이트한 뒤 Claude Code를 다시 시작하세요:
+이후부터는 새 릴리스가 나올 때 Claude Code가 시작 시 자동으로 최신 버전으로 갱신합니다.
+
+### 방법 2 — Claude Code 채팅창에서 1단어로 즉시 업데이트
+
+터미널을 열 필요 없이 Claude Code 안에서 바로 최신 버전을 확인하고 업데이트할 수 있습니다:
+
+```text
+/ag-update            # 플러그인 최신 버전 여부 + agy 변경사항 확인 (읽기 전용)
+/ag-update plugin     # 플러그인 본인 자동 업데이트 (마켓플레이스 / 로컬 클론 자동 판별)
+/ag-update agy        # 로컬 Antigravity CLI (agy) 업그레이드
+/ag-update all        # 플러그인 + agy CLI 둘 다 한 번에 업데이트!
+```
+
+플러그인 업데이트 완료 후 채팅창에 아래 한 줄만 입력하면 재시작 없이 즉시 반영됩니다:
+
+```text
+/reload-plugins
+```
+
+<details>
+<summary>💻 터미널에서 직접 업데이트하기 (수동 명령어)</summary>
+
+**마켓플레이스 설치(빌드 불필요):**
 
 ```bash
 claude plugin marketplace update claude-antigravity-plugin
 claude plugin update antigravity-delegate@claude-antigravity-plugin
 ```
 
-**로컬 클론(1단계)으로 설치했다면** 클론을 받아 자체 점검합니다:
+**로컬 클론 설치(빌드 불필요 — 1줄로 끝):**
 
-**macOS / Linux:**
+`server/dist/`에 자체완결 번들이 커밋되어 있으므로 `npm install`·`npm run build`를 돌릴 필요가 없습니다:
 
 ```bash
-git -C "$HOME/.claude/plugins/claude-antigravity-plugin" pull --ff-only \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
+# macOS / Linux
+git -C "$HOME/.claude/plugins/claude-antigravity-plugin" pull --ff-only
 ```
-
-**Windows PowerShell:**
 
 ```powershell
+# Windows PowerShell
 git -C "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin" pull --ff-only
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
 ```
 
-실행 중인 Claude Code를 끌 필요 없이 채팅창에 아래 명령만 입력하면 즉시 반영됩니다:
+*(소스 코드를 직접 수정하는 개발자만 `npm --prefix .../server run build`가 필요합니다.)*
 
-```text
-/reload-plugins
-```
-
-### 2. Antigravity CLI (`agy`) 자체 업데이트 (Claude Code 안에서 바로!)
-
-```text
-/ag-update            # 최신 Antigravity CLI 변경사항(Release Notes) 먼저 확인
-/ag-update apply      # 로컬 agy CLI 바이너리 최신 버전으로 업그레이드
-```
+</details>
 
 ---
 

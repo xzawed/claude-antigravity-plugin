@@ -7,7 +7,12 @@ import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleListArtifacts } from '../src/artifacts.js';
 import { ensureBridgeDirs, getArtifactsDir, writeManifest, writeReportMarkdown } from '../src/bridge-fs.js';
-import { buildMcpAddArgs, handleAgCliAdmin } from '../src/cli-admin.js';
+import {
+  buildMcpAddArgs,
+  compareSemver,
+  detectPluginInstallMethod,
+  handleAgCliAdmin,
+} from '../src/cli-admin.js';
 import { DetectorDeps } from '../src/detector.js';
 import { handleRollbackAgTask } from '../src/index.js';
 import {
@@ -474,5 +479,130 @@ describe('Persistent sessions, artifacts viewer & CLI admin (TC-U27 ~ TC-U32)', 
     expect(res.ok).toBe(true);
     expect(res.taskId).toBe('ag-valid-1');
     expect(res.artifacts.map((a) => a.name)).toEqual(['shot.png']);
+  });
+
+  it('TC-U54: ag_cli_admin plugin_status compares semver, detects install method, and works without agy CLI', async () => {
+    expect(compareSemver('1.6.1', '1.7.0')).toBe(-1);
+    expect(compareSemver('1.6.1', '1.6.1')).toBe(0);
+    expect(compareSemver('1.6.1-rc.1', '1.6.1')).toBe(-1);
+    expect(compareSemver('2.0.0', '1.9.9')).toBe(1);
+
+    const mktRoot = path.join(tmpRoot, '.claude', 'plugins', 'cache', 'claude-antigravity-plugin', 'antigravity-delegate', '1.6.1');
+    fs.mkdirSync(path.join(mktRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(mktRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ version: '1.6.1' }));
+    expect(detectPluginInstallMethod(mktRoot)).toBe('marketplace');
+
+    const noAgyDeps: DetectorDeps = {
+      platform: 'linux',
+      env: {},
+      homedir: '/tmp/nonexistent-home',
+      existsSync: () => false,
+      findBinary: () => undefined,
+    };
+
+    // Update available
+    const statusRes = await handleAgCliAdmin(
+      { action: 'plugin_status', workspaceRoot: tmpRoot },
+      {
+        pluginRoot: mktRoot,
+        detectorDeps: noAgyDeps,
+        fetchLatestReleaseFn: async () => ({
+          version: '1.7.0',
+          releaseUrl: 'https://github.com/xzawed/claude-antigravity-plugin/releases/tag/v1.7.0',
+        }),
+      },
+    );
+    expect(statusRes.ok).toBe(true);
+    expect(statusRes.pluginUpdate?.currentVersion).toBe('1.6.1');
+    expect(statusRes.pluginUpdate?.latestVersion).toBe('1.7.0');
+    expect(statusRes.pluginUpdate?.updateAvailable).toBe(true);
+    expect(statusRes.pluginUpdate?.installMethod).toBe('marketplace');
+    expect(statusRes.output).toContain('v1.6.1 -> v1.7.0');
+
+    // Offline fallback returns ok: true with warning
+    const offlineRes = await handleAgCliAdmin(
+      { action: 'plugin_status', workspaceRoot: tmpRoot },
+      {
+        pluginRoot: mktRoot,
+        detectorDeps: noAgyDeps,
+        fetchLatestReleaseFn: async () => null,
+      },
+    );
+    expect(offlineRes.ok).toBe(true);
+    expect(offlineRes.pluginUpdate?.updateAvailable).toBeUndefined();
+    expect(offlineRes.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('TC-U55: ag_cli_admin plugin_update updates marketplace caches via claude CLI and local git clones via fast-forward pull', async () => {
+    // 1. Marketplace install path -> runs marketplace update + plugin update
+    const mktRoot = path.join(tmpRoot, '.claude', 'plugins', 'cache', 'claude-antigravity-plugin', 'antigravity-delegate', '1.6.1');
+    fs.mkdirSync(path.join(mktRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(mktRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ version: '1.6.1' }));
+
+    const claudeCalls: Array<{ cli: string; args: string[] }> = [];
+    const mktUpdate = await handleAgCliAdmin(
+      { action: 'plugin_update', workspaceRoot: tmpRoot },
+      {
+        pluginRoot: mktRoot,
+        detectorDeps: {
+          platform: 'linux',
+          env: {},
+          homedir: '/tmp/nonexistent-home',
+          existsSync: (p) => p === '/usr/local/bin/claude',
+          findBinary: (b) => (b === 'claude' ? '/usr/local/bin/claude' : undefined),
+        },
+        runCliFn: async (cli, args) => {
+          claudeCalls.push({ cli, args });
+          return { exitCode: 0, stdout: 'Updated to 1.7.0', stderr: '' };
+        },
+      },
+    );
+    expect(mktUpdate.ok).toBe(true);
+    expect(mktUpdate.pluginUpdate?.updated).toBe(true);
+    expect(mktUpdate.pluginUpdate?.reloadRequired).toBe(true);
+    expect(claudeCalls).toEqual([
+      { cli: '/usr/local/bin/claude', args: ['plugin', 'marketplace', 'update', 'claude-antigravity-plugin'] },
+      { cli: '/usr/local/bin/claude', args: ['plugin', 'update', 'antigravity-delegate@claude-antigravity-plugin'] },
+    ]);
+
+    // 2. Local git clone -> uses pullRepoFn without needing agy or claude
+    const cloneRoot = path.join(tmpRoot, 'local-clone');
+    fs.mkdirSync(path.join(cloneRoot, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(cloneRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(cloneRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ version: '1.6.1' }));
+    expect(detectPluginInstallMethod(cloneRoot)).toBe('git_clone');
+
+    const cloneUpdate = await handleAgCliAdmin(
+      { action: 'plugin_update', workspaceRoot: tmpRoot },
+      {
+        pluginRoot: cloneRoot,
+        pullRepoFn: (dir) => {
+          expect(dir).toBe(cloneRoot);
+          fs.writeFileSync(path.join(cloneRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ version: '1.6.2' }));
+          return {
+            ok: true,
+            alreadyUpToDate: false,
+            previousHead: 'abc1234',
+            currentHead: 'def5678',
+            output: 'Updating abc1234..def5678\nFast-forward',
+          };
+        },
+      },
+    );
+    expect(cloneUpdate.ok).toBe(true);
+    expect(cloneUpdate.pluginUpdate?.currentVersion).toBe('1.6.2');
+    expect(cloneUpdate.pluginUpdate?.updated).toBe(true);
+    expect(cloneUpdate.pluginUpdate?.reloadRequired).toBe(true);
+
+    // 3. Unknown install directory -> returns helpful 2-line marketplace guidance
+    const plainRoot = path.join(tmpRoot, 'plain-dir');
+    fs.mkdirSync(path.join(plainRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(plainRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ version: '1.6.1' }));
+    const unknownRes = await handleAgCliAdmin(
+      { action: 'plugin_update', workspaceRoot: tmpRoot },
+      { pluginRoot: plainRoot },
+    );
+    expect(unknownRes.ok).toBe(false);
+    expect(unknownRes.output).toContain('/plugin marketplace add xzawed/claude-antigravity-plugin');
   });
 });

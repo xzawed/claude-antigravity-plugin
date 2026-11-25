@@ -75,59 +75,39 @@ flowchart LR
 
 ---
 
-### Step 1 — Download, Build & Self-Test (Copy & Paste As-Is)
+### Step 1 — Install Directly from Claude Code Marketplace *(Fastest · 30 Seconds · No Build)*
 
-Open your terminal and paste the block for your computer. It installs cleanly into `~/.claude/plugins/claude-antigravity-plugin`:
-
-#### 🍎 macOS / 🐧 Linux (Terminal)
-
-```bash
-git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin" \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
-```
-
-#### 🪟 Windows (PowerShell)
-
-```powershell
-git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
-```
-
-> ✅ **Success check:** The last line prints `[verify] ALL LIVE VERIFICATION CHECKS PASSED.` with all 12 MCP tools listed.
-
----
-
-### Step 2 — Connect the Plugin to Claude Code (Pick ONE Option)
-
-#### Option A — Permanent Install via Claude Code Marketplace *(Recommended)*
-
-Start `claude` and paste these two lines right inside Claude Code:
+The repository ships a prebuilt, self-contained server bundle (`server/dist/index.js`), so **no `git clone` or `npm install` is needed** — just paste these two lines inside `claude`:
 
 ```text
-/plugin marketplace add ~/.claude/plugins/claude-antigravity-plugin
+/plugin marketplace add xzawed/claude-antigravity-plugin
 /plugin install antigravity-delegate@claude-antigravity-plugin
 ```
 
-> 💡 **Direct from GitHub (no `git clone`, no build):** the repository ships a prebuilt, self-contained server bundle (`server/dist/index.js`), so a marketplace install runs as-is:
-> `/plugin marketplace add xzawed/claude-antigravity-plugin` → `/plugin install antigravity-delegate@claude-antigravity-plugin`
+> ✨ **Turn on Zero-Touch Auto-Updates (Recommended):** Inside Claude Code, run `/plugin` → **Marketplaces** → `claude-antigravity-plugin` → **Enable auto-update**. Future releases will then install automatically whenever Claude Code starts.
 
-#### Option B — Instant Launch with `--plugin-dir` *(Great for Quick Testing)*
+<details>
+<summary>🛠️ Alternative Install Methods (Local Git Clone · <code>--plugin-dir</code> Dev Mode · MCP Only)</summary>
+
+#### Option B — Local Clone + `--plugin-dir` *(Development · Contributing · Quick Testing)*
+
+Because prebuilt bundles are committed, `git clone` alone is enough (`npm install` / `npm run build` is only needed if you edit `server/src/`):
 
 **macOS / Linux:**
 
 ```bash
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$HOME/.claude/plugins/claude-antigravity-plugin"
 claude --plugin-dir "$HOME/.claude/plugins/claude-antigravity-plugin"
 ```
 
 **Windows PowerShell:**
 
 ```powershell
+git clone https://github.com/xzawed/claude-antigravity-plugin.git "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 claude --plugin-dir "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin"
 ```
+
+*(Optional: run `npm --prefix .../server run verify` inside a local clone for a full self-test.)*
 
 #### Option C — MCP Tools Only *(Without Slash Commands or Auto-Hooks)*
 
@@ -143,9 +123,11 @@ claude mcp add antigravity-delegate -- node "$HOME/.claude/plugins/claude-antigr
 claude mcp add antigravity-delegate -- node "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server\dist\index.js"
 ```
 
+</details>
+
 ---
 
-### Step 3 — Sign In to Antigravity Inside Claude Code (`/ag-login`)
+### Step 2 — Sign In to Antigravity Inside Claude Code (`/ag-login`)
 
 You don't need to open another terminal to sign in! Inside Claude Code, just type:
 
@@ -159,7 +141,7 @@ You don't need to open another terminal to sign in! Inside Claude Code, just typ
   - **macOS / Linux:** `export GEMINI_API_KEY="your-gemini-api-key"`
   - **Windows PowerShell:** `$env:GEMINI_API_KEY = "your-gemini-api-key"` *(or `setx GEMINI_API_KEY "your-gemini-api-key"` to save permanently)*
 
-### Step 4 — Verify Everything Is Green
+### Step 3 — Verify Everything Is Green
 
 Inside Claude Code, paste:
 
@@ -171,51 +153,61 @@ You'll see a clean status table confirming your active engine (`subscription` or
 
 ---
 
-## 🔄 How to Update (Copy & Paste)
+## 🔄 How to Update (Auto-Update or 1 Command!)
 
-Keeping both the plugin and Antigravity CLI up to date takes less than 30 seconds.
+### Option 1 — Enable Automatic Updates *(Easiest · Set Once, Forget Forever)*
 
-### 1. Update `claude-antigravity-plugin` to the Latest Version
+Inside Claude Code, type `/plugin`, then:
+1. Open the **Marketplaces** tab
+2. Select **`claude-antigravity-plugin`**
+3. Choose **Enable auto-update**
 
-**Installed directly from GitHub** (`/plugin marketplace add xzawed/claude-antigravity-plugin`)? There is nothing to build — refresh the marketplace, update the plugin, then restart Claude Code:
+Claude Code will now automatically pull new releases in the background on startup.
+
+### Option 2 — 1-Command Update Right Inside Claude Code
+
+Check for updates or upgrade both the plugin and `agy` CLI without leaving chat:
+
+```text
+/ag-update            # Check latest plugin version + agy release notes (read-only)
+/ag-update plugin     # Self-update the plugin (auto-detects marketplace vs git clone)
+/ag-update agy        # Upgrade your local Antigravity CLI (agy) binary
+/ag-update all        # Upgrade BOTH the plugin and agy CLI in one go!
+```
+
+After updating the plugin, apply the new version immediately without restarting Claude Code:
+
+```text
+/reload-plugins
+```
+
+<details>
+<summary>💻 Manual Terminal Commands (Optional)</summary>
+
+**Marketplace install (no build needed):**
 
 ```bash
 claude plugin marketplace update claude-antigravity-plugin
 claude plugin update antigravity-delegate@claude-antigravity-plugin
 ```
 
-**Installed from a local clone (Step 1)?** Pull and self-test the clone:
+**Local git clone (no build needed — 1 line):**
 
-**macOS / Linux:**
+Prebuilt self-contained bundles are committed in `server/dist/`, so you do not need to run `npm install` or `npm run build`:
 
 ```bash
-git -C "$HOME/.claude/plugins/claude-antigravity-plugin" pull --ff-only \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" install \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run build \
-  && npm --prefix "$HOME/.claude/plugins/claude-antigravity-plugin/server" run verify
+# macOS / Linux
+git -C "$HOME/.claude/plugins/claude-antigravity-plugin" pull --ff-only
 ```
-
-**Windows PowerShell:**
 
 ```powershell
+# Windows PowerShell
 git -C "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin" pull --ff-only
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" install
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run build
-npm --prefix "$env:USERPROFILE\.claude\plugins\claude-antigravity-plugin\server" run verify
 ```
 
-Then inside your running Claude Code session, reload immediately without even restarting:
+*(Only contributors editing `server/src/` need `npm --prefix .../server run build`.)*
 
-```text
-/reload-plugins
-```
-
-### 2. Update Antigravity CLI (`agy`) Right Inside Claude Code
-
-```text
-/ag-update            # Read the latest Antigravity CLI release notes first
-/ag-update apply      # Upgrade your local agy CLI binary
-```
+</details>
 
 ---
 
