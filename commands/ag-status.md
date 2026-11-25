@@ -4,7 +4,7 @@ description: Diagnose Antigravity provider availability, active agy CLI permissi
 
 # `/ag-status` — Antigravity Environment, Permissions & Bridge Diagnostics
 
-Check the current environment and bridge status by calling `check_ag_environment({})`.
+Check the current environment and bridge status by calling `check_ag_environment({})`. Optionally, you may also call `ag_cli_admin({ action: "plugin_status" })` to display whether a newer `claude-antigravity-plugin` release is available (if an update is available, suggest `/ag-update plugin`).
 
 ## Output Format
 

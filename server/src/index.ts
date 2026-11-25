@@ -1018,7 +1018,7 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
 
   server.tool(
     'ag_cli_admin',
-    'Manage Antigravity CLI platform integrations safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`).',
+    'Manage Antigravity CLI platform integrations and plugin self-updates safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`, `plugin_status`, `plugin_update`).',
     {
       action: z.enum([
         'mcp_list',
@@ -1032,6 +1032,8 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
         'remote_stop',
         'changelog',
         'update',
+        'plugin_status',
+        'plugin_update',
       ]),
       name: z.string().min(1).optional(),
       commandOrUrl: z.string().min(1).optional(),
@@ -1046,6 +1048,7 @@ export function createAntigravityMcpServer(deps: ServerDependencies = {}): McpSe
     async (args) => {
       try {
         const result = await handleAgCliAdmin(args, {
+          pluginRoot: deps.pluginRoot ?? getDefaultPluginRoot(),
           detectorDeps: deps.detectorDeps,
           ...deps.cliAdminDeps,
         });

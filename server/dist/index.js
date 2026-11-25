@@ -29676,7 +29676,7 @@ var require_websocket_server = __commonJS({
 // src/index.ts
 import fs15 from "node:fs";
 import path15 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -61065,6 +61065,80 @@ function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranc
     ...warnings.length > 0 ? { warning: warnings.join(" ") } : {}
   };
 }
+function pullFastForwardRepo(repoDir) {
+  const info = getGitInfo(repoDir);
+  if (!info.isGitRepo) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      output: "",
+      error: info.error ?? "Plugin directory is not a Git repository."
+    };
+  }
+  if (info.isDirty) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      output: "",
+      error: "Local plugin checkout has uncommitted changes. Commit, stash, or discard them before running `/ag-update plugin`."
+    };
+  }
+  const prevHeadRes = tryRunGit(repoDir, ["rev-parse", "--short", "HEAD"]);
+  const previousHead = prevHeadRes.ok ? prevHeadRes.stdout.trim() : void 0;
+  let gitBin;
+  try {
+    gitBin = requireExecutable("git");
+  } catch (err) {
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      previousHead,
+      output: "",
+      error: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const res = spawnSync(
+    gitBin,
+    [
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "submodule.recurse=false",
+      "pull",
+      "--ff-only"
+    ],
+    {
+      cwd: repoDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 6e4,
+      windowsHide: true
+    }
+  );
+  const combinedOutput = [(res.stdout ?? "").trim(), (res.stderr ?? "").trim()].filter(Boolean).join("\n");
+  if (res.error || res.status !== 0) {
+    const errMsg = res.error?.code === "ETIMEDOUT" ? "Timed out waiting for `git pull --ff-only` after 60s." : combinedOutput || res.error?.message || `git pull --ff-only exited with status ${res.status ?? "unknown"}.`;
+    return {
+      ok: false,
+      alreadyUpToDate: false,
+      previousHead,
+      output: combinedOutput,
+      error: errMsg
+    };
+  }
+  const nextHeadRes = tryRunGit(repoDir, ["rev-parse", "--short", "HEAD"]);
+  const currentHead = nextHeadRes.ok ? nextHeadRes.stdout.trim() : void 0;
+  const alreadyUpToDate = Boolean(previousHead && currentHead && previousHead === currentHead);
+  return {
+    ok: true,
+    alreadyUpToDate,
+    previousHead,
+    currentHead,
+    output: combinedOutput || (alreadyUpToDate ? "Already up to date." : "Updated via fast-forward pull.")
+  };
+}
 
 // src/config.ts
 var ExecutionModeSchema = external_exports.enum(["auto", "subscription", "api"]);
@@ -63750,6 +63824,73 @@ async function handleAgAuth(input2 = {}, deps = {}) {
 import { spawn as spawn3 } from "node:child_process";
 import fs10 from "node:fs";
 import path10 from "node:path";
+import { fileURLToPath } from "node:url";
+var PLUGIN_GITHUB_REPO = "xzawed/claude-antigravity-plugin";
+var PLUGIN_MARKETPLACE_NAME = "claude-antigravity-plugin";
+var PLUGIN_MARKETPLACE_ID = "antigravity-delegate@claude-antigravity-plugin";
+var PLUGIN_RELEASES_API_URL = `https://api.github.com/repos/${PLUGIN_GITHUB_REPO}/releases/latest`;
+var SEMVER_CORE_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/;
+function getDefaultPluginRoot() {
+  return path10.resolve(path10.dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
+function compareSemver(a, b) {
+  const ma = SEMVER_CORE_RE.exec(a.trim().replace(/^v/i, ""));
+  const mb = SEMVER_CORE_RE.exec(b.trim().replace(/^v/i, ""));
+  if (!ma || !mb) return 0;
+  for (let i2 = 1; i2 <= 3; i2++) {
+    const da = Number(ma[i2]);
+    const db = Number(mb[i2]);
+    if (da !== db) return da < db ? -1 : 1;
+  }
+  const preA = ma[4];
+  const preB = mb[4];
+  if (!preA && !preB) return 0;
+  if (!preA) return 1;
+  if (!preB) return -1;
+  return preA.localeCompare(preB);
+}
+function detectPluginInstallMethod(pluginRoot) {
+  const normalized = path10.resolve(pluginRoot).replace(/\\/g, "/").toLowerCase();
+  if (normalized.includes("/.claude/plugins/cache/")) {
+    return "marketplace";
+  }
+  if (fs10.existsSync(path10.join(pluginRoot, ".git"))) {
+    return "git_clone";
+  }
+  return "unknown";
+}
+function readInstalledPluginVersion(pluginRoot) {
+  try {
+    const raw = JSON.parse(
+      fs10.readFileSync(path10.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")
+    );
+    if (typeof raw.version === "string" && raw.version.trim().length > 0) {
+      return raw.version.trim();
+    }
+  } catch {
+  }
+  return "unknown";
+}
+async function fetchLatestPluginRelease(timeoutMs = 2500) {
+  try {
+    const res = await fetch(PLUGIN_RELEASES_API_URL, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "claude-antigravity-plugin"
+      },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (typeof data.tag_name !== "string") return null;
+    const version2 = data.tag_name.trim().replace(/^v/i, "");
+    if (!SEMVER_CORE_RE.test(version2)) return null;
+    const releaseUrl = typeof data.html_url === "string" ? data.html_url : void 0;
+    return { version: version2, releaseUrl };
+  } catch {
+    return null;
+  }
+}
 var VALID_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 var VALID_ENV_KV_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var VALID_HEADER_RE = /^[A-Za-z0-9-]+:/;
@@ -63884,9 +64025,280 @@ function buildMcpAddArgs(input2) {
 async function handleAgCliAdmin(input2, deps = {}) {
   const workspaceRoot = path10.resolve(input2.workspaceRoot ?? process.cwd());
   const detDeps = deps.detectorDeps ?? getDefaultDetectorDeps();
+  const warnings = [];
+  const runCli = deps.runCliFn ?? defaultRunAdminCli;
+  if (input2.action === "plugin_status" || input2.action === "plugin_update") {
+    const pluginRoot = path10.resolve(deps.pluginRoot ?? getDefaultPluginRoot());
+    const currentVersion = readInstalledPluginVersion(pluginRoot);
+    const installMethod = detectPluginInstallMethod(pluginRoot);
+    const fetchLatest = deps.fetchLatestReleaseFn ?? fetchLatestPluginRelease;
+    if (input2.action === "plugin_status") {
+      const latest = await fetchLatest();
+      const updateAvailable = latest && currentVersion !== "unknown" ? compareSemver(currentVersion, latest.version) < 0 : void 0;
+      const nextSteps = [];
+      if (updateAvailable) {
+        nextSteps.push("Run `/ag-update plugin` to update the plugin now, then `/reload-plugins`.");
+      } else if (latest) {
+        nextSteps.push("Plugin is already up to date.");
+      } else {
+        warnings.push("Could not reach GitHub Releases API to check the latest version (offline or rate-limited).");
+        nextSteps.push("Run `/ag-update plugin` when online to pull the latest release.");
+      }
+      if (installMethod === "marketplace") {
+        nextSteps.push(
+          "Tip (Zero-Touch Auto-Update): In Claude Code, run `/plugin` -> Marketplaces -> `claude-antigravity-plugin` -> Enable auto-update."
+        );
+      } else if (installMethod === "git_clone") {
+        nextSteps.push(
+          "Tip: Prebuilt server bundles are committed, so `/ag-update plugin` (or `git pull --ff-only` + `/reload-plugins`) updates without running `npm install` or `npm run build`."
+        );
+      } else {
+        nextSteps.push(
+          `Switch to GitHub Marketplace for 1-click & automatic updates: \`/plugin marketplace add ${PLUGIN_GITHUB_REPO}\` then \`/plugin install ${PLUGIN_MARKETPLACE_ID}\`.`
+        );
+      }
+      const pluginUpdate = {
+        currentVersion,
+        latestVersion: latest?.version,
+        updateAvailable,
+        installMethod,
+        pluginRoot,
+        releaseUrl: latest?.releaseUrl,
+        nextSteps
+      };
+      const statusLine = updateAvailable === true ? `Update available: v${currentVersion} -> v${latest?.version}` : updateAvailable === false ? `Up to date (v${currentVersion})` : `Installed: v${currentVersion} (latest release check unavailable)`;
+      const output3 = [
+        `claude-antigravity-plugin status: ${statusLine}`,
+        `- Install method: ${installMethod}`,
+        `- Plugin root: ${pluginRoot}`,
+        ...latest?.releaseUrl ? [`- Latest release: ${latest.releaseUrl}`] : [],
+        "",
+        ...nextSteps.map((s2) => `- ${s2}`)
+      ].join("\n");
+      return {
+        ok: true,
+        action: input2.action,
+        output: output3,
+        pluginUpdate,
+        warnings
+      };
+    }
+    const dryRun = input2.dryRun ?? false;
+    if (installMethod === "marketplace") {
+      const mktArgs = ["plugin", "marketplace", "update", PLUGIN_MARKETPLACE_NAME];
+      const updArgs = ["plugin", "update", PLUGIN_MARKETPLACE_ID];
+      if (dryRun) {
+        const nextSteps2 = [
+          "Re-run `/ag-update plugin` (without dry-run) to execute both commands.",
+          "Then run `/reload-plugins` in Claude Code."
+        ];
+        return {
+          ok: true,
+          action: input2.action,
+          output: `Dry-run plugin update plan (marketplace):
+- claude ${mktArgs.join(" ")}
+- claude ${updArgs.join(" ")}`,
+          pluginUpdate: {
+            currentVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: nextSteps2
+          },
+          warnings
+        };
+      }
+      const claudePath = detDeps.findBinary("claude");
+      if (!claudePath) {
+        const nextSteps2 = [
+          `Run inside Claude Code: \`/plugin marketplace update ${PLUGIN_MARKETPLACE_NAME}\``,
+          `Then run: \`/plugin update ${PLUGIN_MARKETPLACE_ID}\``,
+          "Finally run `/reload-plugins` (or restart Claude Code)."
+        ];
+        return {
+          ok: false,
+          action: input2.action,
+          output: nextSteps2.join("\n"),
+          pluginUpdate: {
+            currentVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: nextSteps2
+          },
+          warnings,
+          errorCode: "CLI_ADMIN_FAILED",
+          errorMessage: "`claude` CLI was not found on PATH to run automatic marketplace update."
+        };
+      }
+      const step1 = await runCli(claudePath, mktArgs, detDeps.platform, 45e3, workspaceRoot);
+      const step1Out = maskSecrets([step1.stdout.trim(), step1.stderr.trim()].filter(Boolean).join("\n"));
+      if (step1.exitCode !== 0) {
+        const nextSteps2 = [
+          `Try running directly: \`claude ${mktArgs.join(" ")}\``,
+          `Or inside Claude Code: \`/plugin marketplace update ${PLUGIN_MARKETPLACE_NAME}\``
+        ];
+        return {
+          ok: false,
+          action: input2.action,
+          cliPath: claudePath,
+          exitCode: step1.exitCode,
+          output: step1Out || `Failed to refresh marketplace (exit ${step1.exitCode}).`,
+          pluginUpdate: {
+            currentVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: nextSteps2
+          },
+          warnings,
+          errorCode: "CLI_ADMIN_FAILED",
+          errorMessage: `\`claude ${mktArgs.join(" ")}\` exited with code ${step1.exitCode}.`
+        };
+      }
+      const step2 = await runCli(claudePath, updArgs, detDeps.platform, 45e3, workspaceRoot);
+      const step2Out = maskSecrets([step2.stdout.trim(), step2.stderr.trim()].filter(Boolean).join("\n"));
+      const combinedOut = [step1Out, step2Out].filter(Boolean).join("\n");
+      if (step2.exitCode !== 0) {
+        const nextSteps2 = [
+          `Try running directly: \`claude ${updArgs.join(" ")}\``,
+          `Or inside Claude Code: \`/plugin update ${PLUGIN_MARKETPLACE_ID}\``
+        ];
+        return {
+          ok: false,
+          action: input2.action,
+          cliPath: claudePath,
+          exitCode: step2.exitCode,
+          output: combinedOut || `Plugin update failed (exit ${step2.exitCode}).`,
+          pluginUpdate: {
+            currentVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: nextSteps2
+          },
+          warnings,
+          errorCode: "CLI_ADMIN_FAILED",
+          errorMessage: `\`claude ${updArgs.join(" ")}\` exited with code ${step2.exitCode}.`
+        };
+      }
+      const alreadyLatest = /already\s+(?:at\s+the\s+)?latest|up\s+to\s+date/i.test(step2Out);
+      const nextSteps = alreadyLatest ? [
+        "Plugin is already on the latest marketplace release.",
+        "Tip: Enable automatic updates once via `/plugin` -> Marketplaces -> `claude-antigravity-plugin` -> Enable auto-update."
+      ] : [
+        "Run `/reload-plugins` in Claude Code (or restart Claude Code) to activate the new version.",
+        "Tip: Enable automatic updates once via `/plugin` -> Marketplaces -> `claude-antigravity-plugin` -> Enable auto-update."
+      ];
+      return {
+        ok: true,
+        action: input2.action,
+        cliPath: claudePath,
+        exitCode: 0,
+        output: combinedOut || "Marketplace refreshed and plugin updated successfully.",
+        pluginUpdate: {
+          currentVersion,
+          installMethod,
+          pluginRoot,
+          updated: !alreadyLatest,
+          reloadRequired: !alreadyLatest,
+          nextSteps
+        },
+        warnings
+      };
+    }
+    if (installMethod === "git_clone") {
+      if (dryRun) {
+        return {
+          ok: true,
+          action: input2.action,
+          output: `Dry-run plugin update plan (git_clone):
+- git -C "${pluginRoot}" pull --ff-only
+(Prebuilt bundles in server/dist/ are committed; no npm install or build required.)`,
+          pluginUpdate: {
+            currentVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: ["Re-run `/ag-update plugin` (without dry-run) to pull updates, then `/reload-plugins`."]
+          },
+          warnings
+        };
+      }
+      const pullFn = deps.pullRepoFn ?? pullFastForwardRepo;
+      const pullRes = pullFn(pluginRoot);
+      const updatedVersion = readInstalledPluginVersion(pluginRoot);
+      if (!pullRes.ok) {
+        return {
+          ok: false,
+          action: input2.action,
+          output: maskSecrets(pullRes.output || pullRes.error || "git pull --ff-only failed."),
+          pluginUpdate: {
+            currentVersion: updatedVersion,
+            installMethod,
+            pluginRoot,
+            updated: false,
+            reloadRequired: false,
+            nextSteps: [
+              `Inspect local git status in "${pluginRoot}" and run \`git -C "${pluginRoot}" pull --ff-only\`.`
+            ]
+          },
+          warnings,
+          errorCode: "CLI_ADMIN_FAILED",
+          errorMessage: maskSecrets(pullRes.error ?? "Failed to fast-forward local plugin repository.")
+        };
+      }
+      const updated = !pullRes.alreadyUpToDate;
+      const nextSteps = updated ? [
+        `Updated local checkout (${pullRes.previousHead ?? "?"} -> ${pullRes.currentHead ?? "?"}, v${currentVersion} -> v${updatedVersion}).`,
+        "Run `/reload-plugins` in Claude Code to activate the updated version immediately (no `npm install` or `build` needed)."
+      ] : ["Local plugin checkout is already up to date."];
+      return {
+        ok: true,
+        action: input2.action,
+        exitCode: 0,
+        output: maskSecrets(pullRes.output),
+        pluginUpdate: {
+          currentVersion: updatedVersion,
+          installMethod,
+          pluginRoot,
+          updated,
+          reloadRequired: updated,
+          nextSteps
+        },
+        warnings
+      };
+    }
+    const unknownNextSteps = [
+      `Install via GitHub Marketplace for 1-click & automatic updates:`,
+      `  1. /plugin marketplace add ${PLUGIN_GITHUB_REPO}`,
+      `  2. /plugin install ${PLUGIN_MARKETPLACE_ID}`,
+      "  3. Optional: /plugin -> Marketplaces -> claude-antigravity-plugin -> Enable auto-update"
+    ];
+    return {
+      ok: false,
+      action: input2.action,
+      output: unknownNextSteps.join("\n"),
+      pluginUpdate: {
+        currentVersion,
+        installMethod,
+        pluginRoot,
+        updated: false,
+        reloadRequired: false,
+        nextSteps: unknownNextSteps
+      },
+      warnings,
+      errorCode: "CLI_ADMIN_FAILED",
+      errorMessage: `Plugin directory "${pluginRoot}" is neither a Claude marketplace cache nor a git clone.`
+    };
+  }
   const config2 = loadConfig(workspaceRoot, detDeps.env);
   const detection = detectEnvironment(config2, void 0, detDeps);
-  const warnings = [];
   if (!detection.subscription.detected || detection.subscription.cliBinary !== "agy" || !detection.subscription.cliPath) {
     return {
       ok: false,
@@ -63898,7 +64310,6 @@ async function handleAgCliAdmin(input2, deps = {}) {
     };
   }
   const cliPath = detection.subscription.cliPath;
-  const runCli = deps.runCliFn ?? defaultRunAdminCli;
   if (input2.action === "mcp_sync_from_claude") {
     const mcpJsonPath = path10.join(workspaceRoot, ".mcp.json");
     if (!fs10.existsSync(mcpJsonPath)) {
@@ -64132,7 +64543,7 @@ ${summary || "(No eligible MCP servers found.)"}`,
 // src/jobs.ts
 import fs14 from "node:fs";
 import path13 from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // node_modules/@google/genai/dist/node/index.mjs
 var import_p_retry = __toESM(require_p_retry(), 1);
@@ -83248,7 +83659,7 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
 }
 async function handleStartAgTask(input2, deps = {}) {
   const workspaceRoot = path13.resolve(input2.workspaceRoot ?? process.cwd());
-  const pluginRoot = deps.pluginRoot ?? path13.resolve(path13.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const pluginRoot = deps.pluginRoot ?? path13.resolve(path13.dirname(fileURLToPath2(import.meta.url)), "..", "..");
   const manager = deps.jobManager ?? defaultJobManager;
   const warnings = [];
   let normalizedLockedPaths = [];
@@ -84268,8 +84679,8 @@ async function handleAgSession(input2, deps = {}) {
 }
 
 // src/index.ts
-function getDefaultPluginRoot() {
-  const currentFile = fileURLToPath2(import.meta.url);
+function getDefaultPluginRoot2() {
+  const currentFile = fileURLToPath3(import.meta.url);
   return path15.resolve(path15.dirname(currentFile), "..", "..");
 }
 function toJsonToolResponse(payload, isError = false) {
@@ -84468,7 +84879,7 @@ function extractAgyOptions2(input2) {
 }
 async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
   const workspaceRoot = path15.resolve(input2.workspaceRoot ?? process.cwd());
-  const pluginRoot = deps.pluginRoot ?? getDefaultPluginRoot();
+  const pluginRoot = deps.pluginRoot ?? getDefaultPluginRoot2();
   const warnings = [];
   let normalizedLockedPaths = [];
   if (input2.lockedPaths && input2.lockedPaths.length > 0) {
@@ -85084,7 +85495,7 @@ function createAntigravityMcpServer(deps = {}) {
   );
   server.tool(
     "ag_cli_admin",
-    "Manage Antigravity CLI platform integrations safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`).",
+    "Manage Antigravity CLI platform integrations and plugin self-updates safely (`mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`, `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`, `plugin_status`, `plugin_update`).",
     {
       action: external_exports.enum([
         "mcp_list",
@@ -85097,7 +85508,9 @@ function createAntigravityMcpServer(deps = {}) {
         "remote_start",
         "remote_stop",
         "changelog",
-        "update"
+        "update",
+        "plugin_status",
+        "plugin_update"
       ]),
       name: external_exports.string().min(1).optional(),
       commandOrUrl: external_exports.string().min(1).optional(),
@@ -85112,6 +85525,7 @@ function createAntigravityMcpServer(deps = {}) {
     async (args) => {
       try {
         const result = await handleAgCliAdmin(args, {
+          pluginRoot: deps.pluginRoot ?? getDefaultPluginRoot2(),
           detectorDeps: deps.detectorDeps,
           ...deps.cliAdminDeps
         });
@@ -85129,7 +85543,7 @@ function createAntigravityMcpServer(deps = {}) {
   );
   return server;
 }
-var isDirectExecution = process.argv[1] !== void 0 && path15.resolve(process.argv[1]) === path15.resolve(fileURLToPath2(import.meta.url));
+var isDirectExecution = process.argv[1] !== void 0 && path15.resolve(process.argv[1]) === path15.resolve(fileURLToPath3(import.meta.url));
 if (isDirectExecution) {
   process.once("exit", () => {
     disposePendingAuthSessions();

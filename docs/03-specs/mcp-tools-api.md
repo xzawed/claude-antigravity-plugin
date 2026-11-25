@@ -337,8 +337,8 @@ export interface AgAuthToolOutput {
 ### 2.11 Tool 11: `list_ag_artifacts` (아티팩트·스크린샷·로그 뷰어)
 `.ag-bridge/artifacts/<taskId>/` 내 파일 목록을 `screenshot | log | report | json | other`로 분류하고, 마스킹된 `report.md` 및 `agy-cli.log` tail과 최근 작업 목록을 반환한다.
 
-### 2.12 Tool 12: `ag_cli_admin` (Antigravity CLI 플랫폼 통합 관리)
-`agy` 하위 관리 명령을 안전하게(`shell: false`, 비밀 마스킹) 래핑한다: `mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`(기본 `dryRun: true`, 자기 자신 `antigravity-delegate` 재귀 방지 자동 제외), `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`.
+### 2.12 Tool 12: `ag_cli_admin` (Antigravity CLI 통합 관리 & 플러그인 셀프 업데이트)
+`agy` 하위 관리 명령 및 플러그인 자체 업데이트를 안전하게(`shell: false`, 비밀 마스킹) 래핑한다: `mcp_list`, `mcp_add`, `mcp_remove`, `mcp_enable`, `mcp_disable`, `mcp_sync_from_claude`(기본 `dryRun: true`, 자기 자신 `antigravity-delegate` 재귀 방지 자동 제외), `remote_status`, `remote_start`, `remote_stop`, `changelog`, `update`, `plugin_status`(현재 버전·설치 방식·GitHub 최신 릴리스 비교 — `agy` 미설치 환경에서도 동작), `plugin_update`(마켓플레이스 캐시는 `claude plugin marketplace update` + `claude plugin update`, 로컬 클론은 `git pull --ff-only` 자동 실행 — `dryRun` 지원).
 
 ---
 
