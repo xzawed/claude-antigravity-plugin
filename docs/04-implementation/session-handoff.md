@@ -3,15 +3,15 @@
 | 항목 | 내용 |
 | :--- | :--- |
 | **문서 ID** | `IMP-003` |
-| **버전** | `3.2.0` |
+| **버전** | `3.3.0` |
 | **상태** | `Active` |
 | **최종 수정일** | `2026-11-25` |
-| **현재 진행 단계** | **`v1.6.1` 릴리스 준비 및 전수 감사 하드닝 완료 (`PR #1` ~ `#52`, 보안·Git Guard·Worktree·런타임 안정성 결함 전량 해소)** |
+| **현재 진행 단계** | **`v1.7.0` 릴리스 완료 (`PR #1` ~ `#54`, 채팅창 1단어 플러그인 셀프 업데이트 `/ag-update plugin`·`all` 및 자동 업데이트 가이드 개편)** |
 | **관련 문서** | [구현 마스터 플랜](./implementation-plan.md), [작업 체크리스트](./task-checklist.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [AGENTS.md](../../AGENTS.md) |
 
 ---
 
-## 1. 누적 릴리스 및 PR 이력 요약 (`#1` ~ `#52`)
+## 1. 누적 릴리스 및 PR 이력 요약 (`#1` ~ `#54`)
 
 - **GitHub 저장소:** `xzawed/claude-antigravity-plugin` (`Apache License 2.0`)
 - **`v1.0.0` (`#1` ~ `#16`):** 듀얼 실행 엔진(`subscription` / `api`), Git Guard 체크포인트/롤백, Path Guard, MCP Stdio 서버, 3-OS × Node 20/22 CI, 영문/한글 README, `claude plugin validate` 통과
@@ -33,15 +33,18 @@
   - **Git Guard·Worktree·Bridge Lock 하드닝 (`#50`):** `resolveSafeWorktreeRoot` 및 `.ag-bridge/worktrees` 심볼릭 링크·중첩 경로 차단, 모호한 `taskId` 생략 롤백·실행 중 worktree 삭제·변조 `worktreePath` 차단, 절대 `lockedPaths` macOS/Windows 8.3 리베이스·worktree 초기 실패 자동 회수·디스크 폴백/`list_ag_artifacts` 조회, macOS BSD `ps` 호환 및 `endPosixLeftovers` fail-closed/`EPERM` 가드, 스냅샷 복원 `.git/`·비기준선 차단, 머지 충돌 인덱스·대소문자 변경 롤백, 원자적 `dispatch.lock`·기록 `timeoutSec` 준수·손상 `manifest.json` 격리 (`TC-U46`~`TC-U48`, `TC-S35`~`TC-S37`)
   - **런타임 안정성·엔진·감지기 일괄 수정 (`#51`):** `sessions`/`auth` `stdin` `EPIPE` 크래시 차단 및 공용 `killChildProcessTree` 트리 종료, 세션 체크포인트 아카이브 완료/실패 갱신, `SubscriptionEngine` 조기 종료 즉시 실패·손상 매니페스트 중단 내성·에러 비밀 마스킹, `ApiWorkerEngine` `abortSignal` 전달·실경로 정규화·단조 진행률·2MB 읽기 상한, `detector` 표준 `agy` 우선·`.app`/디렉터리 분리, `cli-admin` `null` 항목·커스텀 비밀 마스킹·`cwd`, `jobs` `IDLE` 비활성·완료 상한, `assertSafeTaskId` 예약어 차단, 스크립트 Node 20 호환 (`TC-U49`~`TC-U53`)
   - **커맨드/스킬 문서 동기화 & `v1.6.1` 자동 릴리스 (`#52`):** `--worktree`/롤백 동작/신뢰 민감 키/`checkpointTaskId`/아티팩트 경로 문서 동기화, 버전 `1.6.1` 범프, `verify`·`claude plugin validate` 통과 및 `v1.6.1` 태그 릴리스
+- **`v1.7.0` (`#53` ~ `#54` — 플러그인 셀프 업데이트 & 간편 설치/자동 업데이트 개편):**
+  - **채팅창 1단어 플러그인 셀프 업데이트 (`#53`):** `ag_cli_admin`에 `plugin_status`(버전 비교·설치 방식 판별·오프라인 폴백, `agy` 미설치 환경 지원) 및 `plugin_update`(마켓플레이스 캐시는 `claude plugin marketplace update` + `claude plugin update`, 로컬 클론은 `git-guard.ts` `pullFastForwardRepo`) 추가, `/ag-update plugin`·`all`·`check` 확장, `README.md`/`README.ko.md` 마켓플레이스 2줄 직설치·`Enable auto-update`·로컬 1줄 갱신 개편 (`TC-U54`~`TC-U55`)
+  - **`v1.7.0` 자동 릴리스 (`#54`):** 6곳 버전 `1.7.0` 동기화, 번들 재빌드, 라이브 `verify`·`claude plugin validate` 통과 및 `v1.7.0` 태그 릴리스
 
 ---
 
-## 2. 현재 검증 지표 (`v1.6.1`)
+## 2. 현재 검증 지표 (`v1.7.0`)
 
 | 지표 | 현황 |
 | :--- | :--- |
 | **MCP Tool / 슬래시 커맨드** | **12종** MCP Tools · **21종** Slash Commands (CI G7 자동 검증) |
-| **자동화 TDD 스위트 (`npm --prefix server test`)** | **16 suites / 175 tests** (Windows 174 pass + 1 POSIX-only skip; Ubuntu/macOS 168+ pass + Windows-only skip) |
+| **자동화 TDD 스위트 (`npm --prefix server test`)** | **16 suites / 177 tests** (Windows 176 pass + 1 POSIX-only skip; Ubuntu/macOS 전량 통과) |
 | **GitHub Actions CI 게이트** | **G1~G7 + 버전 동기화 게이트 + 릴리스 자동화 워크플로우 전원 통과** |
 | **라이브 E2E (`npm --prefix server run verify`)** | 매니페스트 6종 · 공백 경로 `cli-init` · 라이브 MCP Stdio 12종 Tool · 로컬 `agy.exe` 감지 모두 **PASS** |
 
@@ -57,7 +60,7 @@
 ## 4. 세션 시작용 프롬프트
 
 ```text
-docs/04-implementation/session-handoff.md와 AGENTS.md를 읽고 현재 v1.6.1 상태를 확인해 줘.
+docs/04-implementation/session-handoff.md와 AGENTS.md를 읽고 현재 v1.7.0 상태를 확인해 줘.
 이후 모든 작업은 main 직접 푸시 없이 전용 브랜치 + PR 단위로 진행하고,
 server/src 변경 시 재빌드한 server/dist 번들을 같은 커밋에 포함하자.
 ```
