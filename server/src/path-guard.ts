@@ -24,13 +24,22 @@ function isInsideRoot(rootPath: string, candidatePath: string): boolean {
   return candCmp.startsWith(prefix);
 }
 
+const MAX_SYMLINK_HOPS = 40;
+
 /**
  * The OS's real path (`fs.realpathSync.native`) of `targetPath`, or of its nearest existing parent
- * with the rest appended. Unlike the JS implementation it normalizes Windows `\\?\` prefixes and 8.3
- * short names (measured), so two spellings of one file compare equal. Every check below compares
- * these paths: with the JS realpath, ENV~1 read .env and GIT~1 passed as a lockedPath (TC-S21).
+ * with the rest appended — ALSO following dangling symbolic links (so a repo-committed dangling
+ * symlink like `src/hook -> ../.git/hooks/post-checkout` or `src/out -> /etc/pwned` resolves to
+ * its actual target and is caught by containment / denylist checks instead of bypassing them).
+ * Non-ENOENT/ENOTDIR stat errors fail closed.
  */
-function nativeRealPathOrNearestParent(targetPath: string): string {
+export function nativeRealPathOrNearestParent(targetPath: string, depth = 0): string {
+  if (depth > MAX_SYMLINK_HOPS) {
+    throw new AgPluginError(
+      'PATH_TRAVERSAL_BLOCKED',
+      `Path "${targetPath}" exceeded maximum symbolic link depth (${MAX_SYMLINK_HOPS}).`,
+    );
+  }
   let current = path.resolve(targetPath);
   const trailingSegments: string[] = [];
   for (;;) {
@@ -38,6 +47,27 @@ function nativeRealPathOrNearestParent(targetPath: string): string {
       const real = fs.realpathSync.native(current);
       return trailingSegments.length > 0 ? path.join(real, ...trailingSegments) : real;
     } catch {
+      let lstat: fs.Stats | null = null;
+      try {
+        lstat = fs.lstatSync(current);
+      } catch (lstatErr) {
+        const code = (lstatErr as NodeJS.ErrnoException)?.code;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+          throw new AgPluginError(
+            'PATH_TRAVERSAL_BLOCKED',
+            `Cannot safely inspect path "${current}" (${code ?? 'unknown error'}).`,
+          );
+        }
+      }
+
+      if (lstat?.isSymbolicLink()) {
+        const linkTarget = fs.readlinkSync(current);
+        const resolvedLink = path.resolve(path.dirname(current), linkTarget);
+        const nextPath =
+          trailingSegments.length > 0 ? path.join(resolvedLink, ...trailingSegments) : resolvedLink;
+        return nativeRealPathOrNearestParent(nextPath, depth + 1);
+      }
+
       const parent = path.dirname(current);
       if (parent === current) {
         return path.resolve(targetPath);
@@ -80,6 +110,16 @@ function realWorkspaceRoot(workspaceRoot: string): string {
   return fs.realpathSync.native(path.resolve(workspaceRoot));
 }
 
+function isEnvFileName(base: string): boolean {
+  return (
+    base === '.env' ||
+    base.startsWith('.env.') ||
+    base === '.envrc' ||
+    base.startsWith('.env_') ||
+    base.startsWith('.env-')
+  );
+}
+
 function isProtectedWritePath(posixRel: string): boolean {
   const lower = posixRel.toLowerCase();
   const segments = lower.split('/').filter(Boolean);
@@ -96,7 +136,7 @@ function isProtectedWritePath(posixRel: string): boolean {
     return true;
   }
   const base = segments[segments.length - 1];
-  if (base === '.env' || base.startsWith('.env.')) {
+  if (isEnvFileName(base)) {
     return true;
   }
   return false;
@@ -111,8 +151,11 @@ function isProtectedReadPath(posixRel: string): boolean {
   if (segments.includes('.ssh')) {
     return true;
   }
+  if (lower === '.ag-bridge/config.json') {
+    return true;
+  }
   const base = segments[segments.length - 1];
-  if ((base === '.env' || base.startsWith('.env.')) && base !== '.env.example' && base !== '.env.sample') {
+  if (isEnvFileName(base) && base !== '.env.example' && base !== '.env.sample') {
     return true;
   }
   if (base.endsWith('.pem') || base.endsWith('.key') || base === 'id_rsa' || base === 'id_ed25519') {

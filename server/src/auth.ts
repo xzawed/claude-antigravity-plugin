@@ -882,9 +882,18 @@ async function completeManualLoginFlow(
         return;
       }
 
-      // Never echo the raw authorization code back in logs or error messages
+      // Never echo the raw authorization code (or URL-encoded code param) back in logs or error messages
+      const codeSecrets = [trimmedCode];
+      try {
+        const parsedUrl = new URL(trimmedCode);
+        const qp = parsedUrl.searchParams.get('code');
+        if (qp) codeSecrets.push(qp);
+      } catch {
+        // not a URL; raw trimmedCode is already in codeSecrets
+      }
       const detail = maskSecrets(
         (session.stderr || session.stdout).trim().split(/\r?\n/).slice(-3).join(' '),
+        codeSecrets,
       );
       finish({
         ok: false,
@@ -905,11 +914,30 @@ async function completeManualLoginFlow(
       });
     });
 
+    if (/[\r\n\0]/.test(trimmedCode)) {
+      finish({
+        ok: false,
+        action: 'complete',
+        status: 'FAILED',
+        authenticated: false,
+        authMethod: 'none',
+        cliDetected: true,
+        cliBinary: 'agy',
+        cliPath: session.cliPath,
+        message: 'Authorization code must not contain newline or NUL control characters.',
+        nextSteps: ['Copy the single-line authorization code or callback URL and retry `/ag-login complete <code>`.'],
+        warnings: [],
+        errorCode: 'AUTH_LOGIN_FAILED',
+        errorMessage: 'Control characters (CR/LF/NUL) are not allowed in OAuth authorization code.',
+      });
+      return;
+    }
+
     try {
       session.child.stdin?.write(`${trimmedCode}\n`);
       session.child.stdin?.end();
     } catch (err) {
-      const msg = maskSecrets(err instanceof Error ? err.message : String(err));
+      const msg = maskSecrets(err instanceof Error ? err.message : String(err), [trimmedCode]);
       finish({
         ok: false,
         action: 'complete',

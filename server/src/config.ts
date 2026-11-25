@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { resolveGitExcludePath } from './bridge-fs.js';
-import { isFullyQualifiedPath } from './exec-path.js';
+import { hasAnyDotGitEntry } from './bridge-fs.js';
+import { isLocalAbsolutePath } from './exec-path.js';
 import { checkTrackedFile } from './git-guard.js';
-import { isInsideWorkspace } from './path-guard.js';
+import { isInsideWorkspace, nativeRealPathOrNearestParent } from './path-guard.js';
 import {
   AgPluginError,
   BridgeConfig,
@@ -174,12 +174,29 @@ function whyConfigIsNotUsers(workspaceRoot: string): string | undefined {
   if (trackedState === 'tracked') {
     return 'the file is tracked by git, so the repository may have supplied it';
   }
-  if (trackedState === 'unknown' && resolveGitExcludePath(workspaceRoot) !== null) {
-    // Fail-closed: a git work tree is present, but git could not confirm the config is untracked
-    // (e.g. dubious ownership, timeout, or git unavailable on PATH).
+  if (trackedState === 'unknown' && hasAnyDotGitEntry(workspaceRoot)) {
+    // Fail-closed: a git work tree (or .git entry / GIT_DIR) is present, but git could not confirm
+    // the config is untracked (e.g. dubious ownership, timeout, symlinked .git/info/exclude, or git unavailable).
     return 'git could not verify whether the file is tracked in this repository';
   }
   return undefined;
+}
+
+function isSafeExternalAppPath(workspaceRoot: string, appPath: string): boolean {
+  // On Windows reject UNC/device paths (`\\server\share`, `\\127.0.0.1\c$`, `\\?\...`) to prevent
+  // outbound SMB/NTLM leakage and admin-share workspace-boundary bypasses.
+  if (!isLocalAbsolutePath(appPath)) {
+    return false;
+  }
+  try {
+    const resolved = nativeRealPathOrNearestParent(appPath);
+    if (process.platform === 'win32' && /^[\\/]{2}/.test(resolved)) {
+      return false;
+    }
+    return !isInsideWorkspace(workspaceRoot, appPath);
+  } catch {
+    return false;
+  }
 }
 
 function applyConfigTrust(
@@ -192,10 +209,16 @@ function applyConfigTrust(
   const fromFile = (section: TrustSection, key: string): unknown =>
     (data[section] as Record<string, unknown> | undefined)?.[key];
   const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile(section, key)));
+  const unsafeExecMode =
+    data.execution_mode !== undefined && data.execution_mode !== base.execution_mode;
 
   // git runs only when the file sets one of these, so an ordinary config costs no process.
-  const notOwn = unsafe.length > 0 ? whyConfigIsNotUsers(workspaceRoot) : undefined;
+  const notOwn = unsafe.length > 0 || unsafeExecMode ? whyConfigIsNotUsers(workspaceRoot) : undefined;
   if (notOwn) {
+    if (unsafeExecMode) {
+      merged.execution_mode = base.execution_mode;
+      ignored.push(`execution_mode (${notOwn})`);
+    }
     for (const [section, key] of unsafe) {
       const target = merged[section] as unknown as Record<string, unknown>;
       const fallback = (base[section] as unknown as Record<string, unknown>)[key];
@@ -205,11 +228,11 @@ function applyConfigTrust(
     }
   }
 
-  // From any config: the program to launch must be absolute and outside the workspace.
+  // From any config: the program to launch must be a local absolute path outside the workspace.
   const appPath = merged.subscription.app_path;
-  if (appPath !== 'auto' && (!isFullyQualifiedPath(appPath) || isInsideWorkspace(workspaceRoot, appPath))) {
+  if (appPath !== 'auto' && !isSafeExternalAppPath(workspaceRoot, appPath)) {
     merged.subscription.app_path = 'auto';
-    ignored.push('subscription.app_path (not an absolute path outside the workspace)');
+    ignored.push('subscription.app_path (not a local absolute path outside the workspace)');
   }
   return ignored;
 }
@@ -249,9 +272,11 @@ export function maskSecrets(
   let result = input;
 
   const candidates = new Set<string>();
-  const envKeys = ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
-  for (const k of envKeys) {
-    const val = env[k]?.trim();
+  const envKeys = new Set(['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
+  for (const [k, rawVal] of Object.entries(env)) {
+    const matches = process.platform === 'win32' ? envKeys.has(k.toUpperCase()) : envKeys.has(k);
+    if (!matches) continue;
+    const val = rawVal?.trim();
     if (val && val.length >= 8) {
       candidates.add(val);
     }
@@ -263,16 +288,18 @@ export function maskSecrets(
     }
   }
 
-  for (const secret of candidates) {
+  // Replace longest secrets first so a shorter substring never corrupts redaction of a longer secret.
+  const ordered = Array.from(candidates).sort((a, b) => b.length - a.length);
+  for (const secret of ordered) {
     result = result.split(secret).join('[REDACTED]');
   }
 
-  // Mask common provider API key & OAuth token patterns
+  // Mask common provider API key & OAuth token patterns (avoid trailing \b which fails after `-`).
   result = result.replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED]');
   result = result.replace(/ya29\.[0-9A-Za-z._-]{20,}/g, '[REDACTED]');
-  result = result.replace(/\b4\/0[A-Za-z0-9_-]{20,}\b/g, '[REDACTED]');
-  result = result.replace(/\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}\b/g, '[REDACTED]');
-  result = result.replace(/\bgh[pousr]_[0-9A-Za-z]{20,}\b/g, '[REDACTED]');
+  result = result.replace(/(?<![A-Za-z0-9])4\/0[A-Za-z0-9_-]{20,}/g, '[REDACTED]');
+  result = result.replace(/(?<![A-Za-z0-9])sk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}/g, '[REDACTED]');
+  result = result.replace(/(?<![A-Za-z0-9])gh[pousr]_[0-9A-Za-z]{20,}/g, '[REDACTED]');
   result = result.replace(/\b(Bearer\s+)[A-Za-z0-9\-._~+/=]{16,}/gi, '$1[REDACTED]');
 
   return result;

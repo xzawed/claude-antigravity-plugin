@@ -50,6 +50,7 @@ export type CommandRunner = (
   command: string,
   cwd: string,
   timeoutSec: number,
+  options?: { extraSensitiveEnvVars?: string[]; abortSignal?: AbortSignal },
 ) => Promise<CommandExecResult>;
 
 export interface ApiWorkerOptions {
@@ -102,7 +103,23 @@ const ALLOWED_BINARIES = new Set([
 ]);
 
 const ALLOWED_NPX_TOOLS = new Set(['tsc', 'eslint', 'prettier', 'vitest', 'jest', 'next', 'vite']);
-const ALLOWED_NPM_SUBCOMMANDS = new Set(['run', 'test']);
+const ALLOWED_PKG_MANAGER_SUBCOMMANDS = new Set(['run', 'test']);
+const PKG_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const DANGEROUS_CLI_FLAGS = new Set([
+  '-e',
+  '--eval',
+  '-p',
+  '--print',
+  '-r',
+  '--require',
+  '--import',
+  '--loader',
+  '--preload',
+  '--script-shell',
+  '--node-options',
+  '--userconfig',
+  '--globalconfig',
+]);
 
 export function tokenizeSimpleCommand(command: string): string[] {
   const tokens: string[] = [];
@@ -177,12 +194,23 @@ export function validateCommandPolicy(command: string): { bin: string; args: str
   }
 
   const args = tokens.slice(1);
-  if (binLower === 'npm') {
-    const sub = args[0]?.toLowerCase();
-    if (!sub || !ALLOWED_NPM_SUBCOMMANDS.has(sub)) {
+  // Reject code-execution / shell-override flags on any allowed binary (`bun -e`, `npm --script-shell=...`, etc.)
+  for (const arg of args) {
+    const flagName = arg.split('=')[0].toLowerCase();
+    if (DANGEROUS_CLI_FLAGS.has(flagName)) {
       throw new AgPluginError(
         'COMMAND_NOT_ALLOWED',
-        'Only "npm run <script>" and "npm test" are allowed.',
+        `Flag "${arg}" is denied by command security policy.`,
+      );
+    }
+  }
+
+  if (PKG_MANAGERS.has(binLower)) {
+    const sub = args[0]?.toLowerCase();
+    if (!sub || !ALLOWED_PKG_MANAGER_SUBCOMMANDS.has(sub)) {
+      throw new AgPluginError(
+        'COMMAND_NOT_ALLOWED',
+        `Only "${binLower} run <script>" and "${binLower} test" are allowed (subcommand "${args[0] ?? ''}" is denied).`,
       );
     }
   } else if (binLower === 'npx') {
@@ -208,12 +236,22 @@ function truncateTail(text: string, maxBytes: number): string {
   return `[... truncated ${omitted} leading bytes ...]\n${tail}`;
 }
 
-function createSanitizedEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.GEMINI_API_KEY;
-  delete env.GOOGLE_API_KEY;
-  delete env.ANTHROPIC_API_KEY;
-  delete env.OPENAI_API_KEY;
+export function createSanitizedEnv(
+  extraVarNames: string[] = [],
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const denyUpper = new Set<string>([
+    'GEMINI_API_KEY',
+    'GOOGLE_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    ...extraVarNames.filter(Boolean).map((k) => k.toUpperCase()),
+  ]);
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(sourceEnv)) {
+    if (denyUpper.has(k.toUpperCase())) continue;
+    env[k] = v;
+  }
   return env;
 }
 
@@ -241,9 +279,10 @@ export async function defaultCommandRunner(
   command: string,
   cwd: string,
   timeoutSec: number,
+  options?: { extraSensitiveEnvVars?: string[]; abortSignal?: AbortSignal },
 ): Promise<CommandExecResult> {
   const { bin, args } = validateCommandPolicy(command);
-  const env = createSanitizedEnv();
+  const env = createSanitizedEnv(options?.extraSensitiveEnvVars);
   const isWin = process.platform === 'win32';
   // The interpreter is an absolute path (TC-S15). `bin` itself stays a name: the allowlisted
   // build/test tools run the workspace's own scripts and configs by design.
@@ -835,6 +874,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
                 cmd,
                 ctx.workspaceRoot,
                 ctx.config.api.command_timeout_sec,
+                { extraSensitiveEnvVars: [ctx.config.api.api_key_env], abortSignal: ctx.abortSignal },
               );
               commandsRun.push({ command: cmd, exitCode: execRes.exitCode });
               toolResult = {

@@ -1,9 +1,11 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ensureBridgeDirs,
   ensureDefaultConfig,
   ensureGitignoreEntry,
+  hasSymlinkInChain,
   IgnoreFile,
   syncHandoffTemplate,
 } from './bridge-fs.js';
@@ -30,9 +32,25 @@ export function runCliInit(options: CliInitOptions): {
   skippedCustomTemplates: string[];
 } {
   const pluginRoot = options.pluginRoot ?? getDefaultPluginRoot();
+  const ignoreRes = ensureGitignoreEntry(options.workspaceRoot);
+
+  // Inside a git repo whose `.git/info/exclude` is unsafe/unwritable, avoid creating untracked files
+  // that would dirty `git status`, and never write through a symlinked `.ag-bridge/`.
+  if (
+    (ignoreRes.file === 'git-info-exclude' && !ignoreRes.protected) ||
+    hasSymlinkInChain(options.workspaceRoot, ['.ag-bridge'])
+  ) {
+    return {
+      configCreated: false,
+      ignoreUpdated: ignoreRes.updated,
+      ignoreFile: ignoreRes.file,
+      syncedTemplates: [],
+      skippedCustomTemplates: [],
+    };
+  }
+
   ensureBridgeDirs(options.workspaceRoot);
   const configRes = ensureDefaultConfig(options.workspaceRoot);
-  const ignoreRes = ensureGitignoreEntry(options.workspaceRoot);
   const templateRes = syncHandoffTemplate(options.workspaceRoot, pluginRoot, {
     force: options.forceTemplate,
   });
@@ -57,7 +75,7 @@ function parseArgs(argv: string[]): CliInitOptions {
       silent = true;
     } else if (arg === '--force-template') {
       forceTemplate = true;
-    } else if (arg === '--workspace' && argv[i + 1]) {
+    } else if (arg === '--workspace' && argv[i + 1] && !argv[i + 1].startsWith('-')) {
       workspaceRoot = path.resolve(argv[i + 1]);
       i += 1;
     }
@@ -66,9 +84,20 @@ function parseArgs(argv: string[]): CliInitOptions {
   return { workspaceRoot, silent, forceTemplate };
 }
 
+function canonicalScriptPath(p: string): string {
+  const resolved = path.resolve(p);
+  let canonical = resolved;
+  try {
+    canonical = fs.realpathSync.native(resolved);
+  } catch {
+    // keep resolved form
+  }
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+}
+
 const isDirectExecution =
   process.argv[1] !== undefined &&
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+  canonicalScriptPath(process.argv[1]) === canonicalScriptPath(fileURLToPath(import.meta.url));
 
 if (isDirectExecution) {
   const opts = parseArgs(process.argv.slice(2));

@@ -1,19 +1,19 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   acquireBridgeLock,
   archiveManifest,
+  BRIDGE_DIR_NAME,
   clearReportMarkdown,
   ensureBridgeDirs,
   ensureGitignoreEntry,
   generateTaskId,
-  getArtifactsDir,
   listTaskArtifacts,
   readAllTaskManifests,
   readArchivedManifest,
   readManifest,
   readReportMarkdown,
+  readSafeFileTail,
   writeDispatchMarkdown,
   writeManifest,
 } from './bridge-fs.js';
@@ -76,16 +76,11 @@ interface LiveJobRecord {
 }
 
 function readLogTail(workspaceRoot: string, taskId: string, maxLines = 30): string | undefined {
-  const logPath = path.join(getArtifactsDir(workspaceRoot, taskId), 'agy-cli.log');
-  try {
-    if (!fs.existsSync(logPath)) return undefined;
-    const raw = fs.readFileSync(logPath, 'utf8');
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return undefined;
-    return maskSecrets(lines.slice(-maxLines).join('\n'));
-  } catch {
-    return undefined;
-  }
+  const raw = readSafeFileTail(workspaceRoot, [BRIDGE_DIR_NAME, 'artifacts', taskId, 'agy-cli.log']);
+  if (!raw) return undefined;
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return undefined;
+  return maskSecrets(lines.slice(-maxLines).join('\n'));
 }
 
 function extractAgyOptions(input: DelegateToolInput): AgyCliOptions {

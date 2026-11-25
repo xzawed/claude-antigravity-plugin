@@ -1,12 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  BRIDGE_DIR_NAME,
   getArtifactsDir,
   getBridgeDir,
+  hasSymlinkInChain,
   readAllTaskManifests,
   readArchivedManifest,
   readManifest,
   readReportMarkdown,
+  readSafeFileTail,
 } from './bridge-fs.js';
 import { maskSecrets } from './config.js';
 import {
@@ -26,18 +29,23 @@ function classifyArtifactKind(filePath: string): AgArtifactKind {
 }
 
 function collectArtifactFiles(workspaceRoot: string, taskId: string): AgArtifactEntry[] {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, 'artifacts', taskId])) {
+    return [];
+  }
   const artDir = getArtifactsDir(workspaceRoot, taskId);
   if (!fs.existsSync(artDir)) return [];
 
   const entries: AgArtifactEntry[] = [];
   const walk = (dir: string): void => {
     for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (dirent.isSymbolicLink()) continue;
       const full = path.join(dir, dirent.name);
       if (dirent.isDirectory()) {
         walk(full);
       } else if (dirent.isFile()) {
         try {
-          const stat = fs.statSync(full);
+          const stat = fs.lstatSync(full);
+          if (!stat.isFile()) continue;
           entries.push({
             name: dirent.name,
             relativePath: path.relative(workspaceRoot, full).replace(/\\/g, '/'),
@@ -58,16 +66,11 @@ function collectArtifactFiles(workspaceRoot: string, taskId: string): AgArtifact
 }
 
 function readMaskedLogTail(workspaceRoot: string, taskId: string, maxLines: number): string | undefined {
-  const logPath = path.join(getArtifactsDir(workspaceRoot, taskId), 'agy-cli.log');
-  if (!fs.existsSync(logPath)) return undefined;
-  try {
-    const raw = fs.readFileSync(logPath, 'utf8');
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return undefined;
-    return maskSecrets(lines.slice(-Math.max(1, maxLines)).join('\n'));
-  } catch {
-    return undefined;
-  }
+  const raw = readSafeFileTail(workspaceRoot, [BRIDGE_DIR_NAME, 'artifacts', taskId, 'agy-cli.log']);
+  if (!raw) return undefined;
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return undefined;
+  return maskSecrets(lines.slice(-Math.max(1, maxLines)).join('\n'));
 }
 
 export function handleListArtifacts(

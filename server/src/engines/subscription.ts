@@ -566,14 +566,22 @@ export function buildCliInvocationArgs(ctx: ExecutionContext): string[] {
 }
 
 function quoteForWindowsCmd(arg: string): string {
-  // Neutralize cmd.exe metacharacters (including newlines that split commands even inside quotes)
-  // and preserve trailing backslashes before the closing double quote.
+  // Neutralize both cmd.exe /c pass-1 AND batch `%*` pass-2 metacharacters + `%VAR%` expansion:
+  // - Inside "...", doubling `"` -> `""` keeps quote state balanced across both cmd.exe passes
+  //   (preventing `" & cmd` breakout) and decodes to a single literal `"` in CommandLineToArgvW.
+  // - Backslashes immediately before `"` or end-of-chunk are doubled so C-runtime parsing matches.
+  // - Splitting on `%` and joining with `^%` prevents `%VAR%` expansion in cmd.exe /c while
+  //   passing a literal `%` through batch `%*` without re-expansion (empirically verified on Win11).
   const sanitized = arg.replace(/[\r\n\0]+/g, ' ');
-  const escaped = sanitized
-    .replace(/(\\*)"/g, '$1$1\\"')
-    .replace(/(\\+)$/, '$1$1')
-    .replace(/%/g, '%%');
-  return `"${escaped}"`;
+  const chunks = sanitized.split('%').map((chunk) => {
+    if (chunk.length === 0) return '';
+    const escaped = chunk
+      .replace(/(\\*)"/g, '$1$1""')
+      .replace(/(\\+)$/, '$1$1');
+    return `"${escaped}"`;
+  });
+  const joined = chunks.join('^%');
+  return joined.length === 0 ? '""' : joined;
 }
 
 export function buildCliSpawnSpec(

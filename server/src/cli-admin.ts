@@ -18,7 +18,10 @@ export interface CliAdminDependencies {
   runCliFn?: AdminRunnerFn;
 }
 
-const VALID_SERVER_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+// Must start with an alphanumeric character so server names can never be parsed as CLI flags (`--all`, `-t`, `.`, `..`).
+const VALID_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const VALID_ENV_KV_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const VALID_HEADER_RE = /^[A-Za-z0-9-]+:/;
 const CONTROL_CHAR_RE = /[\r\n\0]/;
 
 function hasControlChars(values: Array<string | undefined>): boolean {
@@ -352,6 +355,20 @@ export async function handleAgCliAdmin(
           warnings,
           errorCode: 'CLI_ADMIN_FAILED',
           errorMessage: 'Control characters (CR/LF/NUL) are not allowed in `mcp_add` arguments, envVars, or headers.',
+        };
+      }
+      if (
+        (input.envVars ?? []).some((kv) => !VALID_ENV_KV_RE.test(kv)) ||
+        (input.headers ?? []).some((h) => !VALID_HEADER_RE.test(h))
+      ) {
+        return {
+          ok: false,
+          action: input.action,
+          cliPath,
+          output: '',
+          warnings,
+          errorCode: 'CLI_ADMIN_FAILED',
+          errorMessage: 'Invalid `envVars` (expected KEY=VALUE) or `headers` (expected Name: Value) format in `mcp_add`.',
         };
       }
       cliArgs = buildMcpAddArgs({
