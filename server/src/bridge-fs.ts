@@ -434,15 +434,19 @@ export function archiveManifest(workspaceRoot: string, manifest: BridgeManifest)
   const archivePath = path.join(historyDir, `${safeId}.json`);
   atomicWriteFile(archivePath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  // Prune old history files beyond MAX_HISTORY_ITEMS
-  const files = fs
-    .readdirSync(historyDir)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => ({
-      name: f,
-      mtime: fs.statSync(path.join(historyDir, f)).mtimeMs,
-    }))
-    .sort((a, b) => b.mtime - a.mtime);
+  // Prune old history files beyond MAX_HISTORY_ITEMS (skip broken symlinks / concurrently deleted files)
+  const files: Array<{ name: string; mtime: number }> = [];
+  for (const f of fs.readdirSync(historyDir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const st = fs.lstatSync(path.join(historyDir, f));
+      if (!st.isFile()) continue;
+      files.push({ name: f, mtime: st.mtimeMs });
+    } catch {
+      // ignore broken symlink or concurrently removed entry
+    }
+  }
+  files.sort((a, b) => b.mtime - a.mtime);
 
   for (const excess of files.slice(MAX_HISTORY_ITEMS)) {
     try {
@@ -493,48 +497,186 @@ export function readAllTaskManifests(workspaceRoot: string): BridgeManifest[] {
   });
 }
 
+export function getDispatchLockPath(workspaceRoot: string): string {
+  return path.join(getBridgeDir(workspaceRoot), 'dispatch.lock');
+}
+
+export function releaseBridgeLock(workspaceRoot: string): void {
+  try {
+    fs.rmSync(getDispatchLockPath(workspaceRoot), { force: true });
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
+function acquireAtomicDispatchLockFile(workspaceRoot: string, timeoutSec: number, nowMs: number): void {
+  ensureBridgeDirs(workspaceRoot);
+  const lockPath = getDispatchLockPath(workspaceRoot);
+  const payload = `${JSON.stringify({ pid: process.pid, acquiredAt: new Date(nowMs).toISOString(), timeoutSec })}\n`;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      try {
+        fs.writeFileSync(fd, payload, 'utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'EEXIST') {
+        throw err;
+      }
+      // Inspect existing lockfile to see whether it is stale
+      let stale = false;
+      try {
+        const st = fs.lstatSync(lockPath);
+        const raw = st.isFile() ? fs.readFileSync(lockPath, 'utf8') : '';
+        let acquiredMs = st.mtimeMs;
+        let lockTimeoutSec = Math.max(timeoutSec, 60);
+        try {
+          const parsed = JSON.parse(raw) as { acquiredAt?: string; timeoutSec?: number };
+          const parsedMs = parsed.acquiredAt ? Date.parse(parsed.acquiredAt) : Number.NaN;
+          if (!Number.isNaN(parsedMs)) acquiredMs = parsedMs;
+          if (typeof parsed.timeoutSec === 'number' && parsed.timeoutSec > 0) {
+            lockTimeoutSec = Math.max(parsed.timeoutSec, 60);
+          }
+        } catch {
+          // corrupt lock file — treat as stale after 60s
+        }
+        const elapsedMs = Math.max(0, nowMs - acquiredMs);
+        if (elapsedMs > lockTimeoutSec * 1000) {
+          stale = true;
+        }
+      } catch {
+        // Lock disappeared between openSync and lstatSync — retry once
+        stale = true;
+      }
+
+      if (stale && attempt === 0) {
+        try {
+          fs.rmSync(lockPath, { force: true });
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+
+      throw new AgPluginError(
+        'BRIDGE_BUSY',
+        'Another delegation is currently initializing a checkpoint/lock for this workspace. Retry shortly or inspect .ag-bridge/dispatch.lock.',
+      );
+    }
+  }
+}
+
 export function acquireBridgeLock(
   workspaceRoot: string,
   timeoutSec: number,
   nowMs: number = Date.now(),
-): { warnings: string[] } {
+): { warnings: string[]; release: () => void } {
   const warnings: string[] = [];
-  const current = readManifest(workspaceRoot);
-  if (!current) {
-    return { warnings };
-  }
+  acquireAtomicDispatchLockFile(workspaceRoot, timeoutSec, nowMs);
+  const release = (): void => releaseBridgeLock(workspaceRoot);
 
-  if (current.status === 'DISPATCHED' || current.status === 'RUNNING') {
-    const updatedMs = Date.parse(current.updatedAt);
-    const elapsedMs = Number.isNaN(updatedMs) ? Number.POSITIVE_INFINITY : nowMs - updatedMs;
-    if (elapsedMs <= timeoutSec * 1000) {
-      throw new AgPluginError(
-        'BRIDGE_BUSY',
-        `Another delegation task (${current.taskId}, status=${current.status}) is currently active (${Math.round(elapsedMs / 1000)}s elapsed). Wait for completion or inspect .ag-bridge/manifest.json.`,
-        { activeTaskId: current.taskId, status: current.status },
+  try {
+    let current: BridgeManifest | null = null;
+    try {
+      current = readManifest(workspaceRoot);
+    } catch (err) {
+      // Corrupt manifest.json must never permanently lock out the bridge: quarantine it safely.
+      const manifestPath = getManifestPath(workspaceRoot);
+      const quarantinePath = path.join(
+        getBridgeDir(workspaceRoot),
+        `manifest.corrupt-${nowMs}.json`,
       );
+      try {
+        if (fs.existsSync(manifestPath)) {
+          fs.renameSync(manifestPath, quarantinePath);
+        }
+      } catch {
+        try {
+          fs.rmSync(manifestPath, { force: true });
+        } catch {
+          // ignore
+        }
+      }
+      warnings.push(
+        `Quarantined corrupted .ag-bridge/manifest.json (${err instanceof Error ? err.message : String(err)}) to recover bridge lock.`,
+      );
+      return { warnings, release };
     }
 
-    // Stale lock recovery
-    const staleManifest: BridgeManifest = {
-      ...current,
-      status: 'FAILED',
-      updatedAt: new Date(nowMs).toISOString(),
-      errorCode: 'TASK_TIMEOUT',
-      error: `Recovered stale task lock after ${Math.round(elapsedMs / 1000)}s without updates.`,
-    };
-    archiveManifest(workspaceRoot, staleManifest);
-    warnings.push(
-      `Recovered stale active task "${current.taskId}" (exceeded ${timeoutSec}s timeout) and archived it to .ag-bridge/history/.`,
-    );
-    return { warnings };
-  }
+    if (!current) {
+      return { warnings, release };
+    }
 
-  if (current.status === 'VERIFIED' || current.status === 'FAILED') {
-    archiveManifest(workspaceRoot, current);
-  }
+    // Validate taskId safely so an agent-tampered taskId cannot lock out archival forever.
+    let safeCurrentId: string | null = null;
+    try {
+      safeCurrentId = assertSafeTaskId(current.taskId);
+    } catch {
+      const manifestPath = getManifestPath(workspaceRoot);
+      try {
+        fs.renameSync(
+          manifestPath,
+          path.join(getBridgeDir(workspaceRoot), `manifest.invalid-id-${nowMs}.json`),
+        );
+      } catch {
+        // ignore
+      }
+      warnings.push(
+        `Quarantined manifest with invalid taskId "${String(current.taskId)}" to recover bridge lock.`,
+      );
+      return { warnings, release };
+    }
 
-  return { warnings };
+    if (current.status === 'DISPATCHED' || current.status === 'RUNNING') {
+      const updatedMs = Date.parse(current.updatedAt);
+      const elapsedMs = Number.isNaN(updatedMs)
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, nowMs - updatedMs);
+      // Respect the active task's own recorded timeoutSec so a shorter-timeout caller cannot evict it.
+      const activeTimeoutSec =
+        typeof current.timeoutSec === 'number' && Number.isFinite(current.timeoutSec) && current.timeoutSec > 0
+          ? current.timeoutSec
+          : timeoutSec;
+      if (elapsedMs <= activeTimeoutSec * 1000) {
+        release();
+        throw new AgPluginError(
+          'BRIDGE_BUSY',
+          `Another delegation task (${safeCurrentId}, status=${current.status}) is currently active (${Math.round(elapsedMs / 1000)}s elapsed). Wait for completion or inspect .ag-bridge/manifest.json.`,
+          { activeTaskId: safeCurrentId, status: current.status },
+        );
+      }
+
+      // Stale lock recovery: archive AND update manifest.json immediately so a subsequent failure won't re-archive it.
+      const staleManifest: BridgeManifest = {
+        ...current,
+        taskId: safeCurrentId,
+        status: 'FAILED',
+        updatedAt: new Date(nowMs).toISOString(),
+        errorCode: 'TASK_TIMEOUT',
+        error: `Recovered stale task lock after ${Math.round(elapsedMs / 1000)}s without updates.`,
+      };
+      archiveManifest(workspaceRoot, staleManifest);
+      writeManifest(workspaceRoot, staleManifest);
+      warnings.push(
+        `Recovered stale active task "${safeCurrentId}" (exceeded ${activeTimeoutSec}s timeout) and archived it to .ag-bridge/history/.`,
+      );
+      return { warnings, release };
+    }
+
+    if (current.status === 'VERIFIED' || current.status === 'FAILED') {
+      archiveManifest(workspaceRoot, { ...current, taskId: safeCurrentId });
+    }
+
+    return { warnings, release };
+  } catch (err) {
+    release();
+    throw err;
+  }
 }
 
 export function generateTaskId(now: Date = new Date()): string {

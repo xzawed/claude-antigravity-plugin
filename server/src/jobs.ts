@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -27,7 +28,13 @@ import {
 import { ApiWorkerEngine } from './engines/api-worker.js';
 import { ExecutionEngine, ExecutionResult } from './engines/base.js';
 import { SubscriptionEngine } from './engines/subscription.js';
-import { checkpointManifestFields, createCheckpoint, createTaskWorktree } from './git-guard.js';
+import {
+  checkpointManifestFields,
+  createCheckpoint,
+  createTaskWorktree,
+  removeTaskWorktree,
+  resolveSafeWorktreeRoot,
+} from './git-guard.js';
 import { validateLockedPathsConfig } from './path-guard.js';
 import {
   AgErrorCode,
@@ -221,6 +228,16 @@ function summarizeLiveJob(
   };
 }
 
+function resolveManifestExecutionRoot(workspaceRoot: string, m: BridgeManifest): string {
+  if (m.worktreePath) {
+    const safeWt = resolveSafeWorktreeRoot(workspaceRoot, m.taskId, m.worktreePath);
+    if (safeWt && fs.existsSync(safeWt)) {
+      return safeWt;
+    }
+  }
+  return workspaceRoot;
+}
+
 function summarizeDiskManifest(
   workspaceRoot: string,
   m: BridgeManifest,
@@ -240,8 +257,10 @@ function summarizeDiskManifest(
   else if (m.errorCode === 'TASK_CANCELLED') status = 'CANCELLED';
   else if (m.status === 'FAILED') status = 'FAILED';
 
-  const currentManifest = readManifest(workspaceRoot);
+  const execRoot = resolveManifestExecutionRoot(workspaceRoot, m);
+  const currentManifest = readManifest(execRoot);
   const isCurrent = currentManifest?.taskId === m.taskId;
+  const diskArtifacts = includeDetails ? listTaskArtifacts(execRoot, m.taskId) : undefined;
 
   return {
     jobId: m.taskId,
@@ -260,15 +279,19 @@ function summarizeDiskManifest(
     model: m.metrics?.model,
     metrics: m.metrics,
     changedFiles: includeDetails ? m.changedFiles : undefined,
-    artifacts: includeDetails ? listTaskArtifacts(workspaceRoot, m.taskId) : undefined,
+    artifacts: includeDetails
+      ? diskArtifacts && diskArtifacts.length > 0
+        ? diskArtifacts
+        : m.artifacts
+      : undefined,
     reportMarkdown:
       includeDetails && isCurrent
         ? (() => {
-            const r = readReportMarkdown(workspaceRoot);
+            const r = readReportMarkdown(execRoot);
             return r ? maskSecrets(r) : undefined;
           })()
         : undefined,
-    logTail: includeLogTail ? readLogTail(workspaceRoot, m.taskId) : undefined,
+    logTail: includeLogTail ? readLogTail(execRoot, m.taskId) : undefined,
     warnings: [],
     errorCode: m.errorCode,
     errorMessage: m.error,
@@ -324,53 +347,78 @@ export async function handleStartAgTask(
     executionRoot = wt.worktreePath;
     worktreePath = wt.worktreePath;
     worktreeBranch = wt.branchName;
-    if (input.lockedPaths && input.lockedPaths.length > 0) {
-      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input.lockedPaths);
+    if (wt.warning) {
+      warnings.push(wt.warning);
     }
-    ensureBridgeDirs(executionRoot);
-    ensureGitignoreEntry(executionRoot);
   }
 
-  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
-  warnings.push(...lockRes.warnings);
-
-  const checkpoint = createCheckpoint(executionRoot, taskId, config.git_guard);
-  if (checkpoint.warning) {
-    warnings.push(checkpoint.warning);
-  }
-
-  const now = new Date().toISOString();
+  let checkpoint: ReturnType<typeof createCheckpoint>;
+  let manifest: BridgeManifest;
+  let now: string;
   const acceptanceCriteria =
     input.acceptanceCriteria && input.acceptanceCriteria.length > 0
       ? input.acceptanceCriteria
       : ['Complete the delegated instructions and report verified results clearly.'];
 
-  const manifest: BridgeManifest = {
-    schemaVersion: 1,
-    taskId,
-    title: input.title,
-    mode: resolvedMode,
-    status: 'DISPATCHED',
-    lockedPaths: normalizedLockedPaths,
-    verifyUrl: input.verifyUrl,
-    createdAt: now,
-    updatedAt: now,
-    ...checkpointManifestFields(checkpoint),
-    ...(worktreePath ? { worktreePath } : {}),
-    ...(worktreeBranch ? { worktreeBranch } : {}),
-    artifacts: [],
-  };
+  let lockRelease: (() => void) | undefined;
+  try {
+    if (worktreePath) {
+      if (normalizedLockedPaths.length > 0) {
+        normalizedLockedPaths = validateLockedPathsConfig(executionRoot, normalizedLockedPaths);
+      }
+      ensureBridgeDirs(executionRoot);
+      ensureGitignoreEntry(executionRoot);
+    }
 
-  writeManifest(executionRoot, manifest);
-  if (worktreePath) {
-    archiveManifest(workspaceRoot, manifest);
+    const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
+    lockRelease = lockRes.release;
+    warnings.push(...lockRes.warnings);
+
+    checkpoint = createCheckpoint(executionRoot, taskId, config.git_guard);
+    if (checkpoint.warning) {
+      warnings.push(checkpoint.warning);
+    }
+
+    now = new Date().toISOString();
+    manifest = {
+      schemaVersion: 1,
+      taskId,
+      title: input.title,
+      mode: resolvedMode,
+      status: 'DISPATCHED',
+      timeoutSec: effectiveTimeoutSec,
+      lockedPaths: normalizedLockedPaths,
+      verifyUrl: input.verifyUrl,
+      createdAt: now,
+      updatedAt: now,
+      ...checkpointManifestFields(checkpoint),
+      ...(worktreePath ? { worktreePath } : {}),
+      ...(worktreeBranch ? { worktreeBranch } : {}),
+      artifacts: [],
+    };
+
+    writeManifest(executionRoot, manifest);
+    if (worktreePath) {
+      archiveManifest(workspaceRoot, manifest);
+    }
+    clearReportMarkdown(executionRoot);
+    writeDispatchMarkdown(executionRoot, {
+      manifest,
+      instructions: input.instructions,
+      acceptanceCriteria,
+    });
+  } catch (err) {
+    if (worktreePath) {
+      try {
+        removeTaskWorktree(workspaceRoot, worktreePath, worktreeBranch, true);
+      } catch {
+        // Best-effort cleanup of newly created worktree on setup failure
+      }
+    }
+    throw err;
+  } finally {
+    lockRelease?.();
   }
-  clearReportMarkdown(executionRoot);
-  writeDispatchMarkdown(executionRoot, {
-    manifest,
-    instructions: input.instructions,
-    acceptanceCriteria,
-  });
 
   const engine: ExecutionEngine =
     resolvedMode === 'subscription'
@@ -402,7 +450,7 @@ export async function handleStartAgTask(
     if (!worktreePath) return;
     try {
       const disk = readManifest(executionRoot);
-      archiveManifest(workspaceRoot, {
+      const merged: BridgeManifest = {
         ...(disk ?? manifest),
         status: finalStatus,
         worktreePath,
@@ -413,7 +461,11 @@ export async function handleStartAgTask(
         errorCode: record.errorCode,
         error: record.errorMessage,
         updatedAt: record.updatedAt,
-      });
+      };
+      if (disk && disk.taskId === taskId && (disk.status === 'DISPATCHED' || disk.status === 'RUNNING')) {
+        writeManifest(executionRoot, merged);
+      }
+      archiveManifest(workspaceRoot, merged);
     } catch {
       // ignore archive sync failure
     }

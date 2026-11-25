@@ -162,6 +162,8 @@ export interface BridgeManifest {
   worktreePath?: string;
   /** Dedicated `ag-task/<taskId>` branch name when `isolateWorktree: true` was used. */
   worktreeBranch?: string;
+  /** Effective timeout (seconds) recorded at dispatch so stale-lock recovery uses this task's own timeout. */
+  timeoutSec?: number;
   artifacts: string[];
   changedFiles?: string[];
   metrics?: ExecutionMetrics;

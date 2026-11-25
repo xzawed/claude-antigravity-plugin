@@ -12,12 +12,24 @@ import {
   readSafeFileTail,
 } from './bridge-fs.js';
 import { maskSecrets } from './config.js';
+import { resolveSafeWorktreeRoot } from './git-guard.js';
 import {
   AgArtifactEntry,
   AgArtifactKind,
+  BridgeManifest,
   ListArtifactsToolInput,
   ListArtifactsToolOutput,
 } from './types.js';
+
+function resolveManifestRoot(workspaceRoot: string, m: BridgeManifest | null | undefined): string {
+  if (m?.worktreePath) {
+    const safeWt = resolveSafeWorktreeRoot(workspaceRoot, m.taskId, m.worktreePath);
+    if (safeWt && fs.existsSync(safeWt)) {
+      return safeWt;
+    }
+  }
+  return workspaceRoot;
+}
 
 function classifyArtifactKind(filePath: string): AgArtifactKind {
   const ext = path.extname(filePath).toLowerCase();
@@ -87,7 +99,8 @@ export function handleListArtifacts(
 
   for (const m of allManifests) {
     seenIds.add(m.taskId);
-    const files = collectArtifactFiles(workspaceRoot, m.taskId);
+    const mRoot = resolveManifestRoot(workspaceRoot, m);
+    const files = collectArtifactFiles(mRoot, m.taskId);
     availableTasks.push({
       taskId: m.taskId,
       title: m.title,
@@ -130,19 +143,21 @@ export function handleListArtifacts(
       ? current
       : readArchivedManifest(workspaceRoot, targetTaskId);
 
-  const artifacts = collectArtifactFiles(workspaceRoot, targetTaskId);
+  const targetRoot = resolveManifestRoot(workspaceRoot, targetManifest);
+  const artifacts = collectArtifactFiles(targetRoot, targetTaskId);
   const includeReport = input.includeReport ?? true;
   const includeLogTail = input.includeLogTail ?? true;
   const logTailLines = Math.min(200, Math.max(5, input.logTailLines ?? 40));
 
   let reportMarkdown: string | undefined;
-  if (includeReport && current?.taskId === targetTaskId) {
-    const raw = readReportMarkdown(workspaceRoot);
+  const targetCurrent = targetRoot === workspaceRoot ? current : readManifest(targetRoot);
+  if (includeReport && targetCurrent?.taskId === targetTaskId) {
+    const raw = readReportMarkdown(targetRoot);
     if (raw) reportMarkdown = maskSecrets(raw);
   }
 
   const logTail = includeLogTail
-    ? readMaskedLogTail(workspaceRoot, targetTaskId, logTailLines)
+    ? readMaskedLogTail(targetRoot, targetTaskId, logTailLines)
     : undefined;
 
   return {

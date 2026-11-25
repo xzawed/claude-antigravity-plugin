@@ -56,6 +56,7 @@
 | `TC-U43`, `TC-U43b` | `check-version-sync.mjs` | 저장소 버전 선언 6곳(`plugin.json`·`package.json`·`package-lock.json`·`index.ts`·`mcp-tools-api.md`) 일치 여부 및 `--tag vX.Y.Z` 비교 | 모든 선언 일치 시 PASS, 한 곳이라도 드리프트하거나 태그가 어긋나면 FAIL (CI & `.github/workflows/release.yml`) | `NFR-007` |
 | `TC-U44` | `subscription.ts` · `api-worker.ts` | `formatStreamEventProgress`의 `init`/`step_update`/`result` 매핑(비밀 마스킹 포함) 및 API 워커 멀티턴 `onProgress` 콜백 수신 | 진행률이 단조 증가하며 API 키 패턴은 `[REDACTED]`로 마스킹되고 턴/도구 호출 요약이 정상 전달됨 | `SPC-001`, `NFR-002` |
 | `TC-U45` ~ `TC-U45c` | `git-guard.ts` · `jobs.ts` · `index.ts` | `createTaskWorktree` / `removeTaskWorktree` 수명 주기, 2개 `start_ag_task({ isolateWorktree: true })` 동시 병렬 실행, 동기 `delegate_to_antigravity({ isolateWorktree: true })` 후 `rollback_ag_task` 정리 | 두 병렬 작업이 `BRIDGE_BUSY` 없이 각자 worktree에서 완료되고 부모 작업 트리는 깨끗하게 유지되며, `rollback_ag_task`가 worktree와 `ag-task/*` 브랜치만 제거 | `ARC-003`, `PRD §3.2` |
+| `TC-U46` ~ `TC-U48` | `git-guard.ts` · `bridge-fs.ts` · `jobs.ts` · `artifacts.ts` | 머지 충돌(unmerged index) 상태 롤백; `acquireBridgeLock`의 기록 `timeoutSec` 존중·손상 `manifest.json` 격리·원자적 `dispatch.lock`; `isolateWorktree` 절대 `lockedPaths` 및 디스크 폴백/`list_ag_artifacts` 조회 | 충돌 상태에서도 원복 성공, 짧은 타임아웃 호출자가 장기 실행 작업을 밀어내지 않으며 손상 매니페스트 격리 후 정상 복구, worktree 리포트·아티팩트·로그 테일 정상 반환 | `ARC-002`, `ARC-003` |
 
 ---
 
@@ -91,6 +92,7 @@
 | `TC-S26` | `cli-admin.ts` | `mcp_add` 실패 시 `--env`/`--header` 비밀값 포함; `.mcp.json` 동기화 항목에 CR/LF 제어문자·HTTP `headers`·실패 서버 포함 | `errorMessage`에서 `--env`/`--header` 값 `[REDACTED]`, 제어문자 항목 스킵, `headers` 정상 전달, 실패 서버 존재 시 `ok: false` 반환 | `NFR-002` |
 | `TC-S27` | `git-guard.ts` | `removeTaskWorktree`에 `.ag-bridge/worktrees/` 외부 경로·경로 탈출 경로 전달 및 변조된 매니페스트의 `main` 브랜치 삭제 시도 | 외부/탈출 경로는 `PATH_TRAVERSAL_BLOCKED` 거부, `ag-task/` 외 브랜치는 삭제 거부 및 경고 반환 | `NFR-001` |
 | `TC-S28` ~ `TC-S34` | `subscription.ts` · `api-worker.ts` · `path-guard.ts` · `bridge-fs.ts` · `git-guard.ts` · `config.ts` · `artifacts.ts` · `cli-admin.ts` · `auth.ts` | Windows `.cmd` `"`/`%VAR%` 인젝션; `pnpm`/`yarn`/`bun` 서브커맨드·위험 플래그 우회 및 커스텀 키 대소문자 유출; dangling symlink 쓰기 및 `.ag-bridge/config.json`/`.envrc` 접근; SessionStart `.agent`/`.ag-bridge` 심볼릭 링크 외부 쓰기; `gitCheckpointRef` `--output=` 옵션 인젝션; `.git/info` 링크 시 fail-open & Windows UNC `app_path`; `artifacts` 심볼릭 링크 읽기·`cli-admin` 선두 `-`·`auth` 개행 코드 인젝션 | 모든 인젝션·탈출·우회 시도가 100% 차단되고 외부 파일/환경변수 노출 0건 | `NFR-001`, `NFR-002` |
+| `TC-S35` ~ `TC-S37` | `git-guard.ts` · `index.ts` · `jobs.ts` | `.ag-bridge/worktrees` 정션/심볼릭 링크를 통한 생성·삭제 시도; 스냅샷 디렉터리에 심어진 `.git/config` 및 비기준선 파일 복원 시도; worktree 작업 후 `taskId` 생략 롤백·실행 중 worktree 삭제·메인 `manifest.json` 변조 `worktreePath` 주입 | 심볼릭 링크·탈출 경로 차단(`PATH_TRAVERSAL_BLOCKED`), 스냅샷 외부/보호 경로 무시, 모호한 롤백 거부(`ROLLBACK_NO_CHECKPOINT`) 및 실행 중 삭제 차단(`BRIDGE_BUSY`) | `NFR-001`, `ARC-003` |
 
 ---
 
