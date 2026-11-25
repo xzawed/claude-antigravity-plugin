@@ -53,7 +53,7 @@ describe('detector & config (TC-U01 ~ TC-U03, TC-S05)', () => {
   });
 
   it('detects agy from standard install location even when MCP host strips PATH', () => {
-    const winAgy = path.join('C:\\Users\\tester', 'AppData', 'Local', 'agy', 'bin', 'agy.exe');
+    const winAgy = path.win32.join('C:\\Users\\tester', 'AppData', 'Local', 'agy', 'bin', 'agy.exe');
     const deps = makeDeps({
       platform: 'win32',
       homedir: 'C:\\Users\\tester',
