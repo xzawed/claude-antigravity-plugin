@@ -15,7 +15,7 @@ Use Antigravity's built-in `/browser` subagent to visually inspect a running web
    - Extract optional `--model`, `--effort`, `--dangerously-skip-permissions`, `--timeout`, and `--bg` (background execution via `start_ag_task`).
 2. Compose a native Antigravity `/browser` prompt:
    ```text
-   /browser Open <verifyUrl> and perform visual & functional QA: <scenario>. Capture key screenshots under .ag-bridge/artifacts/ and report: (1) rendered layout/UI defects, (2) interactive test results, (3) console errors, (4) failed network requests, and (5) saved screenshot paths. Do not edit source code files.
+   /browser Open <verifyUrl> and perform visual & functional QA: <scenario>. Capture key screenshots under .ag-bridge/artifacts/<taskId>/ (see .ag-bridge/dispatch.md for the taskId) and report: (1) rendered layout/UI defects, (2) interactive test results, (3) console errors, (4) failed network requests, and (5) saved screenshot paths. Do not edit source code files.
    ```
 3. Call `delegate_to_antigravity` (or `start_ag_task` if `--bg` is set) with:
    - `title`: `"Browser QA: <verifyUrl>"`

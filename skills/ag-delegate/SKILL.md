@@ -15,8 +15,8 @@ Use the `antigravity-delegate` MCP server to offload UI-heavy implementation, mu
 ## 1. Available MCP Tools (12)
 
 1. `ag_auth` — Sign in to Antigravity (`agy acp --login`) via Google OAuth (local browser or headless/manual link+code flow), check live authentication status, complete/cancel a pending code-paste login, or view safe logout steps.
-2. `delegate_to_antigravity` — Synchronous delegation: dispatch any task to Antigravity (including native `/boost`, `/browser`, `/swarm`, `/goal`, custom models/effort/agents, `--json-schema`, conversation resume, and `--dangerously-skip-permissions`) and wait for `reportMarkdown`, `structuredOutput`, `changedFiles`, `artifacts`, and `metrics`.
-3. `start_ag_task` — Asynchronous background delegation: immediately returns a `jobId` after creating the Git checkpoint so Claude Code can continue backend/architecture work in parallel while Antigravity executes.
+2. `delegate_to_antigravity` — Synchronous delegation: dispatch any task to Antigravity (including native `/boost`, `/browser`, `/swarm`, `/goal`, custom models/effort/agents, `--json-schema`, conversation resume, `--dangerously-skip-permissions`, and optional `isolateWorktree: true` Git worktree isolation) and wait for `reportMarkdown`, `structuredOutput`, `changedFiles`, `artifacts`, and `metrics`.
+3. `start_ag_task` — Asynchronous background delegation: immediately returns a `jobId` after creating the Git checkpoint (or isolated worktree when `isolateWorktree: true`, allowing multiple parallel jobs without `BRIDGE_BUSY` conflicts) so Claude Code can continue backend/architecture work in parallel while Antigravity executes.
 4. `get_ag_job` — Inspect live progress, masked log tail, token usage, `reportMarkdown`, and `structuredOutput` for a background `jobId`, or list all active and recent jobs.
 5. `cancel_ag_job` — Gracefully terminate a running background Antigravity job while preserving its pre-delegation Git checkpoint for optional rollback.
 6. `ag_session` — Persistent multi-turn `stream-json` sessions (`start`, `send`, `list`, `close`) using `agy --input-format stream-json --output-format stream-json` for zero cold-start overhead and maximum prompt-cache reuse across turns.
@@ -25,7 +25,7 @@ Use the `antigravity-delegate` MCP server to offload UI-heavy implementation, mu
 9. `check_ag_environment` — Inspect detected mode, local `agy`/app path, active `agyConfig` (permissions/sandbox/model/effort), API key status (redacted), Git Guard state, and latest task usage.
 10. `list_ag_capabilities` — Dynamically discover all available `agy` models and agents (including the workspace's own), permission modes, effort levels, and supported CLI flags.
 11. `get_ag_usage` — Inspect cumulative and per-task token usage (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`) and duration across current and archived delegations.
-12. `rollback_ag_task` — Losslessly restore the workspace to its exact pre-delegation Git checkpoint (`gitCheckpointRef`).
+12. `rollback_ag_task` — Restore an in-place workspace task losslessly to its pre-delegation Git checkpoint (`gitCheckpointRef`, moving removed files into `.ag-bridge/recovery/<taskId>/`), or remove an isolated worktree (`.ag-bridge/worktrees/<taskId>`) and its `ag-task/<taskId>` branch for `isolateWorktree: true` tasks.
 
 ## 2. When to Delegate
 

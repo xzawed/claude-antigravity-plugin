@@ -13,7 +13,7 @@
 ## 1. MCP 서버 기본 규격 (`server/src/index.ts`)
 
 - **서버 이름:** `antigravity-delegate`
-- **버전:** `1.6.0`
+- **버전:** `1.6.1`
 - **트랜스포트:** `StdioServerTransport` (`@modelcontextprotocol/sdk/server/stdio.js`)
 - **로깅 규칙:** 모든 내부 진단 로그는 `console.error(...)` (`stderr`)로만 출력. `stdout`은 MCP JSON-RPC 프레임 전용.
 - **작업 디렉터리 해석:** 도구 입력에 `workspaceRoot`가 생략되면 `process.cwd()`를 사용한다.

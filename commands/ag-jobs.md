@@ -11,7 +11,7 @@ Inspect active and recent Antigravity background tasks via `get_ag_job`.
 
 1. If `$ARGUMENTS` contains a `jobId` (e.g., `ag-20261123-...`):
    - Call `get_ag_job({ jobId, includeLogTail: !noLogs })`.
-   - Display status (`RUNNING`, `VERIFIED`, `FAILED`, `CANCELLED`), elapsed seconds, `model`, `conversationId`, live/final token usage, `changedFiles`, `artifacts`, `structuredOutput` (if present), `reportMarkdown`, and masked `logTail` (if still running or failed).
+   - Display status (`RUNNING`, `VERIFIED`, `FAILED`, `CANCELLED`), elapsed seconds, `model`, `conversationId`, `worktreePath` & `worktreeBranch` (when isolated), live/final token usage, `changedFiles`, `artifacts`, `structuredOutput` (if present), `reportMarkdown`, and masked `logTail` (if still running or failed).
 2. If `$ARGUMENTS` is empty (or only `--limit <n>`):
    - Call `get_ag_job({ limit })`.
    - Present a concise Markdown table of active and recent jobs: `Job ID`, `Title`, `Mode`, `Status`, `Elapsed`, `Model`, `Total Tokens`, `Conversation ID`.
