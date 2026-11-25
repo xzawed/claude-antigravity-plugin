@@ -117,7 +117,34 @@ export function readJsonWithRetry<T>(filePath: string): T | null {
   throw lastErr;
 }
 
+export function hasSymlinkInChain(baseDir: string, relSegments: string[]): boolean {
+  let cursor = path.resolve(baseDir);
+  for (const seg of relSegments) {
+    cursor = path.join(cursor, seg);
+    const st = lstatOrNull(cursor);
+    if (!st) {
+      return false;
+    }
+    if (st.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function assertNoSymlinkChain(baseDir: string, relSegments: string[], label?: string): void {
+  if (hasSymlinkInChain(baseDir, relSegments)) {
+    throw new AgPluginError(
+      'PATH_TRAVERSAL_BLOCKED',
+      `Refusing to traverse symbolic link at ${label ?? relSegments.join('/')}.`,
+    );
+  }
+}
+
 export function ensureBridgeDirs(workspaceRoot: string): void {
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME], '.ag-bridge');
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, 'artifacts'], '.ag-bridge/artifacts');
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, 'history'], '.ag-bridge/history');
   fs.mkdirSync(getBridgeDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getArtifactsDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getHistoryDir(workspaceRoot), { recursive: true });
@@ -140,13 +167,18 @@ export const GIT_EXCLUDE_PATTERNS: readonly string[] = [
 ];
 
 function readTrimmedLines(file: string): string[] {
-  if (!fs.existsSync(file)) {
+  const st = lstatOrNull(file);
+  if (!st || !st.isFile()) {
     return [];
   }
-  return fs
-    .readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .map((line) => line.trim());
+  try {
+    return fs
+      .readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim());
+  } catch {
+    return [];
+  }
 }
 
 function hasBridgeEntry(lines: string[]): boolean {
@@ -161,63 +193,135 @@ function lstatOrNull(target: string): fs.Stats | null {
   }
 }
 
-/** A real (non-linked) directory that holds HEAD — what git itself would accept as a git dir. */
+/** A real (non-linked) directory that holds a real HEAD file — what git itself would accept as a git dir. */
 function isGitDir(dir: string): boolean {
-  return Boolean(lstatOrNull(dir)?.isDirectory()) && fs.existsSync(path.join(dir, 'HEAD'));
+  return (
+    Boolean(lstatOrNull(dir)?.isDirectory()) &&
+    Boolean(lstatOrNull(path.join(dir, 'HEAD'))?.isFile())
+  );
+}
+
+/** Verify no intermediate path segment between `rootDir` and `targetDir` is a symlink when inside `rootDir`. */
+function hasRelativeSymlinkEscape(rootDir: string, rawRelative: string): boolean {
+  if (path.isAbsolute(rawRelative)) {
+    return false;
+  }
+  const normalized = path.normalize(rawRelative);
+  const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
+  let cursor = path.resolve(rootDir);
+  for (const part of parts) {
+    if (part === '..') {
+      cursor = path.dirname(cursor);
+      continue;
+    }
+    cursor = path.join(cursor, part);
+    if (lstatOrNull(cursor)?.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** `.git` file (linked worktree, submodule) → the common git dir that owns `info/`. */
 function commonDirFromGitFile(dotGitFile: string): string | null {
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGitFile, 'utf8'));
+  let raw: string;
+  try {
+    raw = fs.readFileSync(dotGitFile, 'utf8');
+  } catch {
+    return null;
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(raw);
   if (!match) {
     return null;
   }
-  const gitDir = path.resolve(path.dirname(dotGitFile), match[1]);
+  const rawGitDir = match[1];
+  const baseDir = path.dirname(dotGitFile);
+  if (hasRelativeSymlinkEscape(baseDir, rawGitDir)) {
+    return null;
+  }
+  const gitDir = path.resolve(baseDir, rawGitDir);
   if (!isGitDir(gitDir)) {
     return null;
   }
   const commondirFile = path.join(gitDir, 'commondir');
-  if (!fs.existsSync(commondirFile)) {
+  const commondirStat = lstatOrNull(commondirFile);
+  if (!commondirStat) {
     return gitDir;
   }
-  const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, 'utf8').trim());
+  if (!commondirStat.isFile()) {
+    return null;
+  }
+  let rawCommon: string;
+  try {
+    rawCommon = fs.readFileSync(commondirFile, 'utf8').trim();
+  } catch {
+    return null;
+  }
+  if (hasRelativeSymlinkEscape(gitDir, rawCommon)) {
+    return null;
+  }
+  const commonDir = path.resolve(gitDir, rawCommon);
   return isGitDir(commonDir) ? commonDir : null;
 }
 
-/**
- * Absolute path of the repository's `info/exclude` for a workspace, or null when the workspace
- * is not inside a git work tree or that file is not safe to write (ADR-005).
- *
- * Resolved WITHOUT running git: the SessionStart hook runs in every folder Claude Code opens, and
- * a bare `git` spawned there executes a binary planted in that folder when PATH holds a relative
- * entry such as "." (measured on Windows). Walks up to the nearest `.git` (honouring
- * GIT_CEILING_DIRECTORIES), follows `.git` files and `commondir` for worktrees and submodules,
- * and refuses links: a `.git`, `info` or `exclude` that is a symlink or junction yields null.
- */
-export function resolveGitExcludePath(workspaceRoot: string): string | null {
+function findEnclosingDotGit(workspaceRoot: string): { dotGit: string; stat: fs.Stats } | null {
   const caseFold = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
   const ceilings = (process.env.GIT_CEILING_DIRECTORIES ?? '')
     .split(path.delimiter)
     .filter(Boolean)
     .map((dir) => caseFold(path.resolve(dir)));
 
-  let commonDir: string | null = null;
   for (let dir = path.resolve(workspaceRoot); ; ) {
     const dotGit = path.join(dir, '.git');
     const stat = lstatOrNull(dotGit);
     if (stat) {
-      if (stat.isDirectory()) {
-        commonDir = isGitDir(dotGit) ? dotGit : null;
-      } else if (stat.isFile()) {
-        commonDir = commonDirFromGitFile(dotGit);
-      }
-      break; // a linked `.git` is never followed
+      return { dotGit, stat };
     }
     const parent = path.dirname(dir);
     if (parent === dir || ceilings.includes(caseFold(parent))) {
-      break;
+      return null;
     }
     dir = parent;
+  }
+}
+
+/**
+ * True when a `.git` entry (directory, file, or symlink) encloses `workspaceRoot` or `GIT_DIR` is set.
+ * Used by config-trust fail-closed checks (ARC-003 §7) so symlinked `.git/info/exclude` can never
+ * cause `config.ts` to treat a git repo as a non-repo.
+ */
+export function hasAnyDotGitEntry(workspaceRoot: string): boolean {
+  if (process.env.GIT_DIR && process.env.GIT_DIR.trim().length > 0) {
+    return true;
+  }
+  return findEnclosingDotGit(workspaceRoot) !== null;
+}
+
+/**
+ * True when `workspaceRoot` is inside a real git work tree (valid `.git` dir or valid `gitdir:` file),
+ * even if `.git/info` or `.git/info/exclude` is symlinked/unwritable.
+ */
+function isRealGitWorkTree(workspaceRoot: string): boolean {
+  const found = findEnclosingDotGit(workspaceRoot);
+  if (!found) return false;
+  if (found.stat.isDirectory()) return isGitDir(found.dotGit);
+  if (found.stat.isFile()) return commonDirFromGitFile(found.dotGit) !== null;
+  return false;
+}
+
+/**
+ * Absolute path of the repository's `info/exclude` for a workspace, or null when the workspace
+ * is not inside a git work tree or that file is not safe to write (ADR-005).
+ */
+export function resolveGitExcludePath(workspaceRoot: string): string | null {
+  const found = findEnclosingDotGit(workspaceRoot);
+  let commonDir: string | null = null;
+  if (found) {
+    if (found.stat.isDirectory()) {
+      commonDir = isGitDir(found.dotGit) ? found.dotGit : null;
+    } else if (found.stat.isFile()) {
+      commonDir = commonDirFromGitFile(found.dotGit);
+    }
   }
   if (!commonDir) {
     return null;
@@ -265,6 +369,12 @@ export function ensureGitignoreEntry(workspaceRoot: string): {
     return { updated: true, protected: true, file: 'git-info-exclude' };
   }
 
+  // Inside a real git work tree whose `.git/info` or `.git/info/exclude` is symlinked/unsafe:
+  // never fall back to mutating the repository's tracked `.gitignore` (ADR-005).
+  if (isRealGitWorkTree(workspaceRoot)) {
+    return { updated: false, protected: false, file: 'git-info-exclude' };
+  }
+
   // Not a git work tree: there is no tracked file to dirty, so keep the historical behaviour.
   if (isGitignoreProtected(workspaceRoot)) {
     return { updated: false, protected: true, file: 'gitignore' };
@@ -293,6 +403,7 @@ export function ensureGitignoreEntry(workspaceRoot: string): {
 
 export function ensureDefaultConfig(workspaceRoot: string): { created: boolean; path: string } {
   ensureBridgeDirs(workspaceRoot);
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, 'config.json'], '.ag-bridge/config.json');
   const configPath = path.join(getBridgeDir(workspaceRoot), 'config.json');
   if (fs.existsSync(configPath)) {
     return { created: false, path: configPath };
@@ -481,9 +592,49 @@ export function writeDispatchMarkdown(
   return dispatchPath;
 }
 
+const MAX_TAIL_READ_BYTES = 256 * 1024;
+
+/**
+ * Safely read the tail of a regular file (never following symlinks on any path component) up to
+ * `maxBytes` so large logs cannot OOM the MCP server and planted symlinks cannot exfiltrate files.
+ */
+export function readSafeFileTail(
+  workspaceRoot: string,
+  relSegments: string[],
+  maxBytes = MAX_TAIL_READ_BYTES,
+): string | null {
+  if (hasSymlinkInChain(workspaceRoot, relSegments)) {
+    return null;
+  }
+  const fullPath = path.join(workspaceRoot, ...relSegments);
+  const st = lstatOrNull(fullPath);
+  if (!st || !st.isFile()) {
+    return null;
+  }
+  try {
+    if (st.size <= maxBytes) {
+      return fs.readFileSync(fullPath, 'utf8');
+    }
+    const fd = fs.openSync(fullPath, 'r');
+    try {
+      const buf = Buffer.alloc(maxBytes);
+      const bytesRead = fs.readSync(fd, buf, 0, maxBytes, st.size - maxBytes);
+      return buf.toString('utf8', 0, bytesRead);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
 export function readReportMarkdown(workspaceRoot: string): string | null {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, 'report.md'])) {
+    return null;
+  }
   const reportPath = getReportPath(workspaceRoot);
-  if (!fs.existsSync(reportPath)) {
+  const st = lstatOrNull(reportPath);
+  if (!st || !st.isFile()) {
     return null;
   }
   return fs.readFileSync(reportPath, 'utf8');
@@ -544,20 +695,30 @@ export function syncHandoffTemplate(
   const templateContent = fs.readFileSync(templatePath, 'utf8');
   const templateVer = extractTemplateVersion(templateContent) ?? TEMPLATE_VERSION;
 
-  const targets = [path.join(workspaceRoot, '.agent', 'workflows', 'claude-handoff.md')];
+  const targetChains: string[][] = [['.agent', 'workflows', 'claude-handoff.md']];
 
-  // ADR-003: Also mirror into .agents/workflows/ if the workspace already uses .agents/
-  if (fs.existsSync(path.join(workspaceRoot, '.agents'))) {
-    targets.push(path.join(workspaceRoot, '.agents', 'workflows', 'claude-handoff.md'));
+  // ADR-003: Also mirror into .agents/workflows/ if the workspace already has a real `.agents/` directory
+  const agentsStat = lstatOrNull(path.join(workspaceRoot, '.agents'));
+  if (agentsStat?.isDirectory() && !agentsStat.isSymbolicLink()) {
+    targetChains.push(['.agents', 'workflows', 'claude-handoff.md']);
   }
 
   const syncedPaths: string[] = [];
   const skippedCustomPaths: string[] = [];
 
-  for (const target of targets) {
-    if (!fs.existsSync(target)) {
+  for (const chain of targetChains) {
+    // TH-06: Never follow symlinks/junctions when syncing handoff templates (SessionStart hook runs automatically).
+    if (hasSymlinkInChain(workspaceRoot, chain)) {
+      continue;
+    }
+    const target = path.join(workspaceRoot, ...chain);
+    const targetStat = lstatOrNull(target);
+    if (!targetStat) {
       atomicWriteFile(target, templateContent);
       syncedPaths.push(target);
+      continue;
+    }
+    if (!targetStat.isFile()) {
       continue;
     }
 

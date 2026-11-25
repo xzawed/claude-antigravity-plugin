@@ -1,6 +1,7 @@
 import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);
 
 // src/cli-init.ts
+import fs2 from "node:fs";
 import path2 from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -101,7 +102,32 @@ function atomicWriteFile(filePath, content) {
   }
   throw lastErr;
 }
+function hasSymlinkInChain(baseDir, relSegments) {
+  let cursor = path.resolve(baseDir);
+  for (const seg of relSegments) {
+    cursor = path.join(cursor, seg);
+    const st = lstatOrNull(cursor);
+    if (!st) {
+      return false;
+    }
+    if (st.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
+}
+function assertNoSymlinkChain(baseDir, relSegments, label) {
+  if (hasSymlinkInChain(baseDir, relSegments)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Refusing to traverse symbolic link at ${label ?? relSegments.join("/")}.`
+    );
+  }
+}
 function ensureBridgeDirs(workspaceRoot) {
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME], ".ag-bridge");
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "artifacts"], ".ag-bridge/artifacts");
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "history"], ".ag-bridge/history");
   fs.mkdirSync(getBridgeDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getArtifactsDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getHistoryDir(workspaceRoot), { recursive: true });
@@ -113,10 +139,15 @@ var GIT_EXCLUDE_PATTERNS = [
   "**/.agents/workflows/claude-handoff.md"
 ];
 function readTrimmedLines(file) {
-  if (!fs.existsSync(file)) {
+  const st = lstatOrNull(file);
+  if (!st || !st.isFile()) {
     return [];
   }
-  return fs.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim());
+  try {
+    return fs.readFileSync(file, "utf8").split(/\r?\n/).map((line) => line.trim());
+  } catch {
+    return [];
+  }
 }
 function hasBridgeEntry(lines) {
   return lines.some((line) => line === ".ag-bridge" || line === ".ag-bridge/" || line === "/.ag-bridge/");
@@ -129,44 +160,99 @@ function lstatOrNull(target) {
   }
 }
 function isGitDir(dir) {
-  return Boolean(lstatOrNull(dir)?.isDirectory()) && fs.existsSync(path.join(dir, "HEAD"));
+  return Boolean(lstatOrNull(dir)?.isDirectory()) && Boolean(lstatOrNull(path.join(dir, "HEAD"))?.isFile());
+}
+function hasRelativeSymlinkEscape(rootDir, rawRelative) {
+  if (path.isAbsolute(rawRelative)) {
+    return false;
+  }
+  const normalized = path.normalize(rawRelative);
+  const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== ".");
+  let cursor = path.resolve(rootDir);
+  for (const part of parts) {
+    if (part === "..") {
+      cursor = path.dirname(cursor);
+      continue;
+    }
+    cursor = path.join(cursor, part);
+    if (lstatOrNull(cursor)?.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
 }
 function commonDirFromGitFile(dotGitFile) {
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGitFile, "utf8"));
+  let raw;
+  try {
+    raw = fs.readFileSync(dotGitFile, "utf8");
+  } catch {
+    return null;
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(raw);
   if (!match) {
     return null;
   }
-  const gitDir = path.resolve(path.dirname(dotGitFile), match[1]);
+  const rawGitDir = match[1];
+  const baseDir = path.dirname(dotGitFile);
+  if (hasRelativeSymlinkEscape(baseDir, rawGitDir)) {
+    return null;
+  }
+  const gitDir = path.resolve(baseDir, rawGitDir);
   if (!isGitDir(gitDir)) {
     return null;
   }
   const commondirFile = path.join(gitDir, "commondir");
-  if (!fs.existsSync(commondirFile)) {
+  const commondirStat = lstatOrNull(commondirFile);
+  if (!commondirStat) {
     return gitDir;
   }
-  const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, "utf8").trim());
+  if (!commondirStat.isFile()) {
+    return null;
+  }
+  let rawCommon;
+  try {
+    rawCommon = fs.readFileSync(commondirFile, "utf8").trim();
+  } catch {
+    return null;
+  }
+  if (hasRelativeSymlinkEscape(gitDir, rawCommon)) {
+    return null;
+  }
+  const commonDir = path.resolve(gitDir, rawCommon);
   return isGitDir(commonDir) ? commonDir : null;
 }
-function resolveGitExcludePath(workspaceRoot) {
+function findEnclosingDotGit(workspaceRoot) {
   const caseFold = (p) => process.platform === "win32" ? p.toLowerCase() : p;
   const ceilings = (process.env.GIT_CEILING_DIRECTORIES ?? "").split(path.delimiter).filter(Boolean).map((dir) => caseFold(path.resolve(dir)));
-  let commonDir = null;
   for (let dir = path.resolve(workspaceRoot); ; ) {
     const dotGit = path.join(dir, ".git");
     const stat = lstatOrNull(dotGit);
     if (stat) {
-      if (stat.isDirectory()) {
-        commonDir = isGitDir(dotGit) ? dotGit : null;
-      } else if (stat.isFile()) {
-        commonDir = commonDirFromGitFile(dotGit);
-      }
-      break;
+      return { dotGit, stat };
     }
     const parent = path.dirname(dir);
     if (parent === dir || ceilings.includes(caseFold(parent))) {
-      break;
+      return null;
     }
     dir = parent;
+  }
+}
+function isRealGitWorkTree(workspaceRoot) {
+  const found = findEnclosingDotGit(workspaceRoot);
+  if (!found) return false;
+  if (found.stat.isDirectory()) return isGitDir(found.dotGit);
+  if (found.stat.isFile()) return commonDirFromGitFile(found.dotGit) !== null;
+  return false;
+}
+function resolveGitExcludePath(workspaceRoot) {
+  const found = findEnclosingDotGit(workspaceRoot);
+  let commonDir = null;
+  if (found) {
+    if (found.stat.isDirectory()) {
+      commonDir = isGitDir(found.dotGit) ? found.dotGit : null;
+    } else if (found.stat.isFile()) {
+      commonDir = commonDirFromGitFile(found.dotGit);
+    }
   }
   if (!commonDir) {
     return null;
@@ -206,6 +292,9 @@ function ensureGitignoreEntry(workspaceRoot) {
 `, "utf8");
     return { updated: true, protected: true, file: "git-info-exclude" };
   }
+  if (isRealGitWorkTree(workspaceRoot)) {
+    return { updated: false, protected: false, file: "git-info-exclude" };
+  }
   if (isGitignoreProtected(workspaceRoot)) {
     return { updated: false, protected: true, file: "gitignore" };
   }
@@ -227,6 +316,7 @@ function ensureGitignoreEntry(workspaceRoot) {
 }
 function ensureDefaultConfig(workspaceRoot) {
   ensureBridgeDirs(workspaceRoot);
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "config.json"], ".ag-bridge/config.json");
   const configPath = path.join(getBridgeDir(workspaceRoot), "config.json");
   if (fs.existsSync(configPath)) {
     return { created: false, path: configPath };
@@ -241,6 +331,7 @@ function ensureDefaultConfig(workspaceRoot) {
 `);
   return { created: true, path: configPath };
 }
+var MAX_TAIL_READ_BYTES = 256 * 1024;
 function extractTemplateVersion(content) {
   const match = content.match(/<!--\s*ag-plugin-template-version:\s*([^\s>]+)\s*-->/);
   return match ? match[1] : null;
@@ -252,16 +343,25 @@ function syncHandoffTemplate(workspaceRoot, pluginRoot, options = {}) {
   }
   const templateContent = fs.readFileSync(templatePath, "utf8");
   const templateVer = extractTemplateVersion(templateContent) ?? TEMPLATE_VERSION;
-  const targets = [path.join(workspaceRoot, ".agent", "workflows", "claude-handoff.md")];
-  if (fs.existsSync(path.join(workspaceRoot, ".agents"))) {
-    targets.push(path.join(workspaceRoot, ".agents", "workflows", "claude-handoff.md"));
+  const targetChains = [[".agent", "workflows", "claude-handoff.md"]];
+  const agentsStat = lstatOrNull(path.join(workspaceRoot, ".agents"));
+  if (agentsStat?.isDirectory() && !agentsStat.isSymbolicLink()) {
+    targetChains.push([".agents", "workflows", "claude-handoff.md"]);
   }
   const syncedPaths = [];
   const skippedCustomPaths = [];
-  for (const target of targets) {
-    if (!fs.existsSync(target)) {
+  for (const chain of targetChains) {
+    if (hasSymlinkInChain(workspaceRoot, chain)) {
+      continue;
+    }
+    const target = path.join(workspaceRoot, ...chain);
+    const targetStat = lstatOrNull(target);
+    if (!targetStat) {
       atomicWriteFile(target, templateContent);
       syncedPaths.push(target);
+      continue;
+    }
+    if (!targetStat.isFile()) {
       continue;
     }
     const existing = fs.readFileSync(target, "utf8");
@@ -290,9 +390,18 @@ function getDefaultPluginRoot() {
 }
 function runCliInit(options) {
   const pluginRoot = options.pluginRoot ?? getDefaultPluginRoot();
+  const ignoreRes = ensureGitignoreEntry(options.workspaceRoot);
+  if (ignoreRes.file === "git-info-exclude" && !ignoreRes.protected || hasSymlinkInChain(options.workspaceRoot, [".ag-bridge"])) {
+    return {
+      configCreated: false,
+      ignoreUpdated: ignoreRes.updated,
+      ignoreFile: ignoreRes.file,
+      syncedTemplates: [],
+      skippedCustomTemplates: []
+    };
+  }
   ensureBridgeDirs(options.workspaceRoot);
   const configRes = ensureDefaultConfig(options.workspaceRoot);
-  const ignoreRes = ensureGitignoreEntry(options.workspaceRoot);
   const templateRes = syncHandoffTemplate(options.workspaceRoot, pluginRoot, {
     force: options.forceTemplate
   });
@@ -314,14 +423,23 @@ function parseArgs(argv) {
       silent = true;
     } else if (arg === "--force-template") {
       forceTemplate = true;
-    } else if (arg === "--workspace" && argv[i + 1]) {
+    } else if (arg === "--workspace" && argv[i + 1] && !argv[i + 1].startsWith("-")) {
       workspaceRoot = path2.resolve(argv[i + 1]);
       i += 1;
     }
   }
   return { workspaceRoot, silent, forceTemplate };
 }
-var isDirectExecution = process.argv[1] !== void 0 && path2.resolve(process.argv[1]) === path2.resolve(fileURLToPath(import.meta.url));
+function canonicalScriptPath(p) {
+  const resolved = path2.resolve(p);
+  let canonical = resolved;
+  try {
+    canonical = fs2.realpathSync.native(resolved);
+  } catch {
+  }
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+}
+var isDirectExecution = process.argv[1] !== void 0 && canonicalScriptPath(process.argv[1]) === canonicalScriptPath(fileURLToPath(import.meta.url));
 if (isDirectExecution) {
   const opts = parseArgs(process.argv.slice(2));
   try {

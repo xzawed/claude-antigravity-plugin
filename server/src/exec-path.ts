@@ -19,15 +19,41 @@ export interface ProgramLookup {
   isCandidate?: (candidate: string) => boolean;
 }
 
-/** Windows environment names are case-insensitive (`Path`, `ComSpec`); a copied env object is not. */
-function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
-  const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
-  return key === undefined ? undefined : env[key];
+/**
+ * Lookup an environment variable respecting platform casing semantics:
+ * - POSIX is case-sensitive (`env[name]`).
+ * - Windows is case-insensitive (`Path`, `ComSpec`), and if a caller merges `{ ...process.env, PATH: '...' }`
+ *   on top of an existing `Path` key, exact match / last defined matching key wins.
+ */
+function envValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== 'win32') {
+    return env[name];
+  }
+  if (env[name] !== undefined) {
+    return env[name];
+  }
+  const lower = name.toLowerCase();
+  let matched: string | undefined;
+  for (const k of Object.keys(env)) {
+    if (k.toLowerCase() === lower && env[k] !== undefined) {
+      matched = env[k];
+    }
+  }
+  return matched;
 }
 
 /** `X:\…` or `\\server\share\…` — not drive-relative (`C:tools`) or root-relative (`\tools`). */
 function isFullyQualifiedWin32(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
+}
+
+/** A local drive-letter absolute path on Windows (`X:\…`), or `/` on POSIX — never UNC/device (`\\…`). */
+export function isLocalAbsolutePath(p: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32' ? /^[a-zA-Z]:[\\/]/.test(p) : path.posix.isAbsolute(p);
 }
 
 /** A path whose meaning does not depend on the current directory or drive. */
@@ -41,7 +67,7 @@ const POSIX_DEFAULT_PATH = '/usr/bin:/bin';
 /** PATH's fully qualified directories, in order. Relative and empty entries are dropped. */
 export function absolutePathDirs(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
   // Unset PATH on POSIX: search what execvp would. Set-but-empty means "the cwd" there: nothing.
-  const raw = envValue(env, 'PATH') ?? (platform === 'win32' ? '' : POSIX_DEFAULT_PATH);
+  const raw = envValue(env, 'PATH', platform) ?? (platform === 'win32' ? '' : POSIX_DEFAULT_PATH);
   if (!raw) {
     return [];
   }
@@ -109,10 +135,10 @@ export function requireExecutable(name: string, lookup?: ProgramLookup): string 
  * `ComSpec || 'cmd.exe'` for `shell: true`; that bare fallback is the PATH lookup avoided here.
  */
 export function windowsShell(env: NodeJS.ProcessEnv = process.env): string {
-  const comspec = envValue(env, 'ComSpec')?.trim();
+  const comspec = envValue(env, 'ComSpec', 'win32')?.trim();
   if (comspec && isFullyQualifiedWin32(comspec)) {
     return comspec;
   }
-  const root = envValue(env, 'SystemRoot')?.trim();
+  const root = envValue(env, 'SystemRoot', 'win32')?.trim();
   return path.win32.join(root && isFullyQualifiedWin32(root) ? root : 'C:\\Windows', 'System32', 'cmd.exe');
 }

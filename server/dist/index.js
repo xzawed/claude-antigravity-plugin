@@ -7256,12 +7256,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f3;
     };
-    function addFormats(ajv, list, fs16, exportName) {
+    function addFormats(ajv, list, fs15, exportName) {
       var _a4;
       var _b;
       (_a4 = (_b = ajv.opts.code).formats) !== null && _a4 !== void 0 ? _a4 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f3 of list)
-        ajv.addFormat(f3, fs16[f3]);
+        ajv.addFormat(f3, fs15[f3]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -19264,7 +19264,7 @@ var require_util3 = __commonJS({
     exports.removeUndefinedValuesInObject = removeUndefinedValuesInObject;
     exports.isValidFile = isValidFile;
     exports.getWellKnownCertificateConfigFileLocation = getWellKnownCertificateConfigFileLocation;
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var os4 = __require("os");
     var path16 = __require("path");
     var WELL_KNOWN_CERTIFICATE_CONFIG_FILE = "certificate_config.json";
@@ -19352,7 +19352,7 @@ var require_util3 = __commonJS({
     }
     async function isValidFile(filePath) {
       try {
-        const stats = await fs16.promises.lstat(filePath);
+        const stats = await fs15.promises.lstat(filePath);
         return stats.isFile();
       } catch (e2) {
         return false;
@@ -21307,10 +21307,10 @@ var require_getCredentials = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getCredentials = getCredentials;
     var path16 = __require("path");
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var util_1 = __require("util");
     var errorWithCode_1 = require_errorWithCode();
-    var readFile = fs16.readFile ? (0, util_1.promisify)(fs16.readFile) : async () => {
+    var readFile = fs15.readFile ? (0, util_1.promisify)(fs15.readFile) : async () => {
       throw new errorWithCode_1.ErrorWithCode("use key rather than keyFile.", "MISSING_CREDENTIALS");
     };
     var ExtensionFiles;
@@ -22987,12 +22987,12 @@ var require_filesubjecttokensupplier = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.FileSubjectTokenSupplier = void 0;
     var util_1 = __require("util");
-    var fs16 = __require("fs");
-    var readFile = (0, util_1.promisify)(fs16.readFile ?? (() => {
+    var fs15 = __require("fs");
+    var readFile = (0, util_1.promisify)(fs15.readFile ?? (() => {
     }));
-    var realpath = (0, util_1.promisify)(fs16.realpath ?? (() => {
+    var realpath = (0, util_1.promisify)(fs15.realpath ?? (() => {
     }));
-    var lstat = (0, util_1.promisify)(fs16.lstat ?? (() => {
+    var lstat = (0, util_1.promisify)(fs15.lstat ?? (() => {
     }));
     var FileSubjectTokenSupplier = class {
       filePath;
@@ -23110,7 +23110,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CertificateSubjectTokenSupplier = exports.InvalidConfigurationError = exports.CertificateSourceUnavailableError = exports.CERTIFICATE_CONFIGURATION_ENV_VARIABLE = void 0;
     var util_1 = require_util3();
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var crypto_1 = __require("crypto");
     var https2 = __require("https");
     exports.CERTIFICATE_CONFIGURATION_ENV_VARIABLE = "GOOGLE_API_CERTIFICATE_CONFIG";
@@ -23204,7 +23204,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
         const configPath = this.certificateConfigPath;
         let fileContents;
         try {
-          fileContents = await fs16.promises.readFile(configPath, "utf8");
+          fileContents = await fs15.promises.readFile(configPath, "utf8");
         } catch (err) {
           throw new CertificateSourceUnavailableError(`Failed to read certificate config file at: ${configPath}`);
         }
@@ -23229,14 +23229,14 @@ var require_certificatesubjecttokensupplier = __commonJS({
       async #getKeyAndCert(certPath, keyPath) {
         let cert, key;
         try {
-          cert = await fs16.promises.readFile(certPath);
+          cert = await fs15.promises.readFile(certPath);
           new crypto_1.X509Certificate(cert);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           throw new CertificateSourceUnavailableError(`Failed to read certificate file at ${certPath}: ${message}`);
         }
         try {
-          key = await fs16.promises.readFile(keyPath);
+          key = await fs15.promises.readFile(keyPath);
           (0, crypto_1.createPrivateKey)(key);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -23255,7 +23255,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
           return JSON.stringify([leafCert.raw.toString("base64")]);
         }
         try {
-          const chainPems = await fs16.promises.readFile(this.trustChainPath, "utf8");
+          const chainPems = await fs15.promises.readFile(this.trustChainPath, "utf8");
           const pemBlocks = chainPems.match(/-----BEGIN CERTIFICATE-----[^-]+-----END CERTIFICATE-----/g) ?? [];
           const chainCerts = pemBlocks.map((pem, index) => {
             try {
@@ -23957,7 +23957,7 @@ var require_pluggable_auth_handler = __commonJS({
     exports.PluggableAuthHandler = exports.ExecutableError = void 0;
     var executable_response_1 = require_executable_response();
     var childProcess = __require("child_process");
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var ExecutableError = class extends Error {
       /**
        * The exit code returned by the executable.
@@ -24042,14 +24042,14 @@ var require_pluggable_auth_handler = __commonJS({
         }
         let filePath;
         try {
-          filePath = await fs16.promises.realpath(this.outputFile);
+          filePath = await fs15.promises.realpath(this.outputFile);
         } catch {
           return void 0;
         }
-        if (!(await fs16.promises.lstat(filePath)).isFile()) {
+        if (!(await fs15.promises.lstat(filePath)).isFile()) {
           return void 0;
         }
-        const responseString = await fs16.promises.readFile(filePath, {
+        const responseString = await fs15.promises.readFile(filePath, {
           encoding: "utf8"
         });
         if (responseString === "") {
@@ -24460,7 +24460,7 @@ var require_gdchclient = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GdchClient = exports.GDCH_SERVICE_ACCOUNT_TYPE = void 0;
     var crypto5 = __require("crypto");
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var https2 = __require("https");
     var oauth2client_1 = require_oauth2client();
     var DEFAULT_LIFETIME_IN_SECONDS = 3600;
@@ -24683,7 +24683,7 @@ var require_gdchclient = __commonJS({
         const currentPath = this.caCertPath;
         this.caAgentPromise = (async () => {
           try {
-            const ca = await fs16.promises.readFile(currentPath);
+            const ca = await fs15.promises.readFile(currentPath);
             return new https2.Agent({ ca });
           } catch (err) {
             if (this.cachedCaCertPath === currentPath) {
@@ -24743,7 +24743,7 @@ var require_googleauth = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GoogleAuth = exports.GoogleAuthExceptionMessages = void 0;
     var child_process_1 = __require("child_process");
-    var fs16 = __require("fs");
+    var fs15 = __require("fs");
     var gaxios_1 = require_src2();
     var gcpMetadata = require_src4();
     var os4 = __require("os");
@@ -25045,7 +25045,7 @@ var require_googleauth = __commonJS({
           return null;
         }
         const location = path16.join(configDir, "application_default_credentials.json");
-        if (!fs16.existsSync(location)) {
+        if (!fs15.existsSync(location)) {
           return null;
         }
         const client = await this._getApplicationCredentialsFromFilePath(location, options);
@@ -25062,8 +25062,8 @@ var require_googleauth = __commonJS({
           throw new Error("The file path is invalid.");
         }
         try {
-          filePath = fs16.realpathSync(filePath);
-          if (!fs16.lstatSync(filePath).isFile()) {
+          filePath = fs15.realpathSync(filePath);
+          if (!fs15.lstatSync(filePath).isFile()) {
             throw new Error();
           }
         } catch (err) {
@@ -25072,7 +25072,7 @@ var require_googleauth = __commonJS({
           }
           throw err;
         }
-        const readStream = fs16.createReadStream(filePath);
+        const readStream = fs15.createReadStream(filePath);
         return this.fromStream(readStream, options);
       }
       /**
@@ -25400,7 +25400,7 @@ var require_googleauth = __commonJS({
           return this._cacheClientFromJSON(this.jsonContent, this.clientOptions);
         } else if (this.keyFilename) {
           const filePath = path16.resolve(this.keyFilename);
-          const stream = fs16.createReadStream(filePath);
+          const stream = fs15.createReadStream(filePath);
           return await this.fromStreamAsync(stream, this.clientOptions);
         } else if (this.apiKey) {
           const client = await this.fromAPIKey(this.apiKey, this.clientOptions);
@@ -29674,7 +29674,7 @@ var require_websocket_server = __commonJS({
 });
 
 // src/index.ts
-import fs15 from "node:fs";
+import fs14 from "node:fs";
 import path15 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
@@ -59204,7 +59204,32 @@ function readJsonWithRetry(filePath) {
   }
   throw lastErr;
 }
+function hasSymlinkInChain(baseDir, relSegments) {
+  let cursor = path.resolve(baseDir);
+  for (const seg of relSegments) {
+    cursor = path.join(cursor, seg);
+    const st = lstatOrNull(cursor);
+    if (!st) {
+      return false;
+    }
+    if (st.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
+}
+function assertNoSymlinkChain(baseDir, relSegments, label) {
+  if (hasSymlinkInChain(baseDir, relSegments)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Refusing to traverse symbolic link at ${label ?? relSegments.join("/")}.`
+    );
+  }
+}
 function ensureBridgeDirs(workspaceRoot) {
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME], ".ag-bridge");
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "artifacts"], ".ag-bridge/artifacts");
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "history"], ".ag-bridge/history");
   fs.mkdirSync(getBridgeDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getArtifactsDir(workspaceRoot), { recursive: true });
   fs.mkdirSync(getHistoryDir(workspaceRoot), { recursive: true });
@@ -59216,10 +59241,15 @@ var GIT_EXCLUDE_PATTERNS = [
   "**/.agents/workflows/claude-handoff.md"
 ];
 function readTrimmedLines(file2) {
-  if (!fs.existsSync(file2)) {
+  const st = lstatOrNull(file2);
+  if (!st || !st.isFile()) {
     return [];
   }
-  return fs.readFileSync(file2, "utf8").split(/\r?\n/).map((line) => line.trim());
+  try {
+    return fs.readFileSync(file2, "utf8").split(/\r?\n/).map((line) => line.trim());
+  } catch {
+    return [];
+  }
 }
 function hasBridgeEntry(lines) {
   return lines.some((line) => line === ".ag-bridge" || line === ".ag-bridge/" || line === "/.ag-bridge/");
@@ -59232,44 +59262,105 @@ function lstatOrNull(target) {
   }
 }
 function isGitDir(dir) {
-  return Boolean(lstatOrNull(dir)?.isDirectory()) && fs.existsSync(path.join(dir, "HEAD"));
+  return Boolean(lstatOrNull(dir)?.isDirectory()) && Boolean(lstatOrNull(path.join(dir, "HEAD"))?.isFile());
+}
+function hasRelativeSymlinkEscape(rootDir, rawRelative) {
+  if (path.isAbsolute(rawRelative)) {
+    return false;
+  }
+  const normalized = path.normalize(rawRelative);
+  const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== ".");
+  let cursor = path.resolve(rootDir);
+  for (const part of parts) {
+    if (part === "..") {
+      cursor = path.dirname(cursor);
+      continue;
+    }
+    cursor = path.join(cursor, part);
+    if (lstatOrNull(cursor)?.isSymbolicLink()) {
+      return true;
+    }
+  }
+  return false;
 }
 function commonDirFromGitFile(dotGitFile) {
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGitFile, "utf8"));
+  let raw;
+  try {
+    raw = fs.readFileSync(dotGitFile, "utf8");
+  } catch {
+    return null;
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(raw);
   if (!match) {
     return null;
   }
-  const gitDir = path.resolve(path.dirname(dotGitFile), match[1]);
+  const rawGitDir = match[1];
+  const baseDir = path.dirname(dotGitFile);
+  if (hasRelativeSymlinkEscape(baseDir, rawGitDir)) {
+    return null;
+  }
+  const gitDir = path.resolve(baseDir, rawGitDir);
   if (!isGitDir(gitDir)) {
     return null;
   }
   const commondirFile = path.join(gitDir, "commondir");
-  if (!fs.existsSync(commondirFile)) {
+  const commondirStat = lstatOrNull(commondirFile);
+  if (!commondirStat) {
     return gitDir;
   }
-  const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, "utf8").trim());
+  if (!commondirStat.isFile()) {
+    return null;
+  }
+  let rawCommon;
+  try {
+    rawCommon = fs.readFileSync(commondirFile, "utf8").trim();
+  } catch {
+    return null;
+  }
+  if (hasRelativeSymlinkEscape(gitDir, rawCommon)) {
+    return null;
+  }
+  const commonDir = path.resolve(gitDir, rawCommon);
   return isGitDir(commonDir) ? commonDir : null;
 }
-function resolveGitExcludePath(workspaceRoot) {
+function findEnclosingDotGit(workspaceRoot) {
   const caseFold = (p) => process.platform === "win32" ? p.toLowerCase() : p;
   const ceilings = (process.env.GIT_CEILING_DIRECTORIES ?? "").split(path.delimiter).filter(Boolean).map((dir) => caseFold(path.resolve(dir)));
-  let commonDir = null;
   for (let dir = path.resolve(workspaceRoot); ; ) {
     const dotGit = path.join(dir, ".git");
     const stat3 = lstatOrNull(dotGit);
     if (stat3) {
-      if (stat3.isDirectory()) {
-        commonDir = isGitDir(dotGit) ? dotGit : null;
-      } else if (stat3.isFile()) {
-        commonDir = commonDirFromGitFile(dotGit);
-      }
-      break;
+      return { dotGit, stat: stat3 };
     }
     const parent = path.dirname(dir);
     if (parent === dir || ceilings.includes(caseFold(parent))) {
-      break;
+      return null;
     }
     dir = parent;
+  }
+}
+function hasAnyDotGitEntry(workspaceRoot) {
+  if (process.env.GIT_DIR && process.env.GIT_DIR.trim().length > 0) {
+    return true;
+  }
+  return findEnclosingDotGit(workspaceRoot) !== null;
+}
+function isRealGitWorkTree(workspaceRoot) {
+  const found = findEnclosingDotGit(workspaceRoot);
+  if (!found) return false;
+  if (found.stat.isDirectory()) return isGitDir(found.dotGit);
+  if (found.stat.isFile()) return commonDirFromGitFile(found.dotGit) !== null;
+  return false;
+}
+function resolveGitExcludePath(workspaceRoot) {
+  const found = findEnclosingDotGit(workspaceRoot);
+  let commonDir = null;
+  if (found) {
+    if (found.stat.isDirectory()) {
+      commonDir = isGitDir(found.dotGit) ? found.dotGit : null;
+    } else if (found.stat.isFile()) {
+      commonDir = commonDirFromGitFile(found.dotGit);
+    }
   }
   if (!commonDir) {
     return null;
@@ -59308,6 +59399,9 @@ function ensureGitignoreEntry(workspaceRoot) {
     fs.appendFileSync(excludePath, `${separator}${[...header, ...missing].join("\n")}
 `, "utf8");
     return { updated: true, protected: true, file: "git-info-exclude" };
+  }
+  if (isRealGitWorkTree(workspaceRoot)) {
+    return { updated: false, protected: false, file: "git-info-exclude" };
   }
   if (isGitignoreProtected(workspaceRoot)) {
     return { updated: false, protected: true, file: "gitignore" };
@@ -59459,9 +59553,39 @@ function writeDispatchMarkdown(workspaceRoot, params) {
   atomicWriteFile(dispatchPath, content);
   return dispatchPath;
 }
+var MAX_TAIL_READ_BYTES = 256 * 1024;
+function readSafeFileTail(workspaceRoot, relSegments, maxBytes = MAX_TAIL_READ_BYTES) {
+  if (hasSymlinkInChain(workspaceRoot, relSegments)) {
+    return null;
+  }
+  const fullPath = path.join(workspaceRoot, ...relSegments);
+  const st = lstatOrNull(fullPath);
+  if (!st || !st.isFile()) {
+    return null;
+  }
+  try {
+    if (st.size <= maxBytes) {
+      return fs.readFileSync(fullPath, "utf8");
+    }
+    const fd = fs.openSync(fullPath, "r");
+    try {
+      const buf = Buffer.alloc(maxBytes);
+      const bytesRead = fs.readSync(fd, buf, 0, maxBytes, st.size - maxBytes);
+      return buf.toString("utf8", 0, bytesRead);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
 function readReportMarkdown(workspaceRoot) {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, "report.md"])) {
+    return null;
+  }
   const reportPath = getReportPath(workspaceRoot);
-  if (!fs.existsSync(reportPath)) {
+  const st = lstatOrNull(reportPath);
+  if (!st || !st.isFile()) {
     return null;
   }
   return fs.readFileSync(reportPath, "utf8");
@@ -59508,16 +59632,25 @@ function syncHandoffTemplate(workspaceRoot, pluginRoot, options = {}) {
   }
   const templateContent = fs.readFileSync(templatePath, "utf8");
   const templateVer = extractTemplateVersion(templateContent) ?? TEMPLATE_VERSION;
-  const targets = [path.join(workspaceRoot, ".agent", "workflows", "claude-handoff.md")];
-  if (fs.existsSync(path.join(workspaceRoot, ".agents"))) {
-    targets.push(path.join(workspaceRoot, ".agents", "workflows", "claude-handoff.md"));
+  const targetChains = [[".agent", "workflows", "claude-handoff.md"]];
+  const agentsStat = lstatOrNull(path.join(workspaceRoot, ".agents"));
+  if (agentsStat?.isDirectory() && !agentsStat.isSymbolicLink()) {
+    targetChains.push([".agents", "workflows", "claude-handoff.md"]);
   }
   const syncedPaths = [];
   const skippedCustomPaths = [];
-  for (const target of targets) {
-    if (!fs.existsSync(target)) {
+  for (const chain of targetChains) {
+    if (hasSymlinkInChain(workspaceRoot, chain)) {
+      continue;
+    }
+    const target = path.join(workspaceRoot, ...chain);
+    const targetStat = lstatOrNull(target);
+    if (!targetStat) {
       atomicWriteFile(target, templateContent);
       syncedPaths.push(target);
+      continue;
+    }
+    if (!targetStat.isFile()) {
       continue;
     }
     const existing = fs.readFileSync(target, "utf8");
@@ -59546,19 +59679,31 @@ import path5 from "node:path";
 // src/exec-path.ts
 import fs2 from "node:fs";
 import path2 from "node:path";
-function envValue(env, name) {
-  const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
-  return key === void 0 ? void 0 : env[key];
+function envValue(env, name, platform = process.platform) {
+  if (platform !== "win32") {
+    return env[name];
+  }
+  if (env[name] !== void 0) {
+    return env[name];
+  }
+  const lower2 = name.toLowerCase();
+  let matched;
+  for (const k of Object.keys(env)) {
+    if (k.toLowerCase() === lower2 && env[k] !== void 0) {
+      matched = env[k];
+    }
+  }
+  return matched;
 }
 function isFullyQualifiedWin32(p) {
   return /^[a-zA-Z]:[\\/]/.test(p) || /^[\\/]{2}[^\\/]/.test(p);
 }
-function isFullyQualifiedPath(p, platform = process.platform) {
-  return platform === "win32" ? isFullyQualifiedWin32(p) : path2.posix.isAbsolute(p);
+function isLocalAbsolutePath(p, platform = process.platform) {
+  return platform === "win32" ? /^[a-zA-Z]:[\\/]/.test(p) : path2.posix.isAbsolute(p);
 }
 var POSIX_DEFAULT_PATH = "/usr/bin:/bin";
 function absolutePathDirs(platform, env) {
-  const raw = envValue(env, "PATH") ?? (platform === "win32" ? "" : POSIX_DEFAULT_PATH);
+  const raw = envValue(env, "PATH", platform) ?? (platform === "win32" ? "" : POSIX_DEFAULT_PATH);
   if (!raw) {
     return [];
   }
@@ -59605,11 +59750,11 @@ function requireExecutable(name, lookup) {
   return found;
 }
 function windowsShell(env = process.env) {
-  const comspec = envValue(env, "ComSpec")?.trim();
+  const comspec = envValue(env, "ComSpec", "win32")?.trim();
   if (comspec && isFullyQualifiedWin32(comspec)) {
     return comspec;
   }
-  const root = envValue(env, "SystemRoot")?.trim();
+  const root = envValue(env, "SystemRoot", "win32")?.trim();
   return path2.win32.join(root && isFullyQualifiedWin32(root) ? root : "C:\\Windows", "System32", "cmd.exe");
 }
 
@@ -60078,7 +60223,13 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       `${why}; cannot perform Git rollback.`
     );
   }
-  const ref = manifest.gitCheckpointRef;
+  const ref = manifest.gitCheckpointRef.trim();
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(ref)) {
+    throw new AgPluginError(
+      "GIT_CHECKPOINT_FAILED",
+      `Invalid gitCheckpointRef "${manifest.gitCheckpointRef}": expected a 40- or 64-character hexadecimal commit hash.`
+    );
+  }
   const recordedHead = manifest.gitCheckpointHeadRef;
   if (recordedHead !== void 0) {
     const headNow = symbolicHead(workspaceRoot) ?? "(unknown)";
@@ -60127,7 +60278,7 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === void 0;
   const baselineSet = new Set(baseline ?? []);
-  const addedRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=A", ref]);
+  const addedRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=A", ref, "--"]);
   if (!addedRes.ok) {
     throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${addedRes.stderr}`);
   }
@@ -60145,7 +60296,7 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
       );
     }
   }
-  const removedFromIndexRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", ref]);
+  const removedFromIndexRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", ref, "--"]);
   if (!removedFromIndexRes.ok) {
     throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
   }
@@ -60159,7 +60310,7 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
     }
     if (present) moveAside(rel, "replaced");
   }
-  const diffRes = tryRunGit(workspaceRoot, ["diff", "--name-only", "-z", "--no-renames", ref]);
+  const diffRes = tryRunGit(workspaceRoot, ["diff", "--name-only", "-z", "--no-renames", ref, "--"]);
   if (!diffRes.ok) {
     throw new AgPluginError(
       "GIT_CHECKPOINT_FAILED",
@@ -60397,7 +60548,14 @@ function isInsideRoot(rootPath, candidatePath) {
   const prefix = rootCmp.endsWith(path4.sep) ? rootCmp : rootCmp + path4.sep;
   return candCmp.startsWith(prefix);
 }
-function nativeRealPathOrNearestParent(targetPath) {
+var MAX_SYMLINK_HOPS = 40;
+function nativeRealPathOrNearestParent(targetPath, depth = 0) {
+  if (depth > MAX_SYMLINK_HOPS) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Path "${targetPath}" exceeded maximum symbolic link depth (${MAX_SYMLINK_HOPS}).`
+    );
+  }
   let current = path4.resolve(targetPath);
   const trailingSegments = [];
   for (; ; ) {
@@ -60405,6 +60563,24 @@ function nativeRealPathOrNearestParent(targetPath) {
       const real = fs4.realpathSync.native(current);
       return trailingSegments.length > 0 ? path4.join(real, ...trailingSegments) : real;
     } catch {
+      let lstat = null;
+      try {
+        lstat = fs4.lstatSync(current);
+      } catch (lstatErr) {
+        const code = lstatErr?.code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") {
+          throw new AgPluginError(
+            "PATH_TRAVERSAL_BLOCKED",
+            `Cannot safely inspect path "${current}" (${code ?? "unknown error"}).`
+          );
+        }
+      }
+      if (lstat?.isSymbolicLink()) {
+        const linkTarget = fs4.readlinkSync(current);
+        const resolvedLink = path4.resolve(path4.dirname(current), linkTarget);
+        const nextPath = trailingSegments.length > 0 ? path4.join(resolvedLink, ...trailingSegments) : resolvedLink;
+        return nativeRealPathOrNearestParent(nextPath, depth + 1);
+      }
       const parent = path4.dirname(current);
       if (parent === current) {
         return path4.resolve(targetPath);
@@ -60436,6 +60612,9 @@ function assertNoWindowsAlias(posixRel, what) {
 function realWorkspaceRoot(workspaceRoot) {
   return fs4.realpathSync.native(path4.resolve(workspaceRoot));
 }
+function isEnvFileName(base) {
+  return base === ".env" || base.startsWith(".env.") || base === ".envrc" || base.startsWith(".env_") || base.startsWith(".env-");
+}
 function isProtectedWritePath(posixRel) {
   const lower2 = posixRel.toLowerCase();
   const segments = lower2.split("/").filter(Boolean);
@@ -60452,7 +60631,7 @@ function isProtectedWritePath(posixRel) {
     return true;
   }
   const base = segments[segments.length - 1];
-  if (base === ".env" || base.startsWith(".env.")) {
+  if (isEnvFileName(base)) {
     return true;
   }
   return false;
@@ -60466,8 +60645,11 @@ function isProtectedReadPath(posixRel) {
   if (segments.includes(".ssh")) {
     return true;
   }
+  if (lower2 === ".ag-bridge/config.json") {
+    return true;
+  }
   const base = segments[segments.length - 1];
-  if ((base === ".env" || base.startsWith(".env.")) && base !== ".env.example" && base !== ".env.sample") {
+  if (isEnvFileName(base) && base !== ".env.example" && base !== ".env.sample") {
     return true;
   }
   if (base.endsWith(".pem") || base.endsWith(".key") || base === "id_rsa" || base === "id_ed25519") {
@@ -60726,17 +60908,36 @@ function whyConfigIsNotUsers(workspaceRoot) {
   if (trackedState === "tracked") {
     return "the file is tracked by git, so the repository may have supplied it";
   }
-  if (trackedState === "unknown" && resolveGitExcludePath(workspaceRoot) !== null) {
+  if (trackedState === "unknown" && hasAnyDotGitEntry(workspaceRoot)) {
     return "git could not verify whether the file is tracked in this repository";
   }
   return void 0;
+}
+function isSafeExternalAppPath(workspaceRoot, appPath) {
+  if (!isLocalAbsolutePath(appPath)) {
+    return false;
+  }
+  try {
+    const resolved = nativeRealPathOrNearestParent(appPath);
+    if (process.platform === "win32" && /^[\\/]{2}/.test(resolved)) {
+      return false;
+    }
+    return !isInsideWorkspace(workspaceRoot, appPath);
+  } catch {
+    return false;
+  }
 }
 function applyConfigTrust(workspaceRoot, data, merged, base) {
   const ignored = [];
   const fromFile2 = (section, key) => data[section]?.[key];
   const unsafe = TRUST_SENSITIVE.filter(([section, key, isUnsafe]) => isUnsafe(fromFile2(section, key)));
-  const notOwn = unsafe.length > 0 ? whyConfigIsNotUsers(workspaceRoot) : void 0;
+  const unsafeExecMode = data.execution_mode !== void 0 && data.execution_mode !== base.execution_mode;
+  const notOwn = unsafe.length > 0 || unsafeExecMode ? whyConfigIsNotUsers(workspaceRoot) : void 0;
   if (notOwn) {
+    if (unsafeExecMode) {
+      merged.execution_mode = base.execution_mode;
+      ignored.push(`execution_mode (${notOwn})`);
+    }
     for (const [section, key] of unsafe) {
       const target = merged[section];
       const fallback = base[section][key];
@@ -60746,9 +60947,9 @@ function applyConfigTrust(workspaceRoot, data, merged, base) {
     }
   }
   const appPath = merged.subscription.app_path;
-  if (appPath !== "auto" && (!isFullyQualifiedPath(appPath) || isInsideWorkspace(workspaceRoot, appPath))) {
+  if (appPath !== "auto" && !isSafeExternalAppPath(workspaceRoot, appPath)) {
     merged.subscription.app_path = "auto";
-    ignored.push("subscription.app_path (not an absolute path outside the workspace)");
+    ignored.push("subscription.app_path (not a local absolute path outside the workspace)");
   }
   return ignored;
 }
@@ -60772,9 +60973,11 @@ function resolveApiKey(config2, env = process.env) {
 function maskSecrets(input2, extraSecrets = [], env = process.env) {
   let result = input2;
   const candidates = /* @__PURE__ */ new Set();
-  const envKeys = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
-  for (const k of envKeys) {
-    const val = env[k]?.trim();
+  const envKeys = /* @__PURE__ */ new Set(["GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+  for (const [k, rawVal] of Object.entries(env)) {
+    const matches = process.platform === "win32" ? envKeys.has(k.toUpperCase()) : envKeys.has(k);
+    if (!matches) continue;
+    const val = rawVal?.trim();
     if (val && val.length >= 8) {
       candidates.add(val);
     }
@@ -60785,14 +60988,15 @@ function maskSecrets(input2, extraSecrets = [], env = process.env) {
       candidates.add(trimmed);
     }
   }
-  for (const secret of candidates) {
+  const ordered = Array.from(candidates).sort((a, b) => b.length - a.length);
+  for (const secret of ordered) {
     result = result.split(secret).join("[REDACTED]");
   }
   result = result.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED]");
   result = result.replace(/ya29\.[0-9A-Za-z._-]{20,}/g, "[REDACTED]");
-  result = result.replace(/\b4\/0[A-Za-z0-9_-]{20,}\b/g, "[REDACTED]");
-  result = result.replace(/\bsk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}\b/g, "[REDACTED]");
-  result = result.replace(/\bgh[pousr]_[0-9A-Za-z]{20,}\b/g, "[REDACTED]");
+  result = result.replace(/(?<![A-Za-z0-9])4\/0[A-Za-z0-9_-]{20,}/g, "[REDACTED]");
+  result = result.replace(/(?<![A-Za-z0-9])sk-(?:proj-|ant-)?[0-9A-Za-z_-]{20,}/g, "[REDACTED]");
+  result = result.replace(/(?<![A-Za-z0-9])gh[pousr]_[0-9A-Za-z]{20,}/g, "[REDACTED]");
   result = result.replace(/\b(Bearer\s+)[A-Za-z0-9\-._~+/=]{16,}/gi, "$1[REDACTED]");
   return result;
 }
@@ -60807,17 +61011,22 @@ function classifyArtifactKind(filePath) {
   return "other";
 }
 function collectArtifactFiles(workspaceRoot, taskId) {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, "artifacts", taskId])) {
+    return [];
+  }
   const artDir = getArtifactsDir(workspaceRoot, taskId);
   if (!fs6.existsSync(artDir)) return [];
   const entries = [];
   const walk = (dir) => {
     for (const dirent of fs6.readdirSync(dir, { withFileTypes: true })) {
+      if (dirent.isSymbolicLink()) continue;
       const full = path6.join(dir, dirent.name);
       if (dirent.isDirectory()) {
         walk(full);
       } else if (dirent.isFile()) {
         try {
-          const stat3 = fs6.statSync(full);
+          const stat3 = fs6.lstatSync(full);
+          if (!stat3.isFile()) continue;
           entries.push({
             name: dirent.name,
             relativePath: path6.relative(workspaceRoot, full).replace(/\\/g, "/"),
@@ -60835,16 +61044,11 @@ function collectArtifactFiles(workspaceRoot, taskId) {
   return entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 function readMaskedLogTail(workspaceRoot, taskId, maxLines) {
-  const logPath = path6.join(getArtifactsDir(workspaceRoot, taskId), "agy-cli.log");
-  if (!fs6.existsSync(logPath)) return void 0;
-  try {
-    const raw = fs6.readFileSync(logPath, "utf8");
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return void 0;
-    return maskSecrets(lines.slice(-Math.max(1, maxLines)).join("\n"));
-  } catch {
-    return void 0;
-  }
+  const raw = readSafeFileTail(workspaceRoot, [BRIDGE_DIR_NAME, "artifacts", taskId, "agy-cli.log"]);
+  if (!raw) return void 0;
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return void 0;
+  return maskSecrets(lines.slice(-Math.max(1, maxLines)).join("\n"));
 }
 function handleListArtifacts(input2 = {}) {
   const workspaceRoot = path6.resolve(input2.workspaceRoot ?? process.cwd());
@@ -61548,8 +61752,13 @@ function buildCliInvocationArgs(ctx) {
 }
 function quoteForWindowsCmd(arg) {
   const sanitized = arg.replace(/[\r\n\0]+/g, " ");
-  const escaped = sanitized.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1").replace(/%/g, "%%");
-  return `"${escaped}"`;
+  const chunks = sanitized.split("%").map((chunk) => {
+    if (chunk.length === 0) return "";
+    const escaped = chunk.replace(/(\\*)"/g, '$1$1""').replace(/(\\+)$/, "$1$1");
+    return `"${escaped}"`;
+  });
+  const joined = chunks.join("^%");
+  return joined.length === 0 ? '""' : joined;
 }
 function buildCliSpawnSpec(cliPath, args, platform = process.platform, env = process.env) {
   if (platform === "win32" && /\.(cmd|bat)$/i.test(cliPath)) {
@@ -62838,8 +63047,16 @@ async function completeManualLoginFlow(code, sessionId, deps) {
         });
         return;
       }
+      const codeSecrets = [trimmedCode];
+      try {
+        const parsedUrl = new URL(trimmedCode);
+        const qp = parsedUrl.searchParams.get("code");
+        if (qp) codeSecrets.push(qp);
+      } catch {
+      }
       const detail = maskSecrets(
-        (session.stderr || session.stdout).trim().split(/\r?\n/).slice(-3).join(" ")
+        (session.stderr || session.stdout).trim().split(/\r?\n/).slice(-3).join(" "),
+        codeSecrets
       );
       finish({
         ok: false,
@@ -62859,12 +63076,30 @@ async function completeManualLoginFlow(code, sessionId, deps) {
         errorMessage: detail || `Code exchange failed with exit code ${exitCode ?? "unknown"}.`
       });
     });
+    if (/[\r\n\0]/.test(trimmedCode)) {
+      finish({
+        ok: false,
+        action: "complete",
+        status: "FAILED",
+        authenticated: false,
+        authMethod: "none",
+        cliDetected: true,
+        cliBinary: "agy",
+        cliPath: session.cliPath,
+        message: "Authorization code must not contain newline or NUL control characters.",
+        nextSteps: ["Copy the single-line authorization code or callback URL and retry `/ag-login complete <code>`."],
+        warnings: [],
+        errorCode: "AUTH_LOGIN_FAILED",
+        errorMessage: "Control characters (CR/LF/NUL) are not allowed in OAuth authorization code."
+      });
+      return;
+    }
     try {
       session.child.stdin?.write(`${trimmedCode}
 `);
       session.child.stdin?.end();
     } catch (err) {
-      const msg = maskSecrets(err instanceof Error ? err.message : String(err));
+      const msg = maskSecrets(err instanceof Error ? err.message : String(err), [trimmedCode]);
       finish({
         ok: false,
         action: "complete",
@@ -63022,7 +63257,9 @@ async function handleAgAuth(input2 = {}, deps = {}) {
 import { spawn as spawn3 } from "node:child_process";
 import fs10 from "node:fs";
 import path10 from "node:path";
-var VALID_SERVER_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+var VALID_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+var VALID_ENV_KV_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+var VALID_HEADER_RE = /^[A-Za-z0-9-]+:/;
 var CONTROL_CHAR_RE = /[\r\n\0]/;
 function hasControlChars(values) {
   return values.some((v) => typeof v === "string" && CONTROL_CHAR_RE.test(v));
@@ -63293,6 +63530,17 @@ ${summary || "(No eligible MCP servers found.)"}`,
           errorMessage: "Control characters (CR/LF/NUL) are not allowed in `mcp_add` arguments, envVars, or headers."
         };
       }
+      if ((input2.envVars ?? []).some((kv) => !VALID_ENV_KV_RE.test(kv)) || (input2.headers ?? []).some((h2) => !VALID_HEADER_RE.test(h2))) {
+        return {
+          ok: false,
+          action: input2.action,
+          cliPath,
+          output: "",
+          warnings,
+          errorCode: "CLI_ADMIN_FAILED",
+          errorMessage: "Invalid `envVars` (expected KEY=VALUE) or `headers` (expected Name: Value) format in `mcp_add`."
+        };
+      }
       cliArgs = buildMcpAddArgs({
         name: input2.name,
         commandOrUrl: input2.commandOrUrl,
@@ -63359,7 +63607,6 @@ ${summary || "(No eligible MCP servers found.)"}`,
 }
 
 // src/jobs.ts
-import fs14 from "node:fs";
 import path13 from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81447,7 +81694,23 @@ var ALLOWED_BINARIES = /* @__PURE__ */ new Set([
   "vite"
 ]);
 var ALLOWED_NPX_TOOLS = /* @__PURE__ */ new Set(["tsc", "eslint", "prettier", "vitest", "jest", "next", "vite"]);
-var ALLOWED_NPM_SUBCOMMANDS = /* @__PURE__ */ new Set(["run", "test"]);
+var ALLOWED_PKG_MANAGER_SUBCOMMANDS = /* @__PURE__ */ new Set(["run", "test"]);
+var PKG_MANAGERS = /* @__PURE__ */ new Set(["npm", "pnpm", "yarn", "bun"]);
+var DANGEROUS_CLI_FLAGS = /* @__PURE__ */ new Set([
+  "-e",
+  "--eval",
+  "-p",
+  "--print",
+  "-r",
+  "--require",
+  "--import",
+  "--loader",
+  "--preload",
+  "--script-shell",
+  "--node-options",
+  "--userconfig",
+  "--globalconfig"
+]);
 function tokenizeSimpleCommand(command) {
   const tokens = [];
   let current = "";
@@ -81513,12 +81776,21 @@ function validateCommandPolicy(command) {
     );
   }
   const args = tokens.slice(1);
-  if (binLower === "npm") {
-    const sub = args[0]?.toLowerCase();
-    if (!sub || !ALLOWED_NPM_SUBCOMMANDS.has(sub)) {
+  for (const arg of args) {
+    const flagName = arg.split("=")[0].toLowerCase();
+    if (DANGEROUS_CLI_FLAGS.has(flagName)) {
       throw new AgPluginError(
         "COMMAND_NOT_ALLOWED",
-        'Only "npm run <script>" and "npm test" are allowed.'
+        `Flag "${arg}" is denied by command security policy.`
+      );
+    }
+  }
+  if (PKG_MANAGERS.has(binLower)) {
+    const sub = args[0]?.toLowerCase();
+    if (!sub || !ALLOWED_PKG_MANAGER_SUBCOMMANDS.has(sub)) {
+      throw new AgPluginError(
+        "COMMAND_NOT_ALLOWED",
+        `Only "${binLower} run <script>" and "${binLower} test" are allowed (subcommand "${args[0] ?? ""}" is denied).`
       );
     }
   } else if (binLower === "npx") {
@@ -81542,12 +81814,19 @@ function truncateTail(text, maxBytes) {
   return `[... truncated ${omitted} leading bytes ...]
 ${tail}`;
 }
-function createSanitizedEnv() {
-  const env = { ...process.env };
-  delete env.GEMINI_API_KEY;
-  delete env.GOOGLE_API_KEY;
-  delete env.ANTHROPIC_API_KEY;
-  delete env.OPENAI_API_KEY;
+function createSanitizedEnv(extraVarNames = [], sourceEnv = process.env) {
+  const denyUpper = /* @__PURE__ */ new Set([
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    ...extraVarNames.filter(Boolean).map((k) => k.toUpperCase())
+  ]);
+  const env = {};
+  for (const [k, v] of Object.entries(sourceEnv)) {
+    if (denyUpper.has(k.toUpperCase())) continue;
+    env[k] = v;
+  }
   return env;
 }
 function killProcessTree(pid, isWin) {
@@ -81568,9 +81847,9 @@ function killProcessTree(pid, isWin) {
   } catch {
   }
 }
-async function defaultCommandRunner(command, cwd, timeoutSec) {
+async function defaultCommandRunner(command, cwd, timeoutSec, options) {
   const { bin, args } = validateCommandPolicy(command);
-  const env = createSanitizedEnv();
+  const env = createSanitizedEnv(options?.extraSensitiveEnvVars);
   const isWin = process.platform === "win32";
   const execBin = isWin ? windowsShell(env) : bin;
   const execArgs = isWin ? ["/d", "/s", "/c", bin, ...args] : args;
@@ -82073,7 +82352,8 @@ ${formatTokenUsageMarkdown(metrics2)}`;
               const execRes = await this.commandRunner(
                 cmd,
                 ctx.workspaceRoot,
-                ctx.config.api.command_timeout_sec
+                ctx.config.api.command_timeout_sec,
+                { extraSensitiveEnvVars: [ctx.config.api.api_key_env], abortSignal: ctx.abortSignal }
               );
               commandsRun.push({ command: cmd, exitCode: execRes.exitCode });
               toolResult = {
@@ -82202,16 +82482,11 @@ ${formatTokenUsageMarkdown(metrics2)}`;
 
 // src/jobs.ts
 function readLogTail(workspaceRoot, taskId, maxLines = 30) {
-  const logPath = path13.join(getArtifactsDir(workspaceRoot, taskId), "agy-cli.log");
-  try {
-    if (!fs14.existsSync(logPath)) return void 0;
-    const raw = fs14.readFileSync(logPath, "utf8");
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return void 0;
-    return maskSecrets(lines.slice(-maxLines).join("\n"));
-  } catch {
-    return void 0;
-  }
+  const raw = readSafeFileTail(workspaceRoot, [BRIDGE_DIR_NAME, "artifacts", taskId, "agy-cli.log"]);
+  if (!raw) return void 0;
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return void 0;
+  return maskSecrets(lines.slice(-maxLines).join("\n"));
 }
 function extractAgyOptions(input2) {
   return {
@@ -83327,7 +83602,7 @@ async function handleCheckEnvironment(workspaceRootInput, deps = {}) {
       agent: config2.subscription.agy_agent
     },
     bridge: {
-      initialized: fs15.existsSync(getBridgeDir(workspaceRoot)),
+      initialized: fs14.existsSync(getBridgeDir(workspaceRoot)),
       gitignoreProtected: isGitignoreProtected(workspaceRoot),
       currentStatus: manifest?.status ?? "IDLE",
       lastTaskId: manifest?.taskId,

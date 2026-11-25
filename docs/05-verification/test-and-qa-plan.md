@@ -90,6 +90,7 @@
 | `TC-S25` | `api-worker.ts` | Gemini API 호출 실패(`catch` 경로) 시 모델 텍스트·오류에 API 키 포함; `read_file`/`list_dir`에 `NaN` 숫자 인자 전달 | `.ag-bridge/report.md` 포함 모든 출력에서 비밀 `[REDACTED]`, `NaN` 인자는 안전한 기본값으로 보정 | `NFR-002` |
 | `TC-S26` | `cli-admin.ts` | `mcp_add` 실패 시 `--env`/`--header` 비밀값 포함; `.mcp.json` 동기화 항목에 CR/LF 제어문자·HTTP `headers`·실패 서버 포함 | `errorMessage`에서 `--env`/`--header` 값 `[REDACTED]`, 제어문자 항목 스킵, `headers` 정상 전달, 실패 서버 존재 시 `ok: false` 반환 | `NFR-002` |
 | `TC-S27` | `git-guard.ts` | `removeTaskWorktree`에 `.ag-bridge/worktrees/` 외부 경로·경로 탈출 경로 전달 및 변조된 매니페스트의 `main` 브랜치 삭제 시도 | 외부/탈출 경로는 `PATH_TRAVERSAL_BLOCKED` 거부, `ag-task/` 외 브랜치는 삭제 거부 및 경고 반환 | `NFR-001` |
+| `TC-S28` ~ `TC-S34` | `subscription.ts` · `api-worker.ts` · `path-guard.ts` · `bridge-fs.ts` · `git-guard.ts` · `config.ts` · `artifacts.ts` · `cli-admin.ts` · `auth.ts` | Windows `.cmd` `"`/`%VAR%` 인젝션; `pnpm`/`yarn`/`bun` 서브커맨드·위험 플래그 우회 및 커스텀 키 대소문자 유출; dangling symlink 쓰기 및 `.ag-bridge/config.json`/`.envrc` 접근; SessionStart `.agent`/`.ag-bridge` 심볼릭 링크 외부 쓰기; `gitCheckpointRef` `--output=` 옵션 인젝션; `.git/info` 링크 시 fail-open & Windows UNC `app_path`; `artifacts` 심볼릭 링크 읽기·`cli-admin` 선두 `-`·`auth` 개행 코드 인젝션 | 모든 인젝션·탈출·우회 시도가 100% 차단되고 외부 파일/환경변수 노출 0건 | `NFR-001`, `NFR-002` |
 
 ---
 

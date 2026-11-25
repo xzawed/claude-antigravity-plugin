@@ -709,7 +709,16 @@ export function rollbackCheckpoint(
     );
   }
 
-  const ref = manifest.gitCheckpointRef;
+  const ref = manifest.gitCheckpointRef.trim();
+  // manifest.json is writable by the delegated agent (ARC-003 §5.5): require a raw SHA-1/SHA-256
+  // commit OID so an untrusted manifest can never inject git flags like `--output=/etc/pwned` or
+  // arbitrary rev specs like `HEAD~50` into git diff / reset.
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(ref)) {
+    throw new AgPluginError(
+      'GIT_CHECKPOINT_FAILED',
+      `Invalid gitCheckpointRef "${manifest.gitCheckpointRef}": expected a 40- or 64-character hexadecimal commit hash.`,
+    );
+  }
 
   // reset --hard moves whichever branch is checked out: after the agent switched to the user's
   // dev, it moved dev onto main's commit (measured; TC-S23d). Refuse before changing anything.
@@ -778,7 +787,7 @@ export function rollbackCheckpoint(
   //   them (Grok leg, measured; TC-S23, TC-S23b);
   // - the files the agent created and staged or committed — reset --hard deleted them for good;
   //   left in the work tree, they go to the recovery folder with the rest (TC-S24b).
-  const addedRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=A', ref]);
+  const addedRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=A', ref, '--']);
   if (!addedRes.ok) {
     throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${addedRes.stderr}`);
   }
@@ -800,7 +809,7 @@ export function rollbackCheckpoint(
   // A file at a path the agent removed from git (`git rm`) and then wrote again is untracked now;
   // reset --hard overwrote it with the checkpoint's version and kept no copy (Antigravity review,
   // measured; TC-S24i). Move it aside first; reset then writes the checkpoint's file.
-  const removedFromIndexRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=D', ref]);
+  const removedFromIndexRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=D', ref, '--']);
   if (!removedFromIndexRes.ok) {
     throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
   }
@@ -817,7 +826,7 @@ export function rollbackCheckpoint(
 
   // What the rollback reverts: every tracked path that differs from the checkpoint, the agent's
   // commits included. `git status` named the user's untouched untracked files instead (TC-U36).
-  const diffRes = tryRunGit(workspaceRoot, ['diff', '--name-only', '-z', '--no-renames', ref]);
+  const diffRes = tryRunGit(workspaceRoot, ['diff', '--name-only', '-z', '--no-renames', ref, '--']);
   if (!diffRes.ok) {
     throw new AgPluginError(
       'GIT_CHECKPOINT_FAILED',
