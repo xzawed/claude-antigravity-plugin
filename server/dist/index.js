@@ -60016,6 +60016,17 @@ function isProtectedReadPath(posixRel) {
   }
   return false;
 }
+function resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, rawPath) {
+  if (path3.isAbsolute(rawPath)) {
+    const resolvedInputRoot = path3.resolve(workspaceRoot);
+    const resolvedRaw = path3.resolve(rawPath);
+    if (isInsideRoot(resolvedInputRoot, resolvedRaw)) {
+      return path3.resolve(realRoot, path3.relative(resolvedInputRoot, resolvedRaw));
+    }
+    return resolvedRaw;
+  }
+  return path3.resolve(realRoot, rawPath);
+}
 function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
   if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
     throw new AgPluginError(
@@ -60030,7 +60041,7 @@ function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
     if (!scope || scope.includes("\0")) {
       throw new AgPluginError("INVALID_LOCKED_PATHS", `Invalid lockedPath entry: "${rawScope}"`);
     }
-    const resolved = path3.resolve(realRoot, scope);
+    const resolved = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, scope);
     if (!isInsideRoot(realRoot, resolved)) {
       throw new AgPluginError(
         "INVALID_LOCKED_PATHS",
@@ -60067,7 +60078,7 @@ function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
     );
   }
   const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path3.resolve(realRoot, targetPath);
+  const resolvedTarget = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, targetPath);
   if (!isInsideRoot(realRoot, resolvedTarget)) {
     throw new AgPluginError(
       "PATH_TRAVERSAL_BLOCKED",
@@ -60094,7 +60105,7 @@ function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
     if (!trimmed || trimmed.includes("\0")) {
       return false;
     }
-    const resolvedScope = path3.resolve(realRoot, trimmed);
+    const resolvedScope = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, trimmed);
     if (!isInsideRoot(realRoot, resolvedScope)) {
       return false;
     }
@@ -60123,7 +60134,7 @@ function assertReadablePath(workspaceRoot, targetPath) {
     throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
   }
   const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path3.resolve(realRoot, targetPath);
+  const resolvedTarget = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, targetPath);
   if (!isInsideRoot(realRoot, resolvedTarget)) {
     throw new AgPluginError(
       "PATH_TRAVERSAL_BLOCKED",

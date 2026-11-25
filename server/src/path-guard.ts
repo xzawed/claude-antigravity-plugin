@@ -164,6 +164,23 @@ function isProtectedReadPath(posixRel: string): boolean {
   return false;
 }
 
+/**
+ * Resolve `rawPath` relative to `realRoot`, also rebasing absolute paths expressed via the
+ * caller's un-canonicalized `workspaceRoot` alias (for example macOS `/var/folders/...` when
+ * `realRoot` is `/private/var/folders/...`, or Windows 8.3 short-name runner temp directories).
+ */
+function resolveAgainstWorkspaceRoot(workspaceRoot: string, realRoot: string, rawPath: string): string {
+  if (path.isAbsolute(rawPath)) {
+    const resolvedInputRoot = path.resolve(workspaceRoot);
+    const resolvedRaw = path.resolve(rawPath);
+    if (isInsideRoot(resolvedInputRoot, resolvedRaw)) {
+      return path.resolve(realRoot, path.relative(resolvedInputRoot, resolvedRaw));
+    }
+    return resolvedRaw;
+  }
+  return path.resolve(realRoot, rawPath);
+}
+
 export function validateLockedPathsConfig(workspaceRoot: string, lockedPaths: string[]): string[] {
   if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
     throw new AgPluginError(
@@ -181,7 +198,7 @@ export function validateLockedPathsConfig(workspaceRoot: string, lockedPaths: st
       throw new AgPluginError('INVALID_LOCKED_PATHS', `Invalid lockedPath entry: "${rawScope}"`);
     }
 
-    const resolved = path.resolve(realRoot, scope);
+    const resolved = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, scope);
     if (!isInsideRoot(realRoot, resolved)) {
       throw new AgPluginError(
         'INVALID_LOCKED_PATHS',
@@ -229,7 +246,7 @@ export function assertWritablePath(
   }
 
   const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path.resolve(realRoot, targetPath);
+  const resolvedTarget = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, targetPath);
 
   if (!isInsideRoot(realRoot, resolvedTarget)) {
     throw new AgPluginError(
@@ -260,7 +277,7 @@ export function assertWritablePath(
     if (!trimmed || trimmed.includes('\0')) {
       return false;
     }
-    const resolvedScope = path.resolve(realRoot, trimmed);
+    const resolvedScope = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, trimmed);
     if (!isInsideRoot(realRoot, resolvedScope)) {
       return false;
     }
@@ -294,7 +311,7 @@ export function assertReadablePath(workspaceRoot: string, targetPath: string): s
   }
 
   const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path.resolve(realRoot, targetPath);
+  const resolvedTarget = resolveAgainstWorkspaceRoot(workspaceRoot, realRoot, targetPath);
 
   if (!isInsideRoot(realRoot, resolvedTarget)) {
     throw new AgPluginError(
