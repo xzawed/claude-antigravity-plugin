@@ -1,6 +1,6 @@
 ---
 description: Delegate any frontend UI, multi-file, browser E2E, or full Antigravity CLI task (models, effort, agents, resume, --dangerously-skip-permissions, token usage)
-argument-hint: "<task> [--paths p1,p2] [--url http://localhost:3000] [--mode auto|subscription|api] [--model <id>] [--effort low|medium|high|xhigh|max] [--agy-mode accept-edits|auto|plan] [--dangerously-skip-permissions] [--no-sandbox] [--continue | --conversation <id>] [--agent <name>] [--add-dir <dir>]"
+argument-hint: "<task> [--paths p1,p2] [--url http://localhost:3000] [--mode auto|subscription|api] [--model <id>] [--effort low|medium|high|xhigh|max] [--agy-mode accept-edits|auto|plan] [--dangerously-skip-permissions] [--no-sandbox] [--worktree] [--continue | --conversation <id>] [--agent <name>] [--add-dir <dir>]"
 ---
 
 # `/ag-delegate` — Delegate Any Task to Antigravity
@@ -29,6 +29,7 @@ Parse any of these optional flags from `$ARGUMENTS`:
 - `--json-schema <schema-or-path>` → `jsonSchema`
 - `--disable-slash-commands` → `disableSlashCommands: true`
 - `--settings <json-or-path>` → `settings`
+- `--worktree` → `isolateWorktree: true` (runs in an isolated Git worktree `.ag-bridge/worktrees/<taskId>` on branch `ag-task/<taskId>`, leaving the parent working tree clean)
 - `--timeout <sec>` → `timeoutSec`
 
 ## Steps
@@ -44,6 +45,6 @@ Parse any of these optional flags from `$ARGUMENTS`:
    - In `api` mode, require `tsc --noEmit` / project build verification.
 5. **Execute Delegation:** Call `delegate_to_antigravity(...)` with all parsed options.
 6. **Review & Report:** Present a clean summary including:
-   - `taskId`, `mode`, `status`, `changedFiles`, `artifacts`, `gitCheckpointRef`
+   - `taskId`, `mode`, `status`, `changedFiles`, `artifacts`, `gitCheckpointRef` (and `worktreePath` / `worktreeBranch` when `--worktree` was used)
    - **Execution Metrics & Token Usage:** `metrics.model`, `metrics.conversationId` (so the user can resume with `--conversation <id>`), `metrics.permissionMode`, `metrics.durationSeconds`, `metrics.numTurns`, and `metrics.usage` (`inputTokens`, `outputTokens`, `thinkingTokens`, `cacheReadTokens`, `totalTokens`)
    - Key findings from `reportMarkdown` and any `warnings`

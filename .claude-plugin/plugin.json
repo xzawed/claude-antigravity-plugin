@@ -1,6 +1,6 @@
 {
   "name": "antigravity-delegate",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Delegate UI implementation, multi-file frontend tasks, browser E2E verification, and full Antigravity CLI workflows (models, effort, agents, --dangerously-skip-permissions, and token usage tracking) from Claude Code to Antigravity (Subscription CLI/App or Gemini API).",
   "author": {
     "name": "xzawed"
