@@ -16,6 +16,7 @@ import { ExecutionContext, ExecutionEngine, ExecutionResult } from './base.js';
 import { formatTokenUsageMarkdown } from './subscription.js';
 
 const MAX_READ_BYTES = 64 * 1024;
+const MAX_FILE_READ_BYTES = 2 * 1024 * 1024;
 const MAX_CMD_OUTPUT_BYTES = 16 * 1024;
 const MAX_LIST_ENTRIES = 200;
 
@@ -36,6 +37,7 @@ export interface GeminiAdapter {
     systemInstruction: string;
     contents: Content[];
     tools: FunctionDeclaration[];
+    abortSignal?: AbortSignal;
   }): Promise<ModelTurnResponse>;
 }
 
@@ -282,6 +284,9 @@ export async function defaultCommandRunner(
   options?: { extraSensitiveEnvVars?: string[]; abortSignal?: AbortSignal },
 ): Promise<CommandExecResult> {
   const { bin, args } = validateCommandPolicy(command);
+  if (options?.abortSignal?.aborted) {
+    return { exitCode: 1, stdout: '', stderr: 'Command cancelled by abort signal.', timedOut: false };
+  }
   const env = createSanitizedEnv(options?.extraSensitiveEnvVars);
   const isWin = process.platform === 'win32';
   // The interpreter is an absolute path (TC-S15). `bin` itself stays a name: the allowlisted
@@ -305,10 +310,17 @@ export async function defaultCommandRunner(
     let timedOut = false;
     let settled = false;
 
+    const onAbort = (): void => {
+      stderr += '\nCommand cancelled by abort signal.';
+      killProcessTree(child.pid, isWin);
+      finish(1);
+    };
+
     const finish = (exitCode: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options?.abortSignal?.removeEventListener('abort', onAbort);
       resolve({
         exitCode,
         stdout: truncateTail(stdout, MAX_CMD_OUTPUT_BYTES),
@@ -316,6 +328,14 @@ export async function defaultCommandRunner(
         timedOut,
       });
     };
+
+    if (options?.abortSignal) {
+      if (options.abortSignal.aborted) {
+        onAbort();
+        return;
+      }
+      options.abortSignal.addEventListener('abort', onAbort, { once: true });
+    }
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
       if (stdout.length < MAX_CAPTURE) {
@@ -349,13 +369,14 @@ export async function defaultCommandRunner(
 function createDefaultGeminiAdapter(apiKey: string): GeminiAdapter {
   const ai = new GoogleGenAI({ apiKey });
   return {
-    async generateTurn({ model, systemInstruction, contents, tools }) {
+    async generateTurn({ model, systemInstruction, contents, tools, abortSignal }) {
       const response = await ai.models.generateContent({
         model,
         contents,
         config: {
           systemInstruction,
           tools: [{ functionDeclarations: tools }],
+          ...(abortSignal ? { abortSignal } : {}),
         },
       });
 
@@ -438,8 +459,18 @@ const WORKER_TOOL_DECLARATIONS: FunctionDeclaration[] = [
   },
 ];
 
+function canonicalWorkspaceRoot(workspaceRoot: string): string {
+  const resolved = path.resolve(workspaceRoot);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 function listWorkspaceDir(workspaceRoot: string, relDir: string, maxDepth: number): string[] {
   const safeDir = assertReadablePath(workspaceRoot, relDir || '.');
+  const canonicalRoot = canonicalWorkspaceRoot(workspaceRoot);
   const results: string[] = [];
   const ignored = new Set(['node_modules', '.git', '.ag-bridge', 'dist']);
 
@@ -451,7 +482,7 @@ function listWorkspaceDir(workspaceRoot: string, relDir: string, maxDepth: numbe
       if (results.length >= MAX_LIST_ENTRIES) break;
       if (ignored.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
-      const rel = path.relative(workspaceRoot, full).split(path.sep).join('/');
+      const rel = path.relative(canonicalRoot, full).split(path.sep).join('/');
       if (entry.isDirectory()) {
         results.push(`${rel}/`);
         if (depth < maxDepth) {
@@ -472,8 +503,19 @@ function isRetryableApiError(err: unknown): boolean {
   return /\b(429|500|502|503|504|RESOURCE_EXHAUSTED|UNAVAILABLE|ECONNRESET|ETIMEDOUT)\b/i.test(msg);
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  if (abortSignal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function buildSystemInstruction(ctx: ExecutionContext): string {
@@ -656,21 +698,56 @@ export class ApiWorkerEngine implements ExecutionEngine {
     let blockedWrites = 0;
     let nudgedForVerification = false;
     let lastModelText = '';
+    const canonicalRoot = canonicalWorkspaceRoot(ctx.workspaceRoot);
+    const totalProgressSteps = maxTurns * 2;
+
+    const buildCancelledResult = (): ExecutionResult => {
+      const metrics = buildMetrics();
+      const cancelledManifest: BridgeManifest = {
+        ...ctx.manifest,
+        status: 'FAILED',
+        changedFiles: Array.from(writtenFiles).sort(),
+        metrics,
+        updatedAt: new Date().toISOString(),
+        errorCode: 'TASK_CANCELLED',
+        error: 'Background API worker task was cancelled by user request.',
+      };
+      writeManifest(ctx.workspaceRoot, cancelledManifest);
+      const cancelReport = `# Antigravity Task Report (Cancelled)\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** CANCELLED\n- **Turns Completed:** ${turnsExecuted}\n\n${formatTokenUsageMarkdown(metrics)}`;
+      writeReportMarkdown(ctx.workspaceRoot, cancelReport);
+      return {
+        status: 'FAILED',
+        reportMarkdown: cancelReport,
+        changedFiles: Array.from(writtenFiles).sort(),
+        artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+        metrics,
+        warnings,
+        errorCode: 'TASK_CANCELLED',
+        errorMessage: 'Task was cancelled by user request.',
+      };
+    };
 
     const callModelWithRetry = async (): Promise<ModelTurnResponse> => {
       let lastErr: unknown;
       for (let attempt = 0; attempt <= 3; attempt++) {
+        if (ctx.abortSignal?.aborted) {
+          throw new AgPluginError('TASK_CANCELLED', 'Task was cancelled by user request.');
+        }
         try {
           return await adapter.generateTurn({
             model,
             systemInstruction,
             contents,
             tools: WORKER_TOOL_DECLARATIONS,
+            abortSignal: ctx.abortSignal,
           });
         } catch (err) {
+          if (ctx.abortSignal?.aborted) {
+            throw new AgPluginError('TASK_CANCELLED', 'Task was cancelled by user request.');
+          }
           lastErr = err;
           if (attempt < 3 && isRetryableApiError(err)) {
-            await sleep(this.retryBaseDelayMs * Math.pow(2, attempt));
+            await sleep(this.retryBaseDelayMs * Math.pow(2, attempt), ctx.abortSignal);
             continue;
           }
           break;
@@ -686,40 +763,21 @@ export class ApiWorkerEngine implements ExecutionEngine {
     try {
       for (let turn = 1; turn <= maxTurns; turn++) {
         if (ctx.abortSignal?.aborted) {
-          const metrics = buildMetrics();
-          const cancelledManifest: BridgeManifest = {
-            ...ctx.manifest,
-            status: 'FAILED',
-            changedFiles: Array.from(writtenFiles).sort(),
-            metrics,
-            updatedAt: new Date().toISOString(),
-            errorCode: 'TASK_CANCELLED',
-            error: 'Background API worker task was cancelled by user request.',
-          };
-          writeManifest(ctx.workspaceRoot, cancelledManifest);
-          const cancelReport = `# Antigravity Task Report (Cancelled)\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** CANCELLED\n- **Turns Completed:** ${turnsExecuted}\n\n${formatTokenUsageMarkdown(metrics)}`;
-          writeReportMarkdown(ctx.workspaceRoot, cancelReport);
-          return {
-            status: 'FAILED',
-            reportMarkdown: cancelReport,
-            changedFiles: Array.from(writtenFiles).sort(),
-            artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
-            metrics,
-            warnings,
-            errorCode: 'TASK_CANCELLED',
-            errorMessage: 'Task was cancelled by user request.',
-          };
+          return buildCancelledResult();
         }
         try {
           ctx.onProgress?.({
-            progress: turn - 1,
-            total: maxTurns,
+            progress: (turn - 1) * 2,
+            total: totalProgressSteps,
             message: `API worker turn ${turn}/${maxTurns}: calling ${model}`,
           });
         } catch {
           // ignore best-effort progress callback error
         }
         const turnResp = await callModelWithRetry();
+        if (ctx.abortSignal?.aborted) {
+          return buildCancelledResult();
+        }
         turnsExecuted = turn;
         addTurnUsage(turnResp.usage);
         if (turnResp.text) {
@@ -782,8 +840,8 @@ export class ApiWorkerEngine implements ExecutionEngine {
 
           try {
             ctx.onProgress?.({
-              progress: maxTurns,
-              total: maxTurns,
+              progress: totalProgressSteps,
+              total: totalProgressSteps,
               message: `API worker completed in ${turnsExecuted} turn(s)`,
             });
           } catch {
@@ -803,8 +861,8 @@ export class ApiWorkerEngine implements ExecutionEngine {
         try {
           const toolNames = calls.map((c) => c.name).join(', ');
           ctx.onProgress?.({
-            progress: turn,
-            total: maxTurns,
+            progress: (turn - 1) * 2 + 1,
+            total: totalProgressSteps,
             message: `API worker turn ${turn}/${maxTurns}: running ${toolNames}`,
           });
         } catch {
@@ -823,6 +881,9 @@ export class ApiWorkerEngine implements ExecutionEngine {
         const responseParts: Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = [];
 
         for (const call of calls) {
+          if (ctx.abortSignal?.aborted) {
+            return buildCancelledResult();
+          }
           let toolResult: Record<string, unknown>;
           try {
             if (call.name === 'read_file') {
@@ -831,20 +892,29 @@ export class ApiWorkerEngine implements ExecutionEngine {
               if (!fs.existsSync(absPath)) {
                 toolResult = { error: `File not found: ${filePath}` };
               } else {
-                const raw = fs.readFileSync(absPath, 'utf8');
-                const lines = raw.split(/\r?\n/);
-                const rawStart = Number(call.args.startLine ?? 1);
-                const rawEnd = Number(call.args.endLine ?? lines.length);
-                const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
-                const end = Number.isFinite(rawEnd)
-                  ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd)))
-                  : lines.length;
-                const sliced = lines.slice(start - 1, end).join('\n');
-                toolResult = {
-                  path: filePath,
-                  totalLines: lines.length,
-                  content: maskSecrets(truncateTail(sliced, MAX_READ_BYTES), [apiKey]),
-                };
+                const st = fs.statSync(absPath);
+                if (!st.isFile()) {
+                  toolResult = { error: `Not a regular file: ${filePath}` };
+                } else if (st.size > MAX_FILE_READ_BYTES) {
+                  toolResult = {
+                    error: `File "${filePath}" is too large to read (${st.size} bytes; limit is ${MAX_FILE_READ_BYTES} bytes).`,
+                  };
+                } else {
+                  const raw = fs.readFileSync(absPath, 'utf8');
+                  const lines = raw.split(/\r?\n/);
+                  const rawStart = Number(call.args.startLine ?? 1);
+                  const rawEnd = Number(call.args.endLine ?? lines.length);
+                  const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
+                  const end = Number.isFinite(rawEnd)
+                    ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd)))
+                    : lines.length;
+                  const sliced = lines.slice(start - 1, end).join('\n');
+                  toolResult = {
+                    path: filePath,
+                    totalLines: lines.length,
+                    content: maskSecrets(truncateTail(sliced, MAX_READ_BYTES), [apiKey]),
+                  };
+                }
               }
             } else if (call.name === 'write_file') {
               const filePath = String(call.args.path ?? '');
@@ -857,7 +927,7 @@ export class ApiWorkerEngine implements ExecutionEngine {
               fs.mkdirSync(path.dirname(absPath), { recursive: true });
               fs.writeFileSync(absPath, content, 'utf8');
               const relWritten = path
-                .relative(ctx.workspaceRoot, absPath)
+                .relative(canonicalRoot, absPath)
                 .split(path.sep)
                 .join('/');
               writtenFiles.add(relWritten);
@@ -923,6 +993,10 @@ export class ApiWorkerEngine implements ExecutionEngine {
         // Heartbeat manifest updatedAt
         runningManifest.updatedAt = new Date().toISOString();
         writeManifest(ctx.workspaceRoot, runningManifest);
+      }
+
+      if (ctx.abortSignal?.aborted) {
+        return buildCancelledResult();
       }
 
       // Max turns exceeded

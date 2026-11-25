@@ -17,7 +17,7 @@ describe('MCP Stdio protocol integration (TC-I01, TC-I06)', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 15, retryDelay: 150 });
   });
 
   it('TC-I01: exposes all 12 MCP tools over clean stdio JSON-RPC and executes check_ag_environment + ag_auth + get_ag_job + ag_session + list_ag_artifacts', async () => {

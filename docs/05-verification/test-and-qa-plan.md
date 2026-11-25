@@ -57,6 +57,7 @@
 | `TC-U44` | `subscription.ts` · `api-worker.ts` | `formatStreamEventProgress`의 `init`/`step_update`/`result` 매핑(비밀 마스킹 포함) 및 API 워커 멀티턴 `onProgress` 콜백 수신 | 진행률이 단조 증가하며 API 키 패턴은 `[REDACTED]`로 마스킹되고 턴/도구 호출 요약이 정상 전달됨 | `SPC-001`, `NFR-002` |
 | `TC-U45` ~ `TC-U45c` | `git-guard.ts` · `jobs.ts` · `index.ts` | `createTaskWorktree` / `removeTaskWorktree` 수명 주기, 2개 `start_ag_task({ isolateWorktree: true })` 동시 병렬 실행, 동기 `delegate_to_antigravity({ isolateWorktree: true })` 후 `rollback_ag_task` 정리 | 두 병렬 작업이 `BRIDGE_BUSY` 없이 각자 worktree에서 완료되고 부모 작업 트리는 깨끗하게 유지되며, `rollback_ag_task`가 worktree와 `ag-task/*` 브랜치만 제거 | `ARC-003`, `PRD §3.2` |
 | `TC-U46` ~ `TC-U48` | `git-guard.ts` · `bridge-fs.ts` · `jobs.ts` · `artifacts.ts` | 머지 충돌(unmerged index) 상태 롤백; `acquireBridgeLock`의 기록 `timeoutSec` 존중·손상 `manifest.json` 격리·원자적 `dispatch.lock`; `isolateWorktree` 절대 `lockedPaths` 및 디스크 폴백/`list_ag_artifacts` 조회 | 충돌 상태에서도 원복 성공, 짧은 타임아웃 호출자가 장기 실행 작업을 밀어내지 않으며 손상 매니페스트 격리 후 정상 복구, worktree 리포트·아티팩트·로그 테일 정상 반환 | `ARC-002`, `ARC-003` |
+| `TC-U49` ~ `TC-U53` | `sessions.ts` · `auth.ts` · `subscription.ts` · `api-worker.ts` · `detector.ts` · `cli-admin.ts` · `jobs.ts` · `bridge-fs.ts` | `stdin` `EPIPE` 크래시 방지 및 세션 체크포인트 아카이브 완료 갱신; Subscription 조기 종료 즉시 실패·손상 매니페스트 중단 내성·에러 비밀 마스킹; API Worker `abortSignal` 전달·단조 진행률·2MB 읽기 상한; `detector` 표준 `agy` 우선·`.app` 디렉터리 분리·누락 `app_path` 권고; `cli-admin` `null` 항목/커스텀 비밀 마스킹·`jobs` `IDLE` 비활성·`assertSafeTaskId` 예약어 차단 | 프로세스 미처리 예외 0건, 조기 종료 시 즉시 실패, 모든 출력 비밀 마스킹 및 예약어/디렉터리 안전 거부 | `NFR-002`, `NFR-004` |
 
 ---
 
