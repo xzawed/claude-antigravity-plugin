@@ -12,6 +12,7 @@ import {
 export const BRIDGE_DIR_NAME = '.ag-bridge';
 const MAX_HISTORY_ITEMS = 20;
 const SAFE_TASK_ID_RE = /^[a-zA-Z0-9._-]{1,128}$/;
+const WINDOWS_RESERVED_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 
 export function assertSafeTaskId(taskId: string): string {
   const trimmed = taskId.trim();
@@ -20,11 +21,15 @@ export function assertSafeTaskId(taskId: string): string {
     !SAFE_TASK_ID_RE.test(trimmed) ||
     trimmed === '.' ||
     trimmed === '..' ||
-    trimmed.includes('..')
+    trimmed.includes('..') ||
+    trimmed.startsWith('.') ||
+    trimmed.endsWith('.') ||
+    trimmed.toLowerCase().endsWith('.lock') ||
+    WINDOWS_RESERVED_DEVICE_RE.test(trimmed)
   ) {
     throw new AgPluginError(
       'PATH_TRAVERSAL_BLOCKED',
-      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal segments.`,
+      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal, leading/trailing dots, .lock suffix, or reserved device names.`,
     );
   }
   return trimmed;
@@ -110,8 +115,13 @@ export function readJsonWithRetry<T>(filePath: string): T | null {
       const raw = fs.readFileSync(filePath, 'utf8');
       return JSON.parse(raw) as T;
     } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return null;
+      }
       lastErr = err;
-      sleepSync(50 * (attempt + 1));
+      if (attempt < 2) {
+        sleepSync(50 * (attempt + 1));
+      }
     }
   }
   throw lastErr;

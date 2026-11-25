@@ -1,13 +1,13 @@
-import { ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { ChildProcess, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { archiveManifest, generateTaskId } from './bridge-fs.js';
+import { archiveManifest, generateTaskId, readArchivedManifest } from './bridge-fs.js';
 import { describeIgnoredSettings, loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
-import { requireExecutable } from './exec-path.js';
-import { buildCliSpawnSpec } from './engines/subscription.js';
+import { buildCliSpawnSpec, killChildProcessTree } from './engines/subscription.js';
 import { checkpointManifestFields, createCheckpoint, deleteCheckpointRef } from './git-guard.js';
 import {
+  AgErrorCode,
   AgSessionSummary,
   AgSessionToolInput,
   AgSessionToolOutput,
@@ -40,6 +40,7 @@ interface TurnWaiter {
   reject: (err: Error) => void;
   timer: NodeJS.Timeout;
   textFragments: string[];
+  textBytes: number;
 }
 
 interface TurnResult {
@@ -65,6 +66,8 @@ interface LivePersistentSession {
   usage?: TokenUsage;
   gitCheckpointRef?: string;
   checkpointTaskId?: string;
+  checkpointIsStash?: boolean;
+  checkpointFinalized?: boolean;
   createdAt: string;
   lastActivityAt: string;
   stdoutBuffer: string;
@@ -75,6 +78,8 @@ interface LivePersistentSession {
 
 const DEFAULT_IDLE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_TURN_TIMEOUT_SEC = 300;
+const MAX_STDOUT_BUFFER_BYTES = 16 * 1024 * 1024;
+const MAX_TEXT_FRAGMENTS_BYTES = 4 * 1024 * 1024;
 
 function parseUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -97,33 +102,37 @@ function parseUsage(raw: unknown): TokenUsage | undefined {
 }
 
 function killSessionProcess(child: ChildProcess, platform: NodeJS.Platform): void {
-  if (!child.pid) {
-    try {
-      child.kill();
-    } catch {
-      // ignore
-    }
-    return;
-  }
+  killChildProcessTree(child, platform, { escalateToSigkillMs: 2000 });
+}
+
+function finalizeSessionCheckpointManifest(
+  session: LivePersistentSession,
+  finalStatus: 'VERIFIED' | 'FAILED',
+  errorCode?: AgErrorCode,
+  errorMsg?: string,
+): void {
+  if (!session.checkpointTaskId || session.checkpointFinalized) return;
+  session.checkpointFinalized = true;
   try {
-    if (platform === 'win32') {
-      execFileSync(requireExecutable('taskkill'), ['/pid', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-        timeout: 5000,
-      });
-    } else {
-      try {
-        process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        child.kill('SIGTERM');
-      }
-    }
+    const existing = readArchivedManifest(session.workspaceRoot, session.checkpointTaskId);
+    if (!existing) return;
+    archiveManifest(session.workspaceRoot, {
+      ...existing,
+      status: finalStatus,
+      metrics: {
+        conversationId: session.conversationId,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        durationSeconds: session.durationSeconds,
+        numTurns: session.numTurns,
+        usage: session.usage,
+      },
+      ...(errorCode ? { errorCode } : {}),
+      ...(errorMsg ? { error: maskSecrets(errorMsg) } : {}),
+      updatedAt: new Date().toISOString(),
+    });
   } catch {
-    try {
-      child.kill();
-    } catch {
-      // ignore
-    }
+    // Best-effort archive status update
   }
 }
 
@@ -271,7 +280,10 @@ export class PersistentSessionManager {
         session.conversationId = stepObj.conversation_id;
       }
       if (typeof stepObj.text_delta === 'string' && session.currentTurn) {
-        session.currentTurn.textFragments.push(stepObj.text_delta);
+        if (session.currentTurn.textBytes < MAX_TEXT_FRAGMENTS_BYTES) {
+          session.currentTurn.textFragments.push(stepObj.text_delta);
+          session.currentTurn.textBytes += stepObj.text_delta.length;
+        }
       }
       const stepUsage = parseUsage(stepObj.usage);
       if (stepUsage) {
@@ -335,6 +347,7 @@ export class PersistentSessionManager {
     child: ChildProcess,
     gitCheckpointRef?: string,
     checkpointTaskId?: string,
+    checkpointIsStash = false,
   ): LivePersistentSession {
     const sessionId = `ag-sess-${crypto.randomBytes(4).toString('hex')}`;
     const now = new Date().toISOString();
@@ -354,6 +367,7 @@ export class PersistentSessionManager {
       durationSeconds: 0,
       gitCheckpointRef,
       checkpointTaskId,
+      checkpointIsStash,
       createdAt: now,
       lastActivityAt: now,
       stdoutBuffer: '',
@@ -361,8 +375,27 @@ export class PersistentSessionManager {
       idleTimer,
     };
 
+    // Guard child.stdin against asynchronous EPIPE errors so a dead child never crashes the MCP server (H-13).
+    child.stdin?.on?.('error', (err) => {
+      if (session.currentTurn) {
+        const waiter = session.currentTurn;
+        session.currentTurn = undefined;
+        session.busy = false;
+        clearTimeout(waiter.timer);
+        waiter.reject(
+          new Error(`Session stdin error: ${maskSecrets(err instanceof Error ? err.message : String(err))}`),
+        );
+      }
+    });
+
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      session.stdoutBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      if (session.stdoutBuffer.length + text.length > MAX_STDOUT_BUFFER_BYTES) {
+        // Bound buffer size on pathological unterminated output to prevent OOM
+        session.stdoutBuffer = `${session.stdoutBuffer}${text}`.slice(-MAX_STDOUT_BUFFER_BYTES);
+      } else {
+        session.stdoutBuffer += text;
+      }
       const lines = session.stdoutBuffer.split(/\r?\n/);
       session.stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) {
@@ -380,6 +413,7 @@ export class PersistentSessionManager {
         this.handleLine(session, session.stdoutBuffer);
         session.stdoutBuffer = '';
       }
+      const wasActive = session.active;
       session.active = false;
       session.busy = false;
       clearTimeout(session.idleTimer);
@@ -392,6 +426,17 @@ export class PersistentSessionManager {
           new Error(
             detail || `Antigravity stream session exited unexpectedly with code ${code ?? 'unknown'}.`,
           ),
+        );
+      }
+      if (wasActive) {
+        finalizeSessionCheckpointManifest(
+          session,
+          code === 0 ? 'VERIFIED' : 'FAILED',
+          code === 0 ? undefined : 'SESSION_FAILED',
+          code === 0
+            ? undefined
+            : session.stderrTail.trim().split(/\r?\n/).slice(-3).join(' ') ||
+              `Antigravity stream session exited with code ${code ?? 'unknown'}.`,
         );
       }
       this.sessions.delete(sessionId);
@@ -407,6 +452,19 @@ export class PersistentSessionManager {
         clearTimeout(waiter.timer);
         waiter.reject(err);
       }
+      if (session.numTurns === 0 && session.checkpointIsStash && session.checkpointTaskId) {
+        try {
+          deleteCheckpointRef(session.workspaceRoot, session.checkpointTaskId);
+        } catch {
+          // ignore
+        }
+      }
+      finalizeSessionCheckpointManifest(
+        session,
+        'FAILED',
+        'SESSION_FAILED',
+        err instanceof Error ? err.message : String(err),
+      );
       this.sessions.delete(sessionId);
     });
 
@@ -416,7 +474,15 @@ export class PersistentSessionManager {
 
   public get(sessionId?: string, workspaceRoot?: string): LivePersistentSession | undefined {
     if (sessionId) {
-      return this.sessions.get(sessionId);
+      const found = this.sessions.get(sessionId);
+      if (
+        found &&
+        workspaceRoot &&
+        path.resolve(found.workspaceRoot) !== path.resolve(workspaceRoot)
+      ) {
+        return undefined;
+      }
+      return found;
     }
     let latest: LivePersistentSession | undefined;
     for (const s of this.sessions.values()) {
@@ -482,11 +548,9 @@ export class PersistentSessionManager {
         this.sessions.delete(session.sessionId);
         // Kill the child so a late result from the timed-out turn cannot desync a future turn.
         killSessionProcess(session.child, session.platform);
-        reject(
-          new Error(
-            `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`,
-          ),
-        );
+        const timeoutMsg = `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`;
+        finalizeSessionCheckpointManifest(session, 'FAILED', 'TASK_TIMEOUT', timeoutMsg);
+        reject(new Error(timeoutMsg));
       }, Math.max(5, timeoutSec) * 1000);
 
       session.currentTurn = {
@@ -494,20 +558,37 @@ export class PersistentSessionManager {
         reject,
         timer,
         textFragments: [],
+        textBytes: 0,
       };
+
+      const failWrite = (err: unknown): void => {
+        if (session.currentTurn?.timer === timer) {
+          session.currentTurn = undefined;
+        }
+        clearTimeout(timer);
+        session.busy = false;
+        this.bumpIdleTimer(session);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+
+      const stdin = session.child.stdin;
+      if (!stdin || stdin.destroyed || !stdin.writable) {
+        failWrite(new Error(`Session "${session.sessionId}" stdin is closed or not writable.`));
+        return;
+      }
 
       try {
         const payload = JSON.stringify({
           event: 'user',
           message: { content: prompt },
         });
-        session.child.stdin?.write(`${payload}\n`);
+        stdin.write(`${payload}\n`, (writeErr) => {
+          if (writeErr) {
+            failWrite(writeErr);
+          }
+        });
       } catch (err) {
-        clearTimeout(timer);
-        session.currentTurn = undefined;
-        session.busy = false;
-        this.bumpIdleTimer(session);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        failWrite(err);
       }
     });
   }
@@ -521,6 +602,12 @@ export class PersistentSessionManager {
     summary.busy = false;
 
     clearTimeout(session.idleTimer);
+    if (session.currentTurn) {
+      clearTimeout(session.currentTurn.timer);
+      const waiter = session.currentTurn;
+      session.currentTurn = undefined;
+      waiter.reject(new Error(`Session "${session.sessionId}" was closed while a turn was in progress.`));
+    }
     this.sessions.delete(session.sessionId);
 
     if (session.active) {
@@ -549,12 +636,18 @@ export class PersistentSessionManager {
       }
     }
 
+    finalizeSessionCheckpointManifest(session, 'VERIFIED');
     return summary;
   }
 
   public disposeAll(): void {
     for (const s of [...this.sessions.values()]) {
       clearTimeout(s.idleTimer);
+      if (s.currentTurn) {
+        clearTimeout(s.currentTurn.timer);
+        s.currentTurn = undefined;
+      }
+      s.active = false;
       try {
         s.child.stdin?.end();
       } catch {
@@ -765,6 +858,7 @@ export async function handleAgSession(
     child,
     checkpoint.checkpointRef,
     persistedCheckpointTaskId,
+    checkpoint.isStashSnapshot,
   );
 
   // If caller provided an initial prompt, execute Turn 1 immediately so session warms up & returns response

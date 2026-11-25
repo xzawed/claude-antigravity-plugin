@@ -59123,12 +59123,13 @@ var DEFAULT_BRIDGE_CONFIG = {
 var BRIDGE_DIR_NAME = ".ag-bridge";
 var MAX_HISTORY_ITEMS = 20;
 var SAFE_TASK_ID_RE = /^[a-zA-Z0-9._-]{1,128}$/;
+var WINDOWS_RESERVED_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 function assertSafeTaskId(taskId) {
   const trimmed = taskId.trim();
-  if (!trimmed || !SAFE_TASK_ID_RE.test(trimmed) || trimmed === "." || trimmed === ".." || trimmed.includes("..")) {
+  if (!trimmed || !SAFE_TASK_ID_RE.test(trimmed) || trimmed === "." || trimmed === ".." || trimmed.includes("..") || trimmed.startsWith(".") || trimmed.endsWith(".") || trimmed.toLowerCase().endsWith(".lock") || WINDOWS_RESERVED_DEVICE_RE.test(trimmed)) {
     throw new AgPluginError(
       "PATH_TRAVERSAL_BLOCKED",
-      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal segments.`
+      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal, leading/trailing dots, .lock suffix, or reserved device names.`
     );
   }
   return trimmed;
@@ -59198,8 +59199,13 @@ function readJsonWithRetry(filePath) {
       const raw = fs.readFileSync(filePath, "utf8");
       return JSON.parse(raw);
     } catch (err) {
+      if (err?.code === "ENOENT") {
+        return null;
+      }
       lastErr = err;
-      sleepSync(50 * (attempt + 1));
+      if (attempt < 2) {
+        sleepSync(50 * (attempt + 1));
+      }
     }
   }
   throw lastErr;
@@ -61411,15 +61417,36 @@ import path9 from "node:path";
 import fs7 from "node:fs";
 import os2 from "node:os";
 import path7 from "node:path";
+function getEnvCaseInsensitive(env, key) {
+  if (env[key] !== void 0) return env[key];
+  const upper = key.toUpperCase();
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase() === upper) return v;
+  }
+  return void 0;
+}
+function isExecutableFile(filePath, platform) {
+  try {
+    const st = fs7.statSync(filePath);
+    if (!st.isFile()) return false;
+    if (platform !== "win32") {
+      fs7.accessSync(filePath, fs7.constants.X_OK);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 function findBinaryInPath(name, platform = process.platform, env = process.env, existsSyncFn = fs7.existsSync) {
   const pathApi = platform === "win32" ? path7.win32 : path7.posix;
   const dirs = absolutePathDirs(platform, env);
-  const extensions = platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").map((e2) => e2.trim().toLowerCase()).filter(Boolean) : [""];
+  const useRealFsCheck = existsSyncFn === fs7.existsSync;
+  const extensions = platform === "win32" ? (getEnvCaseInsensitive(env, "PATHEXT") ?? ".EXE;.CMD;.BAT;.COM").split(";").map((e2) => e2.trim().toLowerCase()).filter(Boolean) : [""];
   for (const dir of dirs) {
     for (const ext of extensions) {
       const candidate = ext && !name.toLowerCase().endsWith(ext) ? pathApi.join(dir, `${name}${ext}`) : pathApi.join(dir, name);
       try {
-        if (existsSyncFn(candidate)) {
+        if (useRealFsCheck ? isExecutableFile(candidate, platform) : existsSyncFn(candidate)) {
           return candidate;
         }
       } catch {
@@ -61440,41 +61467,43 @@ function getDefaultDetectorDeps() {
   };
 }
 function getDefaultCliCandidates(deps) {
+  const pathApi = deps.platform === "win32" ? path7.win32 : path7.posix;
   if (deps.platform === "win32") {
-    const localAppData = deps.env.LOCALAPPDATA ?? path7.join(deps.homedir, "AppData", "Local");
+    const localAppData = getEnvCaseInsensitive(deps.env, "LOCALAPPDATA") ?? pathApi.join(deps.homedir, "AppData", "Local");
     return [
-      { binary: "agy", path: path7.join(localAppData, "agy", "bin", "agy.exe") },
-      { binary: "agy", path: path7.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy.exe") },
-      { binary: "agy", path: path7.join(deps.homedir, ".local", "bin", "agy.exe") },
-      { binary: "antigravity", path: path7.join(localAppData, "Programs", "Antigravity", "bin", "antigravity.cmd") }
+      { binary: "agy", path: pathApi.join(localAppData, "agy", "bin", "agy.exe") },
+      { binary: "agy", path: pathApi.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy.exe") },
+      { binary: "agy", path: pathApi.join(deps.homedir, ".local", "bin", "agy.exe") },
+      { binary: "antigravity", path: pathApi.join(localAppData, "Programs", "Antigravity", "bin", "antigravity.cmd") }
     ];
   }
   return [
-    { binary: "agy", path: path7.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy") },
-    { binary: "agy", path: path7.join(deps.homedir, ".local", "bin", "agy") },
+    { binary: "agy", path: pathApi.join(deps.homedir, ".gemini", "antigravity-cli", "bin", "agy") },
+    { binary: "agy", path: pathApi.join(deps.homedir, ".local", "bin", "agy") },
     { binary: "agy", path: "/usr/local/bin/agy" },
-    { binary: "antigravity", path: path7.join(deps.homedir, ".local", "bin", "antigravity") },
+    { binary: "antigravity", path: pathApi.join(deps.homedir, ".local", "bin", "antigravity") },
     { binary: "antigravity", path: "/usr/local/bin/antigravity" }
   ];
 }
 function getDefaultAppCandidates(deps) {
+  const pathApi = deps.platform === "win32" ? path7.win32 : path7.posix;
   if (deps.platform === "darwin") {
     return [
       "/Applications/Antigravity.app",
-      path7.join(deps.homedir, "Applications", "Antigravity.app")
+      pathApi.join(deps.homedir, "Applications", "Antigravity.app")
     ];
   }
   if (deps.platform === "win32") {
-    const localAppData = deps.env.LOCALAPPDATA ?? path7.join(deps.homedir, "AppData", "Local");
-    const programFiles = deps.env.ProgramFiles ?? "C:\\Program Files";
+    const localAppData = getEnvCaseInsensitive(deps.env, "LOCALAPPDATA") ?? pathApi.join(deps.homedir, "AppData", "Local");
+    const programFiles = getEnvCaseInsensitive(deps.env, "ProgramFiles") ?? "C:\\Program Files";
     return [
-      path7.join(localAppData, "Programs", "Antigravity", "Antigravity.exe"),
-      path7.join(programFiles, "Antigravity", "Antigravity.exe")
+      pathApi.join(localAppData, "Programs", "Antigravity", "Antigravity.exe"),
+      pathApi.join(programFiles, "Antigravity", "Antigravity.exe")
     ];
   }
   return [
     "/usr/bin/antigravity",
-    path7.join(deps.homedir, ".local", "bin", "antigravity"),
+    pathApi.join(deps.homedir, ".local", "bin", "antigravity"),
     "/opt/Antigravity/antigravity"
   ];
 }
@@ -61495,18 +61524,25 @@ function detectSubscriptionApp(config2, deps = getDefaultDetectorDeps()) {
   const triggerMethod = config2.subscription.trigger_method;
   if (config2.subscription.app_path && config2.subscription.app_path !== "auto") {
     if (deps.existsSync(config2.subscription.app_path)) {
+      let isAppBundleDir = config2.subscription.app_path.toLowerCase().endsWith(".app");
+      if (!isAppBundleDir) {
+        try {
+          isAppBundleDir = fs7.statSync(config2.subscription.app_path).isDirectory();
+        } catch {
+        }
+      }
       return {
         detected: true,
-        cliBinary: inferCliBinaryFromPath(config2.subscription.app_path),
+        cliBinary: isAppBundleDir ? void 0 : inferCliBinaryFromPath(config2.subscription.app_path),
         appPath: config2.subscription.app_path,
-        cliPath: config2.subscription.app_path,
+        cliPath: isAppBundleDir ? void 0 : config2.subscription.app_path,
         triggerMethod
       };
     }
   }
   let cliBinary;
   let cliPath;
-  for (const bin of ["agy", "antigravity", "ag"]) {
+  for (const bin of ["agy", "antigravity"]) {
     const found = deps.findBinary(bin);
     if (found) {
       cliBinary = bin;
@@ -61521,6 +61557,13 @@ function detectSubscriptionApp(config2, deps = getDefaultDetectorDeps()) {
         cliPath = candidate.path;
         break;
       }
+    }
+  }
+  if (!cliPath) {
+    const legacyAg = deps.findBinary("ag");
+    if (legacyAg) {
+      cliBinary = "ag";
+      cliPath = legacyAg;
     }
   }
   let appPath;
@@ -61577,6 +61620,11 @@ function detectEnvironment(config2, modeOverride, deps = getDefaultDetectorDeps(
       );
     }
   }
+  if (config2.subscription.app_path && config2.subscription.app_path !== "auto" && !deps.existsSync(config2.subscription.app_path)) {
+    recommendations.push(
+      `Configured subscription.app_path "${config2.subscription.app_path}" does not exist; fell back to automatic detection.`
+    );
+  }
   const ignoredAdvice = describeIgnoredSettings(config2);
   if (ignoredAdvice) {
     recommendations.push(ignoredAdvice);
@@ -61622,6 +61670,53 @@ import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs8 from "node:fs";
 import path8 from "node:path";
+function killChildProcessTree(child, platform = process.platform, options) {
+  if (typeof child.exitCode === "number" || typeof child.signalCode === "string") {
+    return;
+  }
+  const pid = child.pid;
+  if (!pid) {
+    try {
+      child.kill();
+    } catch {
+    }
+    return;
+  }
+  try {
+    if (platform === "win32") {
+      execFileSync2(requireExecutable("taskkill"), ["/pid", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        timeout: 5e3
+      });
+    } else {
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
+      const escalateMs = options?.escalateToSigkillMs ?? 2e3;
+      if (escalateMs > 0) {
+        const timer = setTimeout(() => {
+          if (typeof child.exitCode === "number" || typeof child.signalCode === "string") return;
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+            }
+          }
+        }, escalateMs);
+        timer.unref?.();
+      }
+    }
+  } catch {
+    try {
+      child.kill();
+    } catch {
+    }
+  }
+}
 var NATIVE_AGY_SLASH_RE = /^\/(boost|browser|swarm|goal|teamwork|grill-me|plan|btw|compact|codesearch|learn|schedule)\b/i;
 function buildHandoffPrompt(ctx) {
   const disableSlash = ctx.agyOptions?.disableSlashCommands ?? ctx.config.subscription.agy_disable_slash_commands;
@@ -61881,7 +61976,7 @@ function attachStreamJsonHeartbeat(stream, options) {
         status: finalStatus,
         metrics: { ...current.metrics ?? {}, ...state.metrics },
         errorCode: isSuccess ? void 0 : "INTERNAL_ERROR",
-        error: isSuccess ? void 0 : state.errorMessage ?? `agy CLI finished with status=${status ?? "UNKNOWN"}`,
+        error: isSuccess ? void 0 : maskSecrets(state.errorMessage ?? `agy CLI finished with status=${status ?? "UNKNOWN"}`),
         updatedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
     } catch {
@@ -62123,26 +62218,29 @@ async function queryAgyCapabilities(cliPath, platform = process.platform, query 
       }
     };
     try {
+      const MAX_CAP_OUTPUT = 2 * 1024 * 1024;
       const child = spawn(spec.command, spec.args, {
         cwd: query.cwd,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: platform !== "win32",
         shell: false,
         windowsHide: spec.windowsHide,
         windowsVerbatimArguments: spec.windowsVerbatimArguments
       });
       const timer = setTimeout(() => {
         warnings.push(`Timed out querying \`agy ${subArgs.join(" ")}\` after 15s.`);
-        try {
-          child.kill();
-        } catch {
-        }
+        killChildProcessTree(child, platform);
         finish();
       }, 15e3);
       child.stdout?.on("data", (chunk) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (stdout.length < MAX_CAP_OUTPUT) {
+          stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        }
       });
       child.stderr?.on("data", (chunk) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        if (stderr.length < MAX_CAP_OUTPUT) {
+          stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        }
       });
       child.once("error", (err) => {
         clearTimeout(timer);
@@ -62218,6 +62316,11 @@ async function tryCliTrigger(ctx) {
   }
   return new Promise((resolve) => {
     let settled = false;
+    let exited = false;
+    let resolveExit;
+    const processExitPromise = new Promise((r2) => {
+      resolveExit = r2;
+    });
     const closeLogFd = () => {
       if (logFd !== null) {
         try {
@@ -62241,32 +62344,8 @@ async function tryCliTrigger(ctx) {
       });
       closeLogFd();
       const killProcess = () => {
-        if (!child.pid) {
-          try {
-            child.kill();
-          } catch {
-          }
-          return;
-        }
-        try {
-          if (ctx.detection.platform === "win32") {
-            execFileSync2(requireExecutable("taskkill"), ["/pid", String(child.pid), "/T", "/F"], {
-              stdio: "ignore",
-              timeout: 5e3
-            });
-          } else {
-            try {
-              process.kill(-child.pid, "SIGTERM");
-            } catch {
-              child.kill("SIGTERM");
-            }
-          }
-        } catch {
-          try {
-            child.kill();
-          } catch {
-          }
-        }
+        if (exited) return;
+        killChildProcessTree(child, ctx.detection.platform, { escalateToSigkillMs: 2e3 });
       };
       if (ctx.abortSignal) {
         if (ctx.abortSignal.aborted) {
@@ -62309,23 +62388,28 @@ async function tryCliTrigger(ctx) {
         ctx.abortSignal?.removeEventListener("abort", killProcess);
       };
       child.once("error", () => {
+        exited = true;
         cleanupAbortListener();
         heartbeatHandle?.stop();
+        resolveExit(null);
         if (!settled) {
           settled = true;
           resolve({ ok: false });
         }
       });
       child.once("close", (code) => {
+        exited = true;
         cleanupAbortListener();
         heartbeatHandle?.stop();
+        resolveExit(code);
         if (!settled) {
           settled = true;
           resolve({
             ok: code === 0,
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
-            killProcess
+            killProcess,
+            processExitPromise
           });
         }
       });
@@ -62342,12 +62426,14 @@ async function tryCliTrigger(ctx) {
             ok: true,
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
-            killProcess
+            killProcess,
+            processExitPromise
           });
         }
       }, 400).unref();
     } catch {
       closeLogFd();
+      resolveExit(null);
       if (!settled) {
         settled = true;
         resolve({ ok: false });
@@ -62386,6 +62472,9 @@ function tryOsIpcTrigger(ctx) {
   return false;
 }
 async function defaultSubscriptionTrigger(ctx) {
+  if (ctx.abortSignal?.aborted) {
+    return { methodUsed: "cli" };
+  }
   const method = ctx.config.subscription.trigger_method;
   const prompt = buildHandoffPrompt(ctx);
   if (method === "cli_only" || method === "cli_or_ipc") {
@@ -62395,8 +62484,12 @@ async function defaultSubscriptionTrigger(ctx) {
         methodUsed: "cli",
         streamState: cliRes.streamState,
         stopStream: cliRes.stopStream,
-        killProcess: cliRes.killProcess
+        killProcess: cliRes.killProcess,
+        processExitPromise: cliRes.processExitPromise
       };
+    }
+    if (ctx.abortSignal?.aborted) {
+      return { methodUsed: "cli" };
     }
     if (method === "cli_only") {
       return {
@@ -62404,6 +62497,9 @@ async function defaultSubscriptionTrigger(ctx) {
         warning: "CLI trigger exited early or was unavailable; waiting on .ag-bridge/manifest.json in case Antigravity is running manually."
       };
     }
+  }
+  if (ctx.abortSignal?.aborted) {
+    return { methodUsed: "cli" };
   }
   if (method === "cli_or_ipc") {
     const ipcOk = tryOsIpcTrigger(ctx);
@@ -62425,12 +62521,20 @@ async function defaultSubscriptionTrigger(ctx) {
     warning: copied ? "Copied `/claude-handoff` prompt to clipboard. Paste it into your Antigravity session to execute this task." : "Run `/claude-handoff` inside your Antigravity session for this workspace to execute the dispatched task."
   };
 }
-function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollIntervalMs, abortSignal) {
+function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollIntervalMs, abortSignal, processExitPromise) {
   return new Promise((resolve) => {
     let finished2 = false;
     let watcher = null;
     let pollTimer = null;
     let timeoutTimer = null;
+    let exitGraceTimer = null;
+    const safeReadManifest = () => {
+      try {
+        return readManifest(workspaceRoot);
+      } catch {
+        return null;
+      }
+    };
     const cleanup = () => {
       if (abortSignal) {
         abortSignal.removeEventListener("abort", onAbort);
@@ -62450,6 +62554,10 @@ function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollInterv
         clearTimeout(timeoutTimer);
         timeoutTimer = null;
       }
+      if (exitGraceTimer) {
+        clearTimeout(exitGraceTimer);
+        exitGraceTimer = null;
+      }
     };
     const done = (result) => {
       if (finished2) return;
@@ -62458,7 +62566,7 @@ function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollInterv
       resolve(result);
     };
     const onAbort = () => {
-      done({ timedOut: false, cancelled: true, manifest: readManifest(workspaceRoot) });
+      done({ timedOut: false, cancelled: true, processExitedEarly: false, manifest: safeReadManifest() });
     };
     if (abortSignal?.aborted) {
       onAbort();
@@ -62466,16 +62574,32 @@ function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollInterv
     }
     abortSignal?.addEventListener("abort", onAbort, { once: true });
     const checkOnce = () => {
-      try {
-        const current = readManifest(workspaceRoot);
-        if (current && current.taskId === taskId) {
-          if (current.status === "VERIFIED" || current.status === "FAILED") {
-            done({ timedOut: false, cancelled: false, manifest: current });
-          }
+      const current = safeReadManifest();
+      if (current && current.taskId === taskId) {
+        if (current.status === "VERIFIED" || current.status === "FAILED") {
+          done({ timedOut: false, cancelled: false, processExitedEarly: false, manifest: current });
         }
-      } catch {
       }
     };
+    if (processExitPromise) {
+      void processExitPromise.then((exitCode) => {
+        if (finished2) return;
+        checkOnce();
+        if (finished2) return;
+        exitGraceTimer = setTimeout(() => {
+          checkOnce();
+          if (!finished2) {
+            done({
+              timedOut: false,
+              cancelled: false,
+              processExitedEarly: true,
+              exitCode,
+              manifest: safeReadManifest()
+            });
+          }
+        }, 250);
+      });
+    }
     const bridgeDir = getBridgeDir(workspaceRoot);
     try {
       watcher = fs8.watch(bridgeDir, (_eventType, filename) => {
@@ -62489,7 +62613,7 @@ function waitForManifestCompletion(workspaceRoot, taskId, timeoutSec, pollInterv
     }
     pollTimer = setInterval(checkOnce, Math.max(100, pollIntervalMs));
     timeoutTimer = setTimeout(() => {
-      done({ timedOut: true, cancelled: false, manifest: readManifest(workspaceRoot) });
+      done({ timedOut: true, cancelled: false, processExitedEarly: false, manifest: safeReadManifest() });
     }, Math.max(1, timeoutSec) * 1e3);
     checkOnce();
   });
@@ -62529,9 +62653,44 @@ var SubscriptionEngine = class {
         ctx.manifest.taskId,
         timeoutSec,
         ctx.config.subscription.poll_interval_ms,
-        ctx.abortSignal
+        ctx.abortSignal,
+        triggerOutcome.processExitPromise
       );
       const capturedMetrics = triggerOutcome.streamState?.metrics;
+      if (waitResult.processExitedEarly) {
+        const exitDetail = maskSecrets(
+          triggerOutcome.streamState?.errorMessage ?? `Antigravity CLI exited (code ${waitResult.exitCode ?? "unknown"}) without finalizing .ag-bridge/manifest.json.`
+        );
+        const failedManifest = {
+          ...waitResult.manifest ?? ctx.manifest,
+          status: "FAILED",
+          metrics: {
+            ...waitResult.manifest?.metrics ?? {},
+            ...capturedMetrics ?? {}
+          },
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          errorCode: "INTERNAL_ERROR",
+          error: exitDetail
+        };
+        writeManifest(ctx.workspaceRoot, failedManifest);
+        const partialReport = readReportMarkdown(ctx.workspaceRoot) ?? `# Antigravity Task Report
+
+- **Task ID:** \`${ctx.manifest.taskId}\`
+- **Status:** FAILED
+- **Reason:** ${exitDetail}
+
+${formatTokenUsageMarkdown(failedManifest.metrics)}`;
+        return {
+          status: "FAILED",
+          reportMarkdown: partialReport,
+          changedFiles: listGitChangedFiles(ctx.workspaceRoot),
+          artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+          metrics: failedManifest.metrics,
+          warnings,
+          errorCode: "INTERNAL_ERROR",
+          errorMessage: exitDetail
+        };
+      }
       if (waitResult.cancelled) {
         triggerOutcome.killProcess?.();
         const cancelledManifest = {
@@ -62642,6 +62801,7 @@ var DEFAULT_PENDING_SESSION_TTL_MS = 5 * 60 * 1e3;
 var DEFAULT_MANUAL_PROMPT_TIMEOUT_MS = 15e3;
 var DEFAULT_COMPLETE_TIMEOUT_MS = 3e4;
 var DEFAULT_BROWSER_TIMEOUT_SEC = 180;
+var MAX_AUTH_BUFFER_BYTES = 256 * 1024;
 var PendingAuthSessionManager = class {
   sessions = /* @__PURE__ */ new Map();
   ttlMs;
@@ -62661,22 +62821,31 @@ var PendingAuthSessionManager = class {
       platform,
       child,
       authUrl,
-      stdout: initialStdout,
-      stderr: initialStderr,
+      stdout: initialStdout.slice(-MAX_AUTH_BUFFER_BYTES),
+      stderr: initialStderr.slice(-MAX_AUTH_BUFFER_BYTES),
       createdAt: Date.now(),
       ttlTimer,
       closed: false,
       exitCode: null
     };
+    child.stdin?.on?.("error", () => {
+    });
     child.stdout?.on("data", (chunk) => {
-      session.stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      session.stdout = `${session.stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
     });
     child.stderr?.on("data", (chunk) => {
-      session.stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      session.stderr = `${session.stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
+    });
+    child.once("error", () => {
+      session.closed = true;
+      clearTimeout(session.ttlTimer);
     });
     child.once("close", (code) => {
       session.closed = true;
       session.exitCode = code;
+      clearTimeout(session.ttlTimer);
     });
     this.sessions.set(sessionId, session);
     return session;
@@ -62687,6 +62856,7 @@ var PendingAuthSessionManager = class {
     }
     let latest;
     for (const s2 of this.sessions.values()) {
+      if (s2.closed) continue;
       if (!latest || s2.createdAt > latest.createdAt) {
         latest = s2;
       }
@@ -62708,10 +62878,7 @@ var PendingAuthSessionManager = class {
     }
     this.remove(target.sessionId);
     if (!target.closed) {
-      try {
-        target.child.kill();
-      } catch {
-      }
+      killChildProcessTree(target.child, target.platform);
     }
     return true;
   }
@@ -62766,7 +62933,7 @@ function isHeadlessOrSshEnv(env = process.env, platform = process.platform) {
   return false;
 }
 function defaultSpawn(command, args, options) {
-  return spawn2(command, args, options);
+  return spawn2(command, args, { ...options, detached: process.platform !== "win32" });
 }
 function getInstallNextSteps(platform) {
   if (platform === "win32") {
@@ -62977,11 +63144,13 @@ ${stderr}`;
       }
     };
     const onStdout = (chunk) => {
-      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      stdout = `${stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkForUrl();
     };
     const onStderr = (chunk) => {
-      stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      stderr = `${stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkForUrl();
     };
     const onError = (err) => {
@@ -63003,6 +63172,7 @@ ${stderr}`;
       });
     };
     const onClose = async (code) => {
+      clearTimeout(timer);
       if (code === 0) {
         const verified = await checkAgAuthStatus(workspaceRoot, deps);
         finish({
@@ -63030,10 +63200,7 @@ ${stderr}`;
       });
     };
     const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-      }
+      killChildProcessTree(child, platform);
       finish({
         ok: false,
         action: "login",
@@ -63053,6 +63220,8 @@ ${stderr}`;
     const onCloseWrapper = (code) => {
       void onClose(code);
     };
+    child.stdin?.on?.("error", () => {
+    });
     child.stdout?.on("data", onStdout);
     child.stderr?.on("data", onStderr);
     child.once("error", onError);
@@ -63146,11 +63315,13 @@ ${stderr}`;
       }
     };
     const onStdout = (chunk) => {
-      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      stdout = `${stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkUnexpectedManualPrompt();
     };
     const onStderr = (chunk) => {
-      stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const txt = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      stderr = `${stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkUnexpectedManualPrompt();
     };
     const onError = (err) => {
@@ -63172,6 +63343,7 @@ ${stderr}`;
       });
     };
     const onClose = async (code) => {
+      clearTimeout(timer);
       if (code === 0) {
         const verified = await checkAgAuthStatus(workspaceRoot, deps);
         finish({
@@ -63201,10 +63373,7 @@ ${stderr}`;
       });
     };
     const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-      }
+      killChildProcessTree(child, platform);
       const authUrl = extractOAuthUrl(`${stdout}
 ${stderr}`);
       finish({
@@ -63229,6 +63398,8 @@ ${stderr}`);
     const onCloseWrapper = (code) => {
       void onClose(code);
     };
+    child.stdin?.on?.("error", () => {
+    });
     child.stdout?.on("data", onStdout);
     child.stderr?.on("data", onStderr);
     child.once("error", onError);
@@ -63294,14 +63465,20 @@ async function completeManualLoginFlow(code, sessionId, deps) {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        session.child.off?.("close", onCloseWrapper);
+        session.child.off?.("error", onError);
         resolve(out);
       }
     };
+    const codeSecrets = [trimmedCode];
+    try {
+      const parsedUrl = new URL(trimmedCode);
+      const qp = parsedUrl.searchParams.get("code");
+      if (qp) codeSecrets.push(qp);
+    } catch {
+    }
     const timer = setTimeout(() => {
-      try {
-        session.child.kill();
-      } catch {
-      }
+      killChildProcessTree(session.child, session.platform);
       finish({
         ok: false,
         action: "complete",
@@ -63320,7 +63497,26 @@ async function completeManualLoginFlow(code, sessionId, deps) {
         errorMessage: `Timed out after ${completeTimeoutMs}ms exchanging authorization code.`
       });
     }, completeTimeoutMs);
-    session.child.once("close", async (exitCode) => {
+    const onError = (err) => {
+      const msg = maskSecrets(err.message, codeSecrets);
+      finish({
+        ok: false,
+        action: "complete",
+        status: "FAILED",
+        authenticated: false,
+        authMethod: "none",
+        cliDetected: true,
+        cliBinary: "agy",
+        cliPath: session.cliPath,
+        message: `\`agy acp --login\` process error while exchanging code: ${msg}`,
+        nextSteps: ["Retry `/ag-login --manual`."],
+        warnings: [],
+        errorCode: "AUTH_LOGIN_FAILED",
+        errorMessage: msg
+      });
+    };
+    const onClose = async (exitCode) => {
+      clearTimeout(timer);
       if (exitCode === 0) {
         const verified = await checkAgAuthStatus(session.workspaceRoot, deps);
         finish({
@@ -63329,13 +63525,6 @@ async function completeManualLoginFlow(code, sessionId, deps) {
           message: verified.authenticated ? `Antigravity login succeeded and credentials were saved to your OS keyring (${verified.modelCount ?? 0} models available).` : "Authorization code accepted (`agy acp --login` exited 0), but model verification did not confirm active models yet."
         });
         return;
-      }
-      const codeSecrets = [trimmedCode];
-      try {
-        const parsedUrl = new URL(trimmedCode);
-        const qp = parsedUrl.searchParams.get("code");
-        if (qp) codeSecrets.push(qp);
-      } catch {
       }
       const detail = maskSecrets(
         (session.stderr || session.stdout).trim().split(/\r?\n/).slice(-3).join(" "),
@@ -63358,7 +63547,10 @@ async function completeManualLoginFlow(code, sessionId, deps) {
         errorCode: "AUTH_LOGIN_FAILED",
         errorMessage: detail || `Code exchange failed with exit code ${exitCode ?? "unknown"}.`
       });
-    });
+    };
+    const onCloseWrapper = (exitCode) => {
+      void onClose(exitCode);
+    };
     if (/[\r\n\0]/.test(trimmedCode)) {
       finish({
         ok: false,
@@ -63377,12 +63569,10 @@ async function completeManualLoginFlow(code, sessionId, deps) {
       });
       return;
     }
-    try {
-      session.child.stdin?.write(`${trimmedCode}
-`);
-      session.child.stdin?.end();
-    } catch (err) {
-      const msg = maskSecrets(err instanceof Error ? err.message : String(err), [trimmedCode]);
+    session.child.once("error", onError);
+    session.child.once("close", onCloseWrapper);
+    const failWrite = (err) => {
+      const msg = maskSecrets(err instanceof Error ? err.message : String(err), codeSecrets);
       finish({
         ok: false,
         action: "complete",
@@ -63398,6 +63588,26 @@ async function completeManualLoginFlow(code, sessionId, deps) {
         errorCode: "AUTH_LOGIN_FAILED",
         errorMessage: msg
       });
+    };
+    const stdin = session.child.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) {
+      failWrite(new Error("Login process stdin is closed or not writable."));
+      return;
+    }
+    try {
+      stdin.write(`${trimmedCode}
+`, (writeErr) => {
+        if (writeErr) {
+          failWrite(writeErr);
+          return;
+        }
+        try {
+          stdin.end();
+        } catch {
+        }
+      });
+    } catch (err) {
+      failWrite(err);
     }
   });
 }
@@ -63544,10 +63754,29 @@ var VALID_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 var VALID_ENV_KV_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 var VALID_HEADER_RE = /^[A-Za-z0-9-]+:/;
 var CONTROL_CHAR_RE = /[\r\n\0]/;
+var MAX_ADMIN_OUTPUT_BYTES = 2 * 1024 * 1024;
+function extractSecretValues(envVars, headers) {
+  const secrets = [];
+  for (const kv of envVars ?? []) {
+    const eq = kv.indexOf("=");
+    if (eq > 0) {
+      const val = kv.slice(eq + 1).trim();
+      if (val.length >= 4) secrets.push(val);
+    }
+  }
+  for (const h2 of headers ?? []) {
+    const colon = h2.indexOf(":");
+    if (colon > 0) {
+      const val = h2.slice(colon + 1).trim();
+      if (val.length >= 4) secrets.push(val);
+    }
+  }
+  return secrets;
+}
 function hasControlChars(values) {
   return values.some((v) => typeof v === "string" && CONTROL_CHAR_RE.test(v));
 }
-function defaultRunAdminCli(cliPath, args, platform, timeoutMs) {
+function defaultRunAdminCli(cliPath, args, platform, timeoutMs, cwd) {
   return new Promise((resolve) => {
     const spec = buildCliSpawnSpec(cliPath, args, platform);
     let stdout = "";
@@ -63561,24 +63790,27 @@ function defaultRunAdminCli(cliPath, args, platform, timeoutMs) {
     };
     try {
       const child = spawn3(spec.command, spec.args, {
+        ...cwd ? { cwd } : {},
         stdio: ["ignore", "pipe", "pipe"],
+        detached: platform !== "win32",
         shell: false,
         windowsHide: spec.windowsHide,
         windowsVerbatimArguments: spec.windowsVerbatimArguments
       });
       const timer = setTimeout(() => {
-        try {
-          child.kill();
-        } catch {
-        }
+        killChildProcessTree(child, platform);
         finish({ exitCode: 124, stdout, stderr: `${stderr}
 Timed out after ${timeoutMs}ms.` });
       }, timeoutMs);
       child.stdout?.on("data", (c) => {
-        stdout += typeof c === "string" ? c : c.toString("utf8");
+        if (stdout.length < MAX_ADMIN_OUTPUT_BYTES) {
+          stdout += typeof c === "string" ? c : c.toString("utf8");
+        }
       });
       child.stderr?.on("data", (c) => {
-        stderr += typeof c === "string" ? c : c.toString("utf8");
+        if (stderr.length < MAX_ADMIN_OUTPUT_BYTES) {
+          stderr += typeof c === "string" ? c : c.toString("utf8");
+        }
       });
       child.once("error", (err) => {
         clearTimeout(timer);
@@ -63694,10 +63926,10 @@ async function handleAgCliAdmin(input2, deps = {}) {
         errorMessage: `Failed to parse .mcp.json: ${err instanceof Error ? err.message : String(err)}`
       };
     }
-    const servers = parsed.mcpServers ?? {};
+    const servers = parsed && typeof parsed === "object" && parsed.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers) ? parsed.mcpServers : {};
     const dryRun = input2.dryRun ?? true;
     const syncedServers = [];
-    for (const [name, def] of Object.entries(servers)) {
+    for (const [name, rawDef] of Object.entries(servers)) {
       if (name === "antigravity-delegate") {
         syncedServers.push({
           name,
@@ -63710,6 +63942,11 @@ async function handleAgCliAdmin(input2, deps = {}) {
         syncedServers.push({ name, status: "skipped", detail: "Invalid MCP server name." });
         continue;
       }
+      if (!rawDef || typeof rawDef !== "object" || Array.isArray(rawDef)) {
+        syncedServers.push({ name, status: "skipped", detail: "Invalid MCP server definition." });
+        continue;
+      }
+      const def = rawDef;
       const command = typeof def.command === "string" ? def.command : void 0;
       const url2 = typeof def.url === "string" ? def.url : void 0;
       const commandOrUrl = command ?? url2;
@@ -63734,7 +63971,7 @@ async function handleAgCliAdmin(input2, deps = {}) {
         name,
         commandOrUrl,
         args,
-        serverType: url2 ? "http" : "stdio",
+        serverType: command ? "stdio" : "http",
         envVars,
         headers
       });
@@ -63745,11 +63982,12 @@ async function handleAgCliAdmin(input2, deps = {}) {
           detail: `agy ${formatRedactedCliArgs(addArgs)}`
         });
       } else {
-        const res2 = await runCli(cliPath, addArgs, detection.platform, 2e4);
+        const res2 = await runCli(cliPath, addArgs, detection.platform, 2e4, workspaceRoot);
+        const extraSecrets2 = extractSecretValues(envVars, headers);
         syncedServers.push({
           name,
           status: res2.exitCode === 0 ? "synced" : "failed",
-          detail: maskSecrets((res2.stdout || res2.stderr).trim() || `exit ${res2.exitCode}`)
+          detail: maskSecrets((res2.stdout || res2.stderr).trim() || `exit ${res2.exitCode}`, extraSecrets2)
         });
       }
     }
@@ -63871,9 +64109,11 @@ ${summary || "(No eligible MCP servers found.)"}`,
       timeoutMs = 6e4;
       break;
   }
-  const res = await runCli(cliPath, cliArgs, detection.platform, timeoutMs);
+  const res = await runCli(cliPath, cliArgs, detection.platform, timeoutMs, workspaceRoot);
+  const extraSecrets = input2.action === "mcp_add" ? extractSecretValues(input2.envVars, input2.headers) : [];
   const combined = maskSecrets(
-    [res.stdout.trim(), res.stderr.trim()].filter(Boolean).join("\n")
+    [res.stdout.trim(), res.stderr.trim()].filter(Boolean).join("\n"),
+    extraSecrets
   );
   const maxLines = Math.min(300, Math.max(10, input2.maxLines ?? 80));
   const output2 = truncateLines(combined, maxLines);
@@ -81935,6 +82175,7 @@ import { execFileSync as execFileSync3, spawn as spawn4 } from "node:child_proce
 import fs13 from "node:fs";
 import path12 from "node:path";
 var MAX_READ_BYTES = 64 * 1024;
+var MAX_FILE_READ_BYTES = 2 * 1024 * 1024;
 var MAX_CMD_OUTPUT_BYTES = 16 * 1024;
 var MAX_LIST_ENTRIES = 200;
 var SHELL_METACHAR_REGEX = /[;&|`$<>^%!\r\n]/;
@@ -82133,6 +82374,9 @@ function killProcessTree(pid, isWin) {
 }
 async function defaultCommandRunner(command, cwd, timeoutSec, options) {
   const { bin, args } = validateCommandPolicy(command);
+  if (options?.abortSignal?.aborted) {
+    return { exitCode: 1, stdout: "", stderr: "Command cancelled by abort signal.", timedOut: false };
+  }
   const env = createSanitizedEnv(options?.extraSensitiveEnvVars);
   const isWin = process.platform === "win32";
   const execBin = isWin ? windowsShell(env) : bin;
@@ -82151,10 +82395,16 @@ async function defaultCommandRunner(command, cwd, timeoutSec, options) {
     let stderr = "";
     let timedOut = false;
     let settled = false;
+    const onAbort = () => {
+      stderr += "\nCommand cancelled by abort signal.";
+      killProcessTree(child.pid, isWin);
+      finish(1);
+    };
     const finish = (exitCode) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options?.abortSignal?.removeEventListener("abort", onAbort);
       resolve({
         exitCode,
         stdout: truncateTail(stdout, MAX_CMD_OUTPUT_BYTES),
@@ -82162,6 +82412,13 @@ async function defaultCommandRunner(command, cwd, timeoutSec, options) {
         timedOut
       });
     };
+    if (options?.abortSignal) {
+      if (options.abortSignal.aborted) {
+        onAbort();
+        return;
+      }
+      options.abortSignal.addEventListener("abort", onAbort, { once: true });
+    }
     child.stdout?.on("data", (chunk) => {
       if (stdout.length < MAX_CAPTURE) {
         stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -82189,13 +82446,14 @@ async function defaultCommandRunner(command, cwd, timeoutSec, options) {
 function createDefaultGeminiAdapter(apiKey) {
   const ai = new GoogleGenAI({ apiKey });
   return {
-    async generateTurn({ model, systemInstruction, contents, tools }) {
+    async generateTurn({ model, systemInstruction, contents, tools, abortSignal }) {
       const response = await ai.models.generateContent({
         model,
         contents,
         config: {
           systemInstruction,
-          tools: [{ functionDeclarations: tools }]
+          tools: [{ functionDeclarations: tools }],
+          ...abortSignal ? { abortSignal } : {}
         }
       });
       const functionCalls = (response.functionCalls ?? []).filter((fc) => Boolean(fc.name)).map((fc) => ({
@@ -82267,8 +82525,17 @@ var WORKER_TOOL_DECLARATIONS = [
     }
   }
 ];
+function canonicalWorkspaceRoot(workspaceRoot) {
+  const resolved = path12.resolve(workspaceRoot);
+  try {
+    return fs13.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
 function listWorkspaceDir(workspaceRoot, relDir, maxDepth) {
   const safeDir = assertReadablePath(workspaceRoot, relDir || ".");
+  const canonicalRoot = canonicalWorkspaceRoot(workspaceRoot);
   const results = [];
   const ignored = /* @__PURE__ */ new Set(["node_modules", ".git", ".ag-bridge", "dist"]);
   const walk = (dir, depth) => {
@@ -82279,7 +82546,7 @@ function listWorkspaceDir(workspaceRoot, relDir, maxDepth) {
       if (results.length >= MAX_LIST_ENTRIES) break;
       if (ignored.has(entry.name)) continue;
       const full = path12.join(dir, entry.name);
-      const rel = path12.relative(workspaceRoot, full).split(path12.sep).join("/");
+      const rel = path12.relative(canonicalRoot, full).split(path12.sep).join("/");
       if (entry.isDirectory()) {
         results.push(`${rel}/`);
         if (depth < maxDepth) {
@@ -82297,8 +82564,19 @@ function isRetryableApiError(err) {
   const msg = err instanceof Error ? err.message : String(err);
   return /\b(429|500|502|503|504|RESOURCE_EXHAUSTED|UNAVAILABLE|ECONNRESET|ETIMEDOUT)\b/i.test(msg);
 }
-async function sleep2(ms) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep2(ms, abortSignal) {
+  if (abortSignal?.aborted) return;
+  await new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 function buildSystemInstruction(ctx) {
   return [
@@ -82443,20 +82721,60 @@ var ApiWorkerEngine = class {
     let blockedWrites = 0;
     let nudgedForVerification = false;
     let lastModelText = "";
+    const canonicalRoot = canonicalWorkspaceRoot(ctx.workspaceRoot);
+    const totalProgressSteps = maxTurns * 2;
+    const buildCancelledResult = () => {
+      const metrics = buildMetrics();
+      const cancelledManifest = {
+        ...ctx.manifest,
+        status: "FAILED",
+        changedFiles: Array.from(writtenFiles).sort(),
+        metrics,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        errorCode: "TASK_CANCELLED",
+        error: "Background API worker task was cancelled by user request."
+      };
+      writeManifest(ctx.workspaceRoot, cancelledManifest);
+      const cancelReport = `# Antigravity Task Report (Cancelled)
+
+- **Task ID:** \`${ctx.manifest.taskId}\`
+- **Status:** CANCELLED
+- **Turns Completed:** ${turnsExecuted}
+
+${formatTokenUsageMarkdown(metrics)}`;
+      writeReportMarkdown(ctx.workspaceRoot, cancelReport);
+      return {
+        status: "FAILED",
+        reportMarkdown: cancelReport,
+        changedFiles: Array.from(writtenFiles).sort(),
+        artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+        metrics,
+        warnings,
+        errorCode: "TASK_CANCELLED",
+        errorMessage: "Task was cancelled by user request."
+      };
+    };
     const callModelWithRetry = async () => {
       let lastErr;
       for (let attempt = 0; attempt <= 3; attempt++) {
+        if (ctx.abortSignal?.aborted) {
+          throw new AgPluginError("TASK_CANCELLED", "Task was cancelled by user request.");
+        }
         try {
           return await adapter.generateTurn({
             model,
             systemInstruction,
             contents,
-            tools: WORKER_TOOL_DECLARATIONS
+            tools: WORKER_TOOL_DECLARATIONS,
+            abortSignal: ctx.abortSignal
           });
         } catch (err) {
+          if (ctx.abortSignal?.aborted) {
+            throw new AgPluginError("TASK_CANCELLED", "Task was cancelled by user request.");
+          }
           lastErr = err;
           if (attempt < 3 && isRetryableApiError(err)) {
-            await sleep2(this.retryBaseDelayMs * Math.pow(2, attempt));
+            await sleep2(this.retryBaseDelayMs * Math.pow(2, attempt), ctx.abortSignal);
             continue;
           }
           break;
@@ -82471,45 +82789,20 @@ var ApiWorkerEngine = class {
     try {
       for (let turn = 1; turn <= maxTurns; turn++) {
         if (ctx.abortSignal?.aborted) {
-          const metrics2 = buildMetrics();
-          const cancelledManifest = {
-            ...ctx.manifest,
-            status: "FAILED",
-            changedFiles: Array.from(writtenFiles).sort(),
-            metrics: metrics2,
-            updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            errorCode: "TASK_CANCELLED",
-            error: "Background API worker task was cancelled by user request."
-          };
-          writeManifest(ctx.workspaceRoot, cancelledManifest);
-          const cancelReport = `# Antigravity Task Report (Cancelled)
-
-- **Task ID:** \`${ctx.manifest.taskId}\`
-- **Status:** CANCELLED
-- **Turns Completed:** ${turnsExecuted}
-
-${formatTokenUsageMarkdown(metrics2)}`;
-          writeReportMarkdown(ctx.workspaceRoot, cancelReport);
-          return {
-            status: "FAILED",
-            reportMarkdown: cancelReport,
-            changedFiles: Array.from(writtenFiles).sort(),
-            artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
-            metrics: metrics2,
-            warnings,
-            errorCode: "TASK_CANCELLED",
-            errorMessage: "Task was cancelled by user request."
-          };
+          return buildCancelledResult();
         }
         try {
           ctx.onProgress?.({
-            progress: turn - 1,
-            total: maxTurns,
+            progress: (turn - 1) * 2,
+            total: totalProgressSteps,
             message: `API worker turn ${turn}/${maxTurns}: calling ${model}`
           });
         } catch {
         }
         const turnResp = await callModelWithRetry();
+        if (ctx.abortSignal?.aborted) {
+          return buildCancelledResult();
+        }
         turnsExecuted = turn;
         addTurnUsage(turnResp.usage);
         if (turnResp.text) {
@@ -82559,8 +82852,8 @@ ${formatTokenUsageMarkdown(metrics2)}`;
           writeManifest(ctx.workspaceRoot, verifiedManifest);
           try {
             ctx.onProgress?.({
-              progress: maxTurns,
-              total: maxTurns,
+              progress: totalProgressSteps,
+              total: totalProgressSteps,
               message: `API worker completed in ${turnsExecuted} turn(s)`
             });
           } catch {
@@ -82577,8 +82870,8 @@ ${formatTokenUsageMarkdown(metrics2)}`;
         try {
           const toolNames = calls.map((c) => c.name).join(", ");
           ctx.onProgress?.({
-            progress: turn,
-            total: maxTurns,
+            progress: (turn - 1) * 2 + 1,
+            total: totalProgressSteps,
             message: `API worker turn ${turn}/${maxTurns}: running ${toolNames}`
           });
         } catch {
@@ -82591,6 +82884,9 @@ ${formatTokenUsageMarkdown(metrics2)}`;
         });
         const responseParts = [];
         for (const call of calls) {
+          if (ctx.abortSignal?.aborted) {
+            return buildCancelledResult();
+          }
           let toolResult;
           try {
             if (call.name === "read_file") {
@@ -82599,18 +82895,27 @@ ${formatTokenUsageMarkdown(metrics2)}`;
               if (!fs13.existsSync(absPath)) {
                 toolResult = { error: `File not found: ${filePath}` };
               } else {
-                const raw = fs13.readFileSync(absPath, "utf8");
-                const lines = raw.split(/\r?\n/);
-                const rawStart = Number(call.args.startLine ?? 1);
-                const rawEnd = Number(call.args.endLine ?? lines.length);
-                const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
-                const end = Number.isFinite(rawEnd) ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd))) : lines.length;
-                const sliced = lines.slice(start - 1, end).join("\n");
-                toolResult = {
-                  path: filePath,
-                  totalLines: lines.length,
-                  content: maskSecrets(truncateTail(sliced, MAX_READ_BYTES), [apiKey])
-                };
+                const st = fs13.statSync(absPath);
+                if (!st.isFile()) {
+                  toolResult = { error: `Not a regular file: ${filePath}` };
+                } else if (st.size > MAX_FILE_READ_BYTES) {
+                  toolResult = {
+                    error: `File "${filePath}" is too large to read (${st.size} bytes; limit is ${MAX_FILE_READ_BYTES} bytes).`
+                  };
+                } else {
+                  const raw = fs13.readFileSync(absPath, "utf8");
+                  const lines = raw.split(/\r?\n/);
+                  const rawStart = Number(call.args.startLine ?? 1);
+                  const rawEnd = Number(call.args.endLine ?? lines.length);
+                  const start = Number.isFinite(rawStart) ? Math.max(1, Math.floor(rawStart)) : 1;
+                  const end = Number.isFinite(rawEnd) ? Math.min(lines.length, Math.max(start, Math.floor(rawEnd))) : lines.length;
+                  const sliced = lines.slice(start - 1, end).join("\n");
+                  toolResult = {
+                    path: filePath,
+                    totalLines: lines.length,
+                    content: maskSecrets(truncateTail(sliced, MAX_READ_BYTES), [apiKey])
+                  };
+                }
               }
             } else if (call.name === "write_file") {
               const filePath = String(call.args.path ?? "");
@@ -82622,7 +82927,7 @@ ${formatTokenUsageMarkdown(metrics2)}`;
               );
               fs13.mkdirSync(path12.dirname(absPath), { recursive: true });
               fs13.writeFileSync(absPath, content, "utf8");
-              const relWritten = path12.relative(ctx.workspaceRoot, absPath).split(path12.sep).join("/");
+              const relWritten = path12.relative(canonicalRoot, absPath).split(path12.sep).join("/");
               writtenFiles.add(relWritten);
               toolResult = { ok: true, path: relWritten, bytesWritten: Buffer.byteLength(content, "utf8") };
             } else if (call.name === "list_dir") {
@@ -82677,6 +82982,9 @@ ${formatTokenUsageMarkdown(metrics2)}`;
         contents.push({ role: "user", parts: userParts });
         runningManifest.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
         writeManifest(ctx.workspaceRoot, runningManifest);
+      }
+      if (ctx.abortSignal?.aborted) {
+        return buildCancelledResult();
       }
       const metrics = buildMetrics();
       const changedFiles = Array.from(
@@ -82792,10 +83100,17 @@ function extractAgyOptions(input2) {
     rawPrompt: input2.rawPrompt
   };
 }
+var MAX_COMPLETED_JOBS = 50;
 var BackgroundJobManager = class {
   jobs = /* @__PURE__ */ new Map();
   register(record2) {
     this.jobs.set(record2.jobId, record2);
+    const completed = [...this.jobs.values()].filter((j) => !j.active).sort((a, b) => a.startedAtMs - b.startedAtMs);
+    if (completed.length > MAX_COMPLETED_JOBS) {
+      for (const old of completed.slice(0, completed.length - MAX_COMPLETED_JOBS)) {
+        this.jobs.delete(old.jobId);
+      }
+    }
   }
   get(jobId) {
     return this.jobs.get(jobId);
@@ -82892,10 +83207,12 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
   const createdMs = Date.parse(m2.createdAt);
   const updatedMs = Date.parse(m2.updatedAt);
   const elapsedSeconds = m2.metrics?.durationSeconds ?? (Number.isFinite(createdMs) && Number.isFinite(updatedMs) ? Math.max(0, Math.round((updatedMs - createdMs) / 1e3 * 100) / 100) : 0);
-  let status = "RUNNING";
+  let status = "FAILED";
   if (m2.status === "VERIFIED") status = "VERIFIED";
   else if (m2.errorCode === "TASK_CANCELLED") status = "CANCELLED";
   else if (m2.status === "FAILED") status = "FAILED";
+  else if (m2.status === "IDLE") status = "CANCELLED";
+  else status = "RUNNING";
   const execRoot = resolveManifestExecutionRoot(workspaceRoot, m2);
   const currentManifest = readManifest(execRoot);
   const isCurrent = currentManifest?.taskId === m2.taskId;
@@ -82906,7 +83223,8 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
     title: m2.title,
     mode: m2.mode,
     status,
-    active: status === "RUNNING",
+    // Disk fallback records are not tracked as live in-memory processes in this server instance
+    active: false,
     startedAt: m2.createdAt,
     updatedAt: m2.updatedAt,
     elapsedSeconds,
@@ -83150,7 +83468,7 @@ async function handleGetAgJob(input2 = {}, deps = {}) {
   const includeLogTail = input2.includeLogTail ?? true;
   if (input2.jobId) {
     const live = manager.get(input2.jobId);
-    if (live) {
+    if (live && (!input2.workspaceRoot || path13.resolve(live.workspaceRoot) === workspaceRoot)) {
       return {
         ok: true,
         job: summarizeLiveJob(live, true, includeLogTail),
@@ -83184,8 +83502,12 @@ async function handleGetAgJob(input2 = {}, deps = {}) {
     if (seen.has(m2.taskId)) continue;
     seen.add(m2.taskId);
     summaries.push(summarizeDiskManifest(workspaceRoot, m2, false, false));
-    if (summaries.length >= limit) break;
   }
+  summaries.sort((a, b) => {
+    const ta = Date.parse(a.updatedAt || a.startedAt || "") || 0;
+    const tb = Date.parse(b.updatedAt || b.startedAt || "") || 0;
+    return tb - ta;
+  });
   return {
     ok: true,
     jobs: summaries.slice(0, limit),
@@ -83250,11 +83572,13 @@ async function handleCancelAgJob(input2 = {}, deps = {}) {
 }
 
 // src/sessions.ts
-import { execFileSync as execFileSync4, spawn as spawn5 } from "node:child_process";
+import { spawn as spawn5 } from "node:child_process";
 import crypto4 from "node:crypto";
 import path14 from "node:path";
 var DEFAULT_IDLE_TTL_MS = 30 * 60 * 1e3;
 var DEFAULT_TURN_TIMEOUT_SEC = 300;
+var MAX_STDOUT_BUFFER_BYTES = 16 * 1024 * 1024;
+var MAX_TEXT_FRAGMENTS_BYTES = 4 * 1024 * 1024;
 function parseUsage(raw) {
   if (!raw || typeof raw !== "object") return void 0;
   const u = raw;
@@ -83275,31 +83599,30 @@ function parseUsage(raw) {
   };
 }
 function killSessionProcess(child, platform) {
-  if (!child.pid) {
-    try {
-      child.kill();
-    } catch {
-    }
-    return;
-  }
+  killChildProcessTree(child, platform, { escalateToSigkillMs: 2e3 });
+}
+function finalizeSessionCheckpointManifest(session, finalStatus, errorCode, errorMsg) {
+  if (!session.checkpointTaskId || session.checkpointFinalized) return;
+  session.checkpointFinalized = true;
   try {
-    if (platform === "win32") {
-      execFileSync4(requireExecutable("taskkill"), ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        timeout: 5e3
-      });
-    } else {
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        child.kill("SIGTERM");
-      }
-    }
+    const existing = readArchivedManifest(session.workspaceRoot, session.checkpointTaskId);
+    if (!existing) return;
+    archiveManifest(session.workspaceRoot, {
+      ...existing,
+      status: finalStatus,
+      metrics: {
+        conversationId: session.conversationId,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        durationSeconds: session.durationSeconds,
+        numTurns: session.numTurns,
+        usage: session.usage
+      },
+      ...errorCode ? { errorCode } : {},
+      ...errorMsg ? { error: maskSecrets(errorMsg) } : {},
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
   } catch {
-    try {
-      child.kill();
-    } catch {
-    }
   }
 }
 function defaultSessionSpawn(command, args, options) {
@@ -83409,7 +83732,10 @@ var PersistentSessionManager = class {
         session.conversationId = stepObj.conversation_id;
       }
       if (typeof stepObj.text_delta === "string" && session.currentTurn) {
-        session.currentTurn.textFragments.push(stepObj.text_delta);
+        if (session.currentTurn.textBytes < MAX_TEXT_FRAGMENTS_BYTES) {
+          session.currentTurn.textFragments.push(stepObj.text_delta);
+          session.currentTurn.textBytes += stepObj.text_delta.length;
+        }
       }
       const stepUsage = parseUsage(stepObj.usage);
       if (stepUsage) {
@@ -83460,7 +83786,7 @@ var PersistentSessionManager = class {
       }
     }
   }
-  create(workspaceRoot, platform, child, gitCheckpointRef, checkpointTaskId) {
+  create(workspaceRoot, platform, child, gitCheckpointRef, checkpointTaskId, checkpointIsStash = false) {
     const sessionId = `ag-sess-${crypto4.randomBytes(4).toString("hex")}`;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const idleTimer = setTimeout(() => {
@@ -83478,14 +83804,31 @@ var PersistentSessionManager = class {
       durationSeconds: 0,
       gitCheckpointRef,
       checkpointTaskId,
+      checkpointIsStash,
       createdAt: now,
       lastActivityAt: now,
       stdoutBuffer: "",
       stderrTail: "",
       idleTimer
     };
+    child.stdin?.on?.("error", (err) => {
+      if (session.currentTurn) {
+        const waiter = session.currentTurn;
+        session.currentTurn = void 0;
+        session.busy = false;
+        clearTimeout(waiter.timer);
+        waiter.reject(
+          new Error(`Session stdin error: ${maskSecrets(err instanceof Error ? err.message : String(err))}`)
+        );
+      }
+    });
     child.stdout?.on("data", (chunk) => {
-      session.stdoutBuffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (session.stdoutBuffer.length + text.length > MAX_STDOUT_BUFFER_BYTES) {
+        session.stdoutBuffer = `${session.stdoutBuffer}${text}`.slice(-MAX_STDOUT_BUFFER_BYTES);
+      } else {
+        session.stdoutBuffer += text;
+      }
       const lines = session.stdoutBuffer.split(/\r?\n/);
       session.stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
@@ -83501,6 +83844,7 @@ var PersistentSessionManager = class {
         this.handleLine(session, session.stdoutBuffer);
         session.stdoutBuffer = "";
       }
+      const wasActive = session.active;
       session.active = false;
       session.busy = false;
       clearTimeout(session.idleTimer);
@@ -83515,6 +83859,14 @@ var PersistentSessionManager = class {
           )
         );
       }
+      if (wasActive) {
+        finalizeSessionCheckpointManifest(
+          session,
+          code === 0 ? "VERIFIED" : "FAILED",
+          code === 0 ? void 0 : "SESSION_FAILED",
+          code === 0 ? void 0 : session.stderrTail.trim().split(/\r?\n/).slice(-3).join(" ") || `Antigravity stream session exited with code ${code ?? "unknown"}.`
+        );
+      }
       this.sessions.delete(sessionId);
     });
     child.once("error", (err) => {
@@ -83527,6 +83879,18 @@ var PersistentSessionManager = class {
         clearTimeout(waiter.timer);
         waiter.reject(err);
       }
+      if (session.numTurns === 0 && session.checkpointIsStash && session.checkpointTaskId) {
+        try {
+          deleteCheckpointRef(session.workspaceRoot, session.checkpointTaskId);
+        } catch {
+        }
+      }
+      finalizeSessionCheckpointManifest(
+        session,
+        "FAILED",
+        "SESSION_FAILED",
+        err instanceof Error ? err.message : String(err)
+      );
       this.sessions.delete(sessionId);
     });
     this.sessions.set(sessionId, session);
@@ -83534,7 +83898,11 @@ var PersistentSessionManager = class {
   }
   get(sessionId, workspaceRoot) {
     if (sessionId) {
-      return this.sessions.get(sessionId);
+      const found = this.sessions.get(sessionId);
+      if (found && workspaceRoot && path14.resolve(found.workspaceRoot) !== path14.resolve(workspaceRoot)) {
+        return void 0;
+      }
+      return found;
     }
     let latest;
     for (const s2 of this.sessions.values()) {
@@ -83590,31 +83958,44 @@ var PersistentSessionManager = class {
         clearTimeout(session.idleTimer);
         this.sessions.delete(session.sessionId);
         killSessionProcess(session.child, session.platform);
-        reject(
-          new Error(
-            `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`
-          )
-        );
+        const timeoutMsg = `Session turn timed out after ${timeoutSec}s; session closed to prevent response desynchronization.`;
+        finalizeSessionCheckpointManifest(session, "FAILED", "TASK_TIMEOUT", timeoutMsg);
+        reject(new Error(timeoutMsg));
       }, Math.max(5, timeoutSec) * 1e3);
       session.currentTurn = {
         resolve,
         reject,
         timer,
-        textFragments: []
+        textFragments: [],
+        textBytes: 0
       };
+      const failWrite = (err) => {
+        if (session.currentTurn?.timer === timer) {
+          session.currentTurn = void 0;
+        }
+        clearTimeout(timer);
+        session.busy = false;
+        this.bumpIdleTimer(session);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      const stdin = session.child.stdin;
+      if (!stdin || stdin.destroyed || !stdin.writable) {
+        failWrite(new Error(`Session "${session.sessionId}" stdin is closed or not writable.`));
+        return;
+      }
       try {
         const payload = JSON.stringify({
           event: "user",
           message: { content: prompt }
         });
-        session.child.stdin?.write(`${payload}
-`);
+        stdin.write(`${payload}
+`, (writeErr) => {
+          if (writeErr) {
+            failWrite(writeErr);
+          }
+        });
       } catch (err) {
-        clearTimeout(timer);
-        session.currentTurn = void 0;
-        session.busy = false;
-        this.bumpIdleTimer(session);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        failWrite(err);
       }
     });
   }
@@ -83625,6 +84006,12 @@ var PersistentSessionManager = class {
     summary.active = false;
     summary.busy = false;
     clearTimeout(session.idleTimer);
+    if (session.currentTurn) {
+      clearTimeout(session.currentTurn.timer);
+      const waiter = session.currentTurn;
+      session.currentTurn = void 0;
+      waiter.reject(new Error(`Session "${session.sessionId}" was closed while a turn was in progress.`));
+    }
     this.sessions.delete(session.sessionId);
     if (session.active) {
       session.active = false;
@@ -83648,11 +84035,17 @@ var PersistentSessionManager = class {
         killSessionProcess(session.child, session.platform);
       }
     }
+    finalizeSessionCheckpointManifest(session, "VERIFIED");
     return summary;
   }
   disposeAll() {
     for (const s2 of [...this.sessions.values()]) {
       clearTimeout(s2.idleTimer);
+      if (s2.currentTurn) {
+        clearTimeout(s2.currentTurn.timer);
+        s2.currentTurn = void 0;
+      }
+      s2.active = false;
       try {
         s2.child.stdin?.end();
       } catch {
@@ -83829,7 +84222,8 @@ async function handleAgSession(input2, deps = {}) {
     detection.platform,
     child,
     checkpoint.checkpointRef,
-    persistedCheckpointTaskId
+    persistedCheckpointTaskId,
+    checkpoint.isStashSnapshot
   );
   if (input2.prompt && input2.prompt.trim().length > 0) {
     try {

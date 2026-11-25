@@ -20,6 +20,28 @@ export interface DetectorDeps {
   findBinary: (name: string) => string | undefined;
 }
 
+function getEnvCaseInsensitive(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  if (env[key] !== undefined) return env[key];
+  const upper = key.toUpperCase();
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase() === upper) return v;
+  }
+  return undefined;
+}
+
+function isExecutableFile(filePath: string, platform: NodeJS.Platform): boolean {
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) return false;
+    if (platform !== 'win32') {
+      fs.accessSync(filePath, fs.constants.X_OK);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function findBinaryInPath(
   name: string,
   platform: NodeJS.Platform = process.platform,
@@ -29,10 +51,11 @@ export function findBinaryInPath(
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   // Fully qualified entries only: "." or "bin" would find an agy the opened workspace ships (TC-S13).
   const dirs = absolutePathDirs(platform, env);
+  const useRealFsCheck = existsSyncFn === fs.existsSync;
 
   const extensions =
     platform === 'win32'
-      ? (env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+      ? (getEnvCaseInsensitive(env, 'PATHEXT') ?? '.EXE;.CMD;.BAT;.COM')
           .split(';')
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean)
@@ -45,7 +68,7 @@ export function findBinaryInPath(
           ? pathApi.join(dir, `${name}${ext}`)
           : pathApi.join(dir, name);
       try {
-        if (existsSyncFn(candidate)) {
+        if (useRealFsCheck ? isExecutableFile(candidate, platform) : existsSyncFn(candidate)) {
           return candidate;
         }
       } catch {
@@ -69,42 +92,46 @@ export function getDefaultDetectorDeps(): DetectorDeps {
 }
 
 function getDefaultCliCandidates(deps: DetectorDeps): Array<{ binary: string; path: string }> {
+  const pathApi = deps.platform === 'win32' ? path.win32 : path.posix;
   if (deps.platform === 'win32') {
-    const localAppData = deps.env.LOCALAPPDATA ?? path.join(deps.homedir, 'AppData', 'Local');
+    const localAppData =
+      getEnvCaseInsensitive(deps.env, 'LOCALAPPDATA') ?? pathApi.join(deps.homedir, 'AppData', 'Local');
     return [
-      { binary: 'agy', path: path.join(localAppData, 'agy', 'bin', 'agy.exe') },
-      { binary: 'agy', path: path.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy.exe') },
-      { binary: 'agy', path: path.join(deps.homedir, '.local', 'bin', 'agy.exe') },
-      { binary: 'antigravity', path: path.join(localAppData, 'Programs', 'Antigravity', 'bin', 'antigravity.cmd') },
+      { binary: 'agy', path: pathApi.join(localAppData, 'agy', 'bin', 'agy.exe') },
+      { binary: 'agy', path: pathApi.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy.exe') },
+      { binary: 'agy', path: pathApi.join(deps.homedir, '.local', 'bin', 'agy.exe') },
+      { binary: 'antigravity', path: pathApi.join(localAppData, 'Programs', 'Antigravity', 'bin', 'antigravity.cmd') },
     ];
   }
   return [
-    { binary: 'agy', path: path.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy') },
-    { binary: 'agy', path: path.join(deps.homedir, '.local', 'bin', 'agy') },
+    { binary: 'agy', path: pathApi.join(deps.homedir, '.gemini', 'antigravity-cli', 'bin', 'agy') },
+    { binary: 'agy', path: pathApi.join(deps.homedir, '.local', 'bin', 'agy') },
     { binary: 'agy', path: '/usr/local/bin/agy' },
-    { binary: 'antigravity', path: path.join(deps.homedir, '.local', 'bin', 'antigravity') },
+    { binary: 'antigravity', path: pathApi.join(deps.homedir, '.local', 'bin', 'antigravity') },
     { binary: 'antigravity', path: '/usr/local/bin/antigravity' },
   ];
 }
 
 function getDefaultAppCandidates(deps: DetectorDeps): string[] {
+  const pathApi = deps.platform === 'win32' ? path.win32 : path.posix;
   if (deps.platform === 'darwin') {
     return [
       '/Applications/Antigravity.app',
-      path.join(deps.homedir, 'Applications', 'Antigravity.app'),
+      pathApi.join(deps.homedir, 'Applications', 'Antigravity.app'),
     ];
   }
   if (deps.platform === 'win32') {
-    const localAppData = deps.env.LOCALAPPDATA ?? path.join(deps.homedir, 'AppData', 'Local');
-    const programFiles = deps.env.ProgramFiles ?? 'C:\\Program Files';
+    const localAppData =
+      getEnvCaseInsensitive(deps.env, 'LOCALAPPDATA') ?? pathApi.join(deps.homedir, 'AppData', 'Local');
+    const programFiles = getEnvCaseInsensitive(deps.env, 'ProgramFiles') ?? 'C:\\Program Files';
     return [
-      path.join(localAppData, 'Programs', 'Antigravity', 'Antigravity.exe'),
-      path.join(programFiles, 'Antigravity', 'Antigravity.exe'),
+      pathApi.join(localAppData, 'Programs', 'Antigravity', 'Antigravity.exe'),
+      pathApi.join(programFiles, 'Antigravity', 'Antigravity.exe'),
     ];
   }
   return [
     '/usr/bin/antigravity',
-    path.join(deps.homedir, '.local', 'bin', 'antigravity'),
+    pathApi.join(deps.homedir, '.local', 'bin', 'antigravity'),
     '/opt/Antigravity/antigravity',
   ];
 }
@@ -129,23 +156,32 @@ export function detectSubscriptionApp(
 ): SubscriptionDetection {
   const triggerMethod = config.subscription.trigger_method;
 
-  // 1. Explicit app_path override (infer cliBinary so agy flags still apply)
+  // 1. Explicit app_path override (infer cliBinary so agy flags still apply; never treat macOS .app bundle dirs as CLI executables)
   if (config.subscription.app_path && config.subscription.app_path !== 'auto') {
     if (deps.existsSync(config.subscription.app_path)) {
+      let isAppBundleDir = config.subscription.app_path.toLowerCase().endsWith('.app');
+      if (!isAppBundleDir) {
+        try {
+          isAppBundleDir = fs.statSync(config.subscription.app_path).isDirectory();
+        } catch {
+          // Mocked existsSync path that does not exist on real FS: treat as CLI file unless .app
+        }
+      }
       return {
         detected: true,
-        cliBinary: inferCliBinaryFromPath(config.subscription.app_path),
+        cliBinary: isAppBundleDir ? undefined : inferCliBinaryFromPath(config.subscription.app_path),
         appPath: config.subscription.app_path,
-        cliPath: config.subscription.app_path,
+        cliPath: isAppBundleDir ? undefined : config.subscription.app_path,
         triggerMethod,
       };
     }
   }
 
-  // 2. CLI binaries via PATH (ADR-003: agy -> antigravity -> ag)
+  // 2. Modern CLI binaries via PATH first (`agy`, `antigravity`), then standard install locations,
+  // before falling back to legacy `ag` (prevents The Silver Searcher `ag` from shadowing `agy`).
   let cliBinary: string | undefined;
   let cliPath: string | undefined;
-  for (const bin of ['agy', 'antigravity', 'ag']) {
+  for (const bin of ['agy', 'antigravity']) {
     const found = deps.findBinary(bin);
     if (found) {
       cliBinary = bin;
@@ -162,6 +198,15 @@ export function detectSubscriptionApp(
         cliPath = candidate.path;
         break;
       }
+    }
+  }
+
+  // 2c. Legacy `ag` fallback only if neither `agy` nor `antigravity` was found anywhere
+  if (!cliPath) {
+    const legacyAg = deps.findBinary('ag');
+    if (legacyAg) {
+      cliBinary = 'ag';
+      cliPath = legacyAg;
     }
   }
 
@@ -229,6 +274,16 @@ export function detectEnvironment(
         'Install & sign in to Antigravity (CLI `agy` or desktop app) for Subscription Mode, OR export GEMINI_API_KEY for API Fallback Mode.',
       );
     }
+  }
+
+  if (
+    config.subscription.app_path &&
+    config.subscription.app_path !== 'auto' &&
+    !deps.existsSync(config.subscription.app_path)
+  ) {
+    recommendations.push(
+      `Configured subscription.app_path "${config.subscription.app_path}" does not exist; fell back to automatic detection.`,
+    );
   }
 
   const ignoredAdvice = describeIgnoredSettings(config);

@@ -111,11 +111,22 @@ function extractAgyOptions(input: DelegateToolInput): AgyCliOptions {
   };
 }
 
+const MAX_COMPLETED_JOBS = 50;
+
 export class BackgroundJobManager {
   private readonly jobs = new Map<string, LiveJobRecord>();
 
   public register(record: LiveJobRecord): void {
     this.jobs.set(record.jobId, record);
+    // Prune oldest completed jobs beyond MAX_COMPLETED_JOBS to prevent unbounded memory growth
+    const completed = [...this.jobs.values()]
+      .filter((j) => !j.active)
+      .sort((a, b) => a.startedAtMs - b.startedAtMs);
+    if (completed.length > MAX_COMPLETED_JOBS) {
+      for (const old of completed.slice(0, completed.length - MAX_COMPLETED_JOBS)) {
+        this.jobs.delete(old.jobId);
+      }
+    }
   }
 
   public get(jobId: string): LiveJobRecord | undefined {
@@ -252,10 +263,12 @@ function summarizeDiskManifest(
       ? Math.max(0, Math.round(((updatedMs - createdMs) / 1000) * 100) / 100)
       : 0);
 
-  let status: BackgroundJobState = 'RUNNING';
+  let status: BackgroundJobState = 'FAILED';
   if (m.status === 'VERIFIED') status = 'VERIFIED';
   else if (m.errorCode === 'TASK_CANCELLED') status = 'CANCELLED';
   else if (m.status === 'FAILED') status = 'FAILED';
+  else if (m.status === 'IDLE') status = 'CANCELLED';
+  else status = 'RUNNING';
 
   const execRoot = resolveManifestExecutionRoot(workspaceRoot, m);
   const currentManifest = readManifest(execRoot);
@@ -268,7 +281,8 @@ function summarizeDiskManifest(
     title: m.title,
     mode: m.mode,
     status,
-    active: status === 'RUNNING',
+    // Disk fallback records are not tracked as live in-memory processes in this server instance
+    active: false,
     startedAt: m.createdAt,
     updatedAt: m.updatedAt,
     elapsedSeconds,
@@ -564,7 +578,10 @@ export async function handleGetAgJob(
 
   if (input.jobId) {
     const live = manager.get(input.jobId);
-    if (live) {
+    if (
+      live &&
+      (!input.workspaceRoot || path.resolve(live.workspaceRoot) === workspaceRoot)
+    ) {
       return {
         ok: true,
         job: summarizeLiveJob(live, true, includeLogTail),
@@ -593,7 +610,7 @@ export async function handleGetAgJob(
     };
   }
 
-  // List mode: merge live in-memory jobs + recent disk manifests (deduped by taskId)
+  // List mode: merge live in-memory jobs + recent disk manifests (deduped by taskId), sorted chronologically
   const limit = Math.max(1, Math.min(50, input.limit ?? 10));
   const seen = new Set<string>();
   const summaries: BackgroundJobSummary[] = [];
@@ -607,8 +624,13 @@ export async function handleGetAgJob(
     if (seen.has(m.taskId)) continue;
     seen.add(m.taskId);
     summaries.push(summarizeDiskManifest(workspaceRoot, m, false, false));
-    if (summaries.length >= limit) break;
   }
+
+  summaries.sort((a, b) => {
+    const ta = Date.parse(a.updatedAt || a.startedAt || '') || 0;
+    const tb = Date.parse(b.updatedAt || b.startedAt || '') || 0;
+    return tb - ta;
+  });
 
   return {
     ok: true,

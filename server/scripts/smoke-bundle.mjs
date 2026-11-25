@@ -58,13 +58,25 @@ function mcpHandshake(cwd) {
       env: hermeticEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    let settled = false;
+    let spawnErrored = false;
     const exited = new Promise((res) => child.once('exit', res));
-    // Settle only after the child has exited: Windows refuses to remove a directory that is
-    // still some process's working directory (EBUSY).
+    // Settle only after the child has exited (unless spawn itself failed so 'exit' will never fire):
+    // Windows refuses to remove a directory that is still some process's working directory (EBUSY).
     const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      child.kill();
-      exited.then(() => fn(value));
+      if (spawnErrored || child.exitCode !== null || child.signalCode !== null) {
+        fn(value);
+        return;
+      }
+      try {
+        child.kill();
+      } catch {
+        // ignore
+      }
+      Promise.race([exited, new Promise((res) => setTimeout(res, 2000))]).then(() => fn(value));
     };
     let stdoutBuf = '';
     let stderrBuf = '';
@@ -72,7 +84,10 @@ function mcpHandshake(cwd) {
     const timer = setTimeout(() => {
       settle(reject, new Error(`MCP server did not answer within 20 s. stderr:\n${stderrBuf}`));
     }, 20_000);
-    child.on('error', (err) => settle(reject, err));
+    child.on('error', (err) => {
+      spawnErrored = true;
+      settle(reject, err);
+    });
     // A server that dies early turns our next write into EPIPE; the 'exit' handler reports it.
     child.stdin.on('error', () => {});
 

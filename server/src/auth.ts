@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
-import { buildCliSpawnSpec, queryAgyCapabilities } from './engines/subscription.js';
+import { buildCliSpawnSpec, killChildProcessTree, queryAgyCapabilities } from './engines/subscription.js';
 import {
   AgAuthMethod,
   AgAuthToolInput,
@@ -60,6 +60,7 @@ const DEFAULT_PENDING_SESSION_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MANUAL_PROMPT_TIMEOUT_MS = 15_000;
 const DEFAULT_COMPLETE_TIMEOUT_MS = 30_000;
 const DEFAULT_BROWSER_TIMEOUT_SEC = 180;
+const MAX_AUTH_BUFFER_BYTES = 256 * 1024;
 
 export class PendingAuthSessionManager {
   private readonly sessions = new Map<string, PendingAuthSession>();
@@ -91,23 +92,33 @@ export class PendingAuthSessionManager {
       platform,
       child,
       authUrl,
-      stdout: initialStdout,
-      stderr: initialStderr,
+      stdout: initialStdout.slice(-MAX_AUTH_BUFFER_BYTES),
+      stderr: initialStderr.slice(-MAX_AUTH_BUFFER_BYTES),
       createdAt: Date.now(),
       ttlTimer,
       closed: false,
       exitCode: null,
     };
 
+    child.stdin?.on?.('error', () => {
+      // Prevent unhandled EPIPE on dead child process (H-13)
+    });
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      session.stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      session.stdout = `${session.stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
     });
     child.stderr?.on('data', (chunk: Buffer | string) => {
-      session.stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      session.stderr = `${session.stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
+    });
+    child.once('error', () => {
+      session.closed = true;
+      clearTimeout(session.ttlTimer);
     });
     child.once('close', (code) => {
       session.closed = true;
       session.exitCode = code;
+      clearTimeout(session.ttlTimer);
     });
 
     this.sessions.set(sessionId, session);
@@ -118,9 +129,10 @@ export class PendingAuthSessionManager {
     if (sessionId) {
       return this.sessions.get(sessionId);
     }
-    // Return most recently created active session when sessionId is omitted
+    // Return most recently created open session when sessionId is omitted
     let latest: PendingAuthSession | undefined;
     for (const s of this.sessions.values()) {
+      if (s.closed) continue;
       if (!latest || s.createdAt > latest.createdAt) {
         latest = s;
       }
@@ -144,11 +156,7 @@ export class PendingAuthSessionManager {
     }
     this.remove(target.sessionId);
     if (!target.closed) {
-      try {
-        target.child.kill();
-      } catch {
-        // ignore
-      }
+      killChildProcessTree(target.child, target.platform);
     }
     return true;
   }
@@ -240,7 +248,7 @@ function defaultSpawn(
     windowsVerbatimArguments?: boolean;
   },
 ): ChildProcess {
-  return spawn(command, args, options);
+  return spawn(command, args, { ...options, detached: process.platform !== 'win32' });
 }
 
 function getInstallNextSteps(platform: NodeJS.Platform): string[] {
@@ -482,11 +490,13 @@ async function startManualLoginFlow(
     };
 
     const onStdout = (chunk: Buffer | string): void => {
-      stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      stdout = `${stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkForUrl();
     };
     const onStderr = (chunk: Buffer | string): void => {
-      stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      stderr = `${stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkForUrl();
     };
     const onError = (err: Error): void => {
@@ -508,6 +518,7 @@ async function startManualLoginFlow(
       });
     };
     const onClose = async (code: number | null): Promise<void> => {
+      clearTimeout(timer);
       if (code === 0) {
         const verified = await checkAgAuthStatus(workspaceRoot, deps);
         finish({
@@ -538,11 +549,7 @@ async function startManualLoginFlow(
     };
 
     const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        // ignore
-      }
+      killChildProcessTree(child, platform);
       finish({
         ok: false,
         action: 'login',
@@ -564,6 +571,7 @@ async function startManualLoginFlow(
       void onClose(code);
     };
 
+    child.stdin?.on?.('error', () => {});
     child.stdout?.on('data', onStdout);
     child.stderr?.on('data', onStderr);
     child.once('error', onError);
@@ -674,11 +682,13 @@ async function runBrowserLoginFlow(
     };
 
     const onStdout = (chunk: Buffer | string): void => {
-      stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      stdout = `${stdout}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkUnexpectedManualPrompt();
     };
     const onStderr = (chunk: Buffer | string): void => {
-      stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const txt = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      stderr = `${stderr}${txt}`.slice(-MAX_AUTH_BUFFER_BYTES);
       checkUnexpectedManualPrompt();
     };
     const onError = (err: Error): void => {
@@ -700,6 +710,7 @@ async function runBrowserLoginFlow(
       });
     };
     const onClose = async (code: number | null): Promise<void> => {
+      clearTimeout(timer);
       if (code === 0) {
         const verified = await checkAgAuthStatus(workspaceRoot, deps);
         finish({
@@ -733,11 +744,7 @@ async function runBrowserLoginFlow(
     };
 
     const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        // ignore
-      }
+      killChildProcessTree(child, platform);
       const authUrl = extractOAuthUrl(`${stdout}\n${stderr}`);
       finish({
         ok: false,
@@ -763,6 +770,7 @@ async function runBrowserLoginFlow(
       void onClose(code);
     };
 
+    child.stdin?.on?.('error', () => {});
     child.stdout?.on('data', onStdout);
     child.stderr?.on('data', onStderr);
     child.once('error', onError);
@@ -840,16 +848,23 @@ async function completeManualLoginFlow(
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        session.child.off?.('close', onCloseWrapper);
+        session.child.off?.('error', onError);
         resolve(out);
       }
     };
 
+    const codeSecrets = [trimmedCode];
+    try {
+      const parsedUrl = new URL(trimmedCode);
+      const qp = parsedUrl.searchParams.get('code');
+      if (qp) codeSecrets.push(qp);
+    } catch {
+      // not a URL
+    }
+
     const timer = setTimeout(() => {
-      try {
-        session.child.kill();
-      } catch {
-        // ignore
-      }
+      killChildProcessTree(session.child, session.platform);
       finish({
         ok: false,
         action: 'complete',
@@ -869,7 +884,27 @@ async function completeManualLoginFlow(
       });
     }, completeTimeoutMs);
 
-    session.child.once('close', async (exitCode) => {
+    const onError = (err: Error): void => {
+      const msg = maskSecrets(err.message, codeSecrets);
+      finish({
+        ok: false,
+        action: 'complete',
+        status: 'FAILED',
+        authenticated: false,
+        authMethod: 'none',
+        cliDetected: true,
+        cliBinary: 'agy',
+        cliPath: session.cliPath,
+        message: `\`agy acp --login\` process error while exchanging code: ${msg}`,
+        nextSteps: ['Retry `/ag-login --manual`.'],
+        warnings: [],
+        errorCode: 'AUTH_LOGIN_FAILED',
+        errorMessage: msg,
+      });
+    };
+
+    const onClose = async (exitCode: number | null): Promise<void> => {
+      clearTimeout(timer);
       if (exitCode === 0) {
         const verified = await checkAgAuthStatus(session.workspaceRoot, deps);
         finish({
@@ -883,14 +918,6 @@ async function completeManualLoginFlow(
       }
 
       // Never echo the raw authorization code (or URL-encoded code param) back in logs or error messages
-      const codeSecrets = [trimmedCode];
-      try {
-        const parsedUrl = new URL(trimmedCode);
-        const qp = parsedUrl.searchParams.get('code');
-        if (qp) codeSecrets.push(qp);
-      } catch {
-        // not a URL; raw trimmedCode is already in codeSecrets
-      }
       const detail = maskSecrets(
         (session.stderr || session.stdout).trim().split(/\r?\n/).slice(-3).join(' '),
         codeSecrets,
@@ -912,7 +939,11 @@ async function completeManualLoginFlow(
         errorCode: 'AUTH_LOGIN_FAILED',
         errorMessage: detail || `Code exchange failed with exit code ${exitCode ?? 'unknown'}.`,
       });
-    });
+    };
+
+    const onCloseWrapper = (exitCode: number | null): void => {
+      void onClose(exitCode);
+    };
 
     if (/[\r\n\0]/.test(trimmedCode)) {
       finish({
@@ -933,11 +964,11 @@ async function completeManualLoginFlow(
       return;
     }
 
-    try {
-      session.child.stdin?.write(`${trimmedCode}\n`);
-      session.child.stdin?.end();
-    } catch (err) {
-      const msg = maskSecrets(err instanceof Error ? err.message : String(err), [trimmedCode]);
+    session.child.once('error', onError);
+    session.child.once('close', onCloseWrapper);
+
+    const failWrite = (err: unknown): void => {
+      const msg = maskSecrets(err instanceof Error ? err.message : String(err), codeSecrets);
       finish({
         ok: false,
         action: 'complete',
@@ -953,6 +984,28 @@ async function completeManualLoginFlow(
         errorCode: 'AUTH_LOGIN_FAILED',
         errorMessage: msg,
       });
+    };
+
+    const stdin = session.child.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) {
+      failWrite(new Error('Login process stdin is closed or not writable.'));
+      return;
+    }
+
+    try {
+      stdin.write(`${trimmedCode}\n`, (writeErr) => {
+        if (writeErr) {
+          failWrite(writeErr);
+          return;
+        }
+        try {
+          stdin.end();
+        } catch {
+          // ignore
+        }
+      });
+    } catch (err) {
+      failWrite(err);
     }
   });
 }

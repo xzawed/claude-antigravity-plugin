@@ -46,12 +46,13 @@ var DEFAULT_BRIDGE_CONFIG = {
 // src/bridge-fs.ts
 var BRIDGE_DIR_NAME = ".ag-bridge";
 var SAFE_TASK_ID_RE = /^[a-zA-Z0-9._-]{1,128}$/;
+var WINDOWS_RESERVED_DEVICE_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 function assertSafeTaskId(taskId) {
   const trimmed = taskId.trim();
-  if (!trimmed || !SAFE_TASK_ID_RE.test(trimmed) || trimmed === "." || trimmed === ".." || trimmed.includes("..")) {
+  if (!trimmed || !SAFE_TASK_ID_RE.test(trimmed) || trimmed === "." || trimmed === ".." || trimmed.includes("..") || trimmed.startsWith(".") || trimmed.endsWith(".") || trimmed.toLowerCase().endsWith(".lock") || WINDOWS_RESERVED_DEVICE_RE.test(trimmed)) {
     throw new AgPluginError(
       "PATH_TRAVERSAL_BLOCKED",
-      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal segments.`
+      `Invalid taskId "${taskId}": must match ${SAFE_TASK_ID_RE.source} without path traversal, leading/trailing dots, .lock suffix, or reserved device names.`
     );
   }
   return trimmed;

@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,6 +44,67 @@ export interface TriggerOutcome {
   streamState?: StreamCaptureState;
   stopStream?: () => void;
   killProcess?: () => void;
+  processExitPromise?: Promise<number | null>;
+}
+
+/**
+ * Terminate a spawned child process and its descendant process tree across platforms.
+ * On Windows uses `taskkill /T /F`; on POSIX sends `SIGTERM` to the child's process group
+ * (`-pid`, assuming `detached: true`) and optionally escalates to `SIGKILL` if still alive.
+ */
+export function killChildProcessTree(
+  child: ChildProcess,
+  platform: NodeJS.Platform = process.platform,
+  options?: { escalateToSigkillMs?: number },
+): void {
+  if (typeof child.exitCode === 'number' || typeof child.signalCode === 'string') {
+    return;
+  }
+  const pid = child.pid;
+  if (!pid) {
+    try {
+      child.kill();
+    } catch {
+      // ignore
+    }
+    return;
+  }
+  try {
+    if (platform === 'win32') {
+      execFileSync(requireExecutable('taskkill'), ['/pid', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+    } else {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+      const escalateMs = options?.escalateToSigkillMs ?? 2000;
+      if (escalateMs > 0) {
+        const timer = setTimeout(() => {
+          if (typeof child.exitCode === 'number' || typeof child.signalCode === 'string') return;
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            try {
+              child.kill('SIGKILL');
+            } catch {
+              // ignore
+            }
+          }
+        }, escalateMs);
+        timer.unref?.();
+      }
+    }
+  } catch {
+    try {
+      child.kill();
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export type TriggerFn = (ctx: ExecutionContext) => Promise<TriggerOutcome>;
@@ -378,7 +439,9 @@ export function attachStreamJsonHeartbeat(
         status: finalStatus,
         metrics: { ...(current.metrics ?? {}), ...state.metrics },
         errorCode: isSuccess ? undefined : 'INTERNAL_ERROR',
-        error: isSuccess ? undefined : state.errorMessage ?? `agy CLI finished with status=${status ?? 'UNKNOWN'}`,
+        error: isSuccess
+          ? undefined
+          : maskSecrets(state.errorMessage ?? `agy CLI finished with status=${status ?? 'UNKNOWN'}`),
         updatedAt: new Date().toISOString(),
       });
     } catch {
@@ -703,9 +766,11 @@ export async function queryAgyCapabilities(
       };
 
       try {
+        const MAX_CAP_OUTPUT = 2 * 1024 * 1024;
         const child = spawn(spec.command, spec.args, {
           cwd: query.cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
+          detached: platform !== 'win32',
           shell: false,
           windowsHide: spec.windowsHide,
           windowsVerbatimArguments: spec.windowsVerbatimArguments,
@@ -713,19 +778,19 @@ export async function queryAgyCapabilities(
 
         const timer = setTimeout(() => {
           warnings.push(`Timed out querying \`agy ${subArgs.join(' ')}\` after 15s.`);
-          try {
-            child.kill();
-          } catch {
-            // ignore
-          }
+          killChildProcessTree(child, platform);
           finish();
         }, 15_000);
 
         child.stdout?.on('data', (chunk: Buffer | string) => {
-          stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          if (stdout.length < MAX_CAP_OUTPUT) {
+            stdout += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          }
         });
         child.stderr?.on('data', (chunk: Buffer | string) => {
-          stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          if (stderr.length < MAX_CAP_OUTPUT) {
+            stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          }
         });
         child.once('error', (err) => {
           clearTimeout(timer);
@@ -791,6 +856,7 @@ async function tryCliTrigger(
   streamState?: StreamCaptureState;
   stopStream?: () => void;
   killProcess?: () => void;
+  processExitPromise?: Promise<number | null>;
 }> {
   const { cliBinary, cliPath } = ctx.detection.subscription;
   if (!cliPath) {
@@ -817,6 +883,11 @@ async function tryCliTrigger(
 
   return new Promise((resolve) => {
     let settled = false;
+    let exited = false;
+    let resolveExit!: (code: number | null) => void;
+    const processExitPromise = new Promise<number | null>((r) => {
+      resolveExit = r;
+    });
     const closeLogFd = (): void => {
       if (logFd !== null) {
         try {
@@ -849,34 +920,8 @@ async function tryCliTrigger(
       closeLogFd();
 
       const killProcess = (): void => {
-        if (!child.pid) {
-          try {
-            child.kill();
-          } catch {
-            // ignore
-          }
-          return;
-        }
-        try {
-          if (ctx.detection.platform === 'win32') {
-            execFileSync(requireExecutable('taskkill'), ['/pid', String(child.pid), '/T', '/F'], {
-              stdio: 'ignore',
-              timeout: 5000,
-            });
-          } else {
-            try {
-              process.kill(-child.pid, 'SIGTERM');
-            } catch {
-              child.kill('SIGTERM');
-            }
-          }
-        } catch {
-          try {
-            child.kill();
-          } catch {
-            // ignore
-          }
-        }
+        if (exited) return;
+        killChildProcessTree(child, ctx.detection.platform, { escalateToSigkillMs: 2000 });
       };
 
       if (ctx.abortSignal) {
@@ -924,8 +969,10 @@ async function tryCliTrigger(
       };
 
       child.once('error', () => {
+        exited = true;
         cleanupAbortListener();
         heartbeatHandle?.stop();
+        resolveExit(null);
         if (!settled) {
           settled = true;
           resolve({ ok: false });
@@ -935,8 +982,10 @@ async function tryCliTrigger(
       // Use 'close' (not 'exit') so stdout has fully flushed and emitted 'end' before
       // heartbeatHandle.stop() detaches listeners — prevents losing the final result JSON line.
       child.once('close', (code) => {
+        exited = true;
         cleanupAbortListener();
         heartbeatHandle?.stop();
+        resolveExit(code);
         if (!settled) {
           settled = true;
           resolve({
@@ -944,6 +993,7 @@ async function tryCliTrigger(
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
             killProcess,
+            processExitPromise,
           });
         }
       });
@@ -964,11 +1014,13 @@ async function tryCliTrigger(
             streamState: heartbeatHandle?.state,
             stopStream: heartbeatHandle?.stop,
             killProcess,
+            processExitPromise,
           });
         }
       }, 400).unref();
     } catch {
       closeLogFd();
+      resolveExit(null);
       if (!settled) {
         settled = true;
         resolve({ ok: false });
@@ -1009,6 +1061,9 @@ function tryOsIpcTrigger(ctx: ExecutionContext): boolean {
 }
 
 export async function defaultSubscriptionTrigger(ctx: ExecutionContext): Promise<TriggerOutcome> {
+  if (ctx.abortSignal?.aborted) {
+    return { methodUsed: 'cli' };
+  }
   const method = ctx.config.subscription.trigger_method;
   const prompt = buildHandoffPrompt(ctx);
 
@@ -1020,7 +1075,11 @@ export async function defaultSubscriptionTrigger(ctx: ExecutionContext): Promise
         streamState: cliRes.streamState,
         stopStream: cliRes.stopStream,
         killProcess: cliRes.killProcess,
+        processExitPromise: cliRes.processExitPromise,
       };
+    }
+    if (ctx.abortSignal?.aborted) {
+      return { methodUsed: 'cli' };
     }
     if (method === 'cli_only') {
       return {
@@ -1029,6 +1088,10 @@ export async function defaultSubscriptionTrigger(ctx: ExecutionContext): Promise
           'CLI trigger exited early or was unavailable; waiting on .ag-bridge/manifest.json in case Antigravity is running manually.',
       };
     }
+  }
+
+  if (ctx.abortSignal?.aborted) {
+    return { methodUsed: 'cli' };
   }
 
   if (method === 'cli_or_ipc') {
@@ -1063,12 +1126,28 @@ function waitForManifestCompletion(
   timeoutSec: number,
   pollIntervalMs: number,
   abortSignal?: AbortSignal,
-): Promise<{ timedOut: boolean; cancelled: boolean; manifest: BridgeManifest | null }> {
+  processExitPromise?: Promise<number | null>,
+): Promise<{
+  timedOut: boolean;
+  cancelled: boolean;
+  processExitedEarly: boolean;
+  exitCode?: number | null;
+  manifest: BridgeManifest | null;
+}> {
   return new Promise((resolve) => {
     let finished = false;
     let watcher: fs.FSWatcher | null = null;
     let pollTimer: NodeJS.Timeout | null = null;
     let timeoutTimer: NodeJS.Timeout | null = null;
+    let exitGraceTimer: NodeJS.Timeout | null = null;
+
+    const safeReadManifest = (): BridgeManifest | null => {
+      try {
+        return readManifest(workspaceRoot);
+      } catch {
+        return null;
+      }
+    };
 
     const cleanup = (): void => {
       if (abortSignal) {
@@ -1090,11 +1169,17 @@ function waitForManifestCompletion(
         clearTimeout(timeoutTimer);
         timeoutTimer = null;
       }
+      if (exitGraceTimer) {
+        clearTimeout(exitGraceTimer);
+        exitGraceTimer = null;
+      }
     };
 
     const done = (result: {
       timedOut: boolean;
       cancelled: boolean;
+      processExitedEarly: boolean;
+      exitCode?: number | null;
       manifest: BridgeManifest | null;
     }): void => {
       if (finished) return;
@@ -1104,7 +1189,7 @@ function waitForManifestCompletion(
     };
 
     const onAbort = (): void => {
-      done({ timedOut: false, cancelled: true, manifest: readManifest(workspaceRoot) });
+      done({ timedOut: false, cancelled: true, processExitedEarly: false, manifest: safeReadManifest() });
     };
 
     if (abortSignal?.aborted) {
@@ -1114,17 +1199,34 @@ function waitForManifestCompletion(
     abortSignal?.addEventListener('abort', onAbort, { once: true });
 
     const checkOnce = (): void => {
-      try {
-        const current = readManifest(workspaceRoot);
-        if (current && current.taskId === taskId) {
-          if (current.status === 'VERIFIED' || current.status === 'FAILED') {
-            done({ timedOut: false, cancelled: false, manifest: current });
-          }
+      const current = safeReadManifest();
+      if (current && current.taskId === taskId) {
+        if (current.status === 'VERIFIED' || current.status === 'FAILED') {
+          done({ timedOut: false, cancelled: false, processExitedEarly: false, manifest: current });
         }
-      } catch {
-        // Ignore transient read errors during concurrent writes
       }
     };
+
+    if (processExitPromise) {
+      void processExitPromise.then((exitCode) => {
+        if (finished) return;
+        checkOnce();
+        if (finished) return;
+        // Brief grace period for final manifest flush after CLI closes, then fail fast instead of hanging until timeoutSec
+        exitGraceTimer = setTimeout(() => {
+          checkOnce();
+          if (!finished) {
+            done({
+              timedOut: false,
+              cancelled: false,
+              processExitedEarly: true,
+              exitCode,
+              manifest: safeReadManifest(),
+            });
+          }
+        }, 250);
+      });
+    }
 
     const bridgeDir = getBridgeDir(workspaceRoot);
     try {
@@ -1142,7 +1244,7 @@ function waitForManifestCompletion(
 
     pollTimer = setInterval(checkOnce, Math.max(100, pollIntervalMs));
     timeoutTimer = setTimeout(() => {
-      done({ timedOut: true, cancelled: false, manifest: readManifest(workspaceRoot) });
+      done({ timedOut: true, cancelled: false, processExitedEarly: false, manifest: safeReadManifest() });
     }, Math.max(1, timeoutSec) * 1000);
 
     // Immediate check in case status already changed before watch attached
@@ -1197,9 +1299,44 @@ export class SubscriptionEngine implements ExecutionEngine {
         timeoutSec,
         ctx.config.subscription.poll_interval_ms,
         ctx.abortSignal,
+        triggerOutcome.processExitPromise,
       );
 
       const capturedMetrics = triggerOutcome.streamState?.metrics;
+
+      if (waitResult.processExitedEarly) {
+        const exitDetail = maskSecrets(
+          triggerOutcome.streamState?.errorMessage ??
+            `Antigravity CLI exited (code ${waitResult.exitCode ?? 'unknown'}) without finalizing .ag-bridge/manifest.json.`,
+        );
+        const failedManifest: BridgeManifest = {
+          ...(waitResult.manifest ?? ctx.manifest),
+          status: 'FAILED',
+          metrics: {
+            ...(waitResult.manifest?.metrics ?? {}),
+            ...(capturedMetrics ?? {}),
+          },
+          updatedAt: new Date().toISOString(),
+          errorCode: 'INTERNAL_ERROR',
+          error: exitDetail,
+        };
+        writeManifest(ctx.workspaceRoot, failedManifest);
+
+        const partialReport =
+          readReportMarkdown(ctx.workspaceRoot) ??
+          `# Antigravity Task Report\n\n- **Task ID:** \`${ctx.manifest.taskId}\`\n- **Status:** FAILED\n- **Reason:** ${exitDetail}\n\n${formatTokenUsageMarkdown(failedManifest.metrics)}`;
+
+        return {
+          status: 'FAILED',
+          reportMarkdown: partialReport,
+          changedFiles: listGitChangedFiles(ctx.workspaceRoot),
+          artifacts: listTaskArtifacts(ctx.workspaceRoot, ctx.manifest.taskId),
+          metrics: failedManifest.metrics,
+          warnings,
+          errorCode: 'INTERNAL_ERROR',
+          errorMessage: exitDetail,
+        };
+      }
 
       if (waitResult.cancelled) {
         triggerOutcome.killProcess?.();

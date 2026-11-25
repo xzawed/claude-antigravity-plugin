@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, maskSecrets } from './config.js';
 import { detectEnvironment, DetectorDeps, getDefaultDetectorDeps } from './detector.js';
-import { buildCliSpawnSpec } from './engines/subscription.js';
+import { buildCliSpawnSpec, killChildProcessTree } from './engines/subscription.js';
 import { AgCliAdminToolInput, AgCliAdminToolOutput } from './types.js';
 
 export type AdminRunnerFn = (
@@ -11,6 +11,7 @@ export type AdminRunnerFn = (
   args: string[],
   platform: NodeJS.Platform,
   timeoutMs: number,
+  cwd?: string,
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 export interface CliAdminDependencies {
@@ -23,6 +24,26 @@ const VALID_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const VALID_ENV_KV_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const VALID_HEADER_RE = /^[A-Za-z0-9-]+:/;
 const CONTROL_CHAR_RE = /[\r\n\0]/;
+const MAX_ADMIN_OUTPUT_BYTES = 2 * 1024 * 1024;
+
+function extractSecretValues(envVars?: string[], headers?: string[]): string[] {
+  const secrets: string[] = [];
+  for (const kv of envVars ?? []) {
+    const eq = kv.indexOf('=');
+    if (eq > 0) {
+      const val = kv.slice(eq + 1).trim();
+      if (val.length >= 4) secrets.push(val);
+    }
+  }
+  for (const h of headers ?? []) {
+    const colon = h.indexOf(':');
+    if (colon > 0) {
+      const val = h.slice(colon + 1).trim();
+      if (val.length >= 4) secrets.push(val);
+    }
+  }
+  return secrets;
+}
 
 function hasControlChars(values: Array<string | undefined>): boolean {
   return values.some((v) => typeof v === 'string' && CONTROL_CHAR_RE.test(v));
@@ -33,6 +54,7 @@ export function defaultRunAdminCli(
   args: string[],
   platform: NodeJS.Platform,
   timeoutMs: number,
+  cwd?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const spec = buildCliSpawnSpec(cliPath, args, platform);
@@ -49,26 +71,28 @@ export function defaultRunAdminCli(
 
     try {
       const child = spawn(spec.command, spec.args, {
+        ...(cwd ? { cwd } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: platform !== 'win32',
         shell: false,
         windowsHide: spec.windowsHide,
         windowsVerbatimArguments: spec.windowsVerbatimArguments,
       });
 
       const timer = setTimeout(() => {
-        try {
-          child.kill();
-        } catch {
-          // ignore
-        }
+        killChildProcessTree(child, platform);
         finish({ exitCode: 124, stdout, stderr: `${stderr}\nTimed out after ${timeoutMs}ms.` });
       }, timeoutMs);
 
       child.stdout?.on('data', (c: Buffer | string) => {
-        stdout += typeof c === 'string' ? c : c.toString('utf8');
+        if (stdout.length < MAX_ADMIN_OUTPUT_BYTES) {
+          stdout += typeof c === 'string' ? c : c.toString('utf8');
+        }
       });
       child.stderr?.on('data', (c: Buffer | string) => {
-        stderr += typeof c === 'string' ? c : c.toString('utf8');
+        if (stderr.length < MAX_ADMIN_OUTPUT_BYTES) {
+          stderr += typeof c === 'string' ? c : c.toString('utf8');
+        }
       });
       child.once('error', (err) => {
         clearTimeout(timer);
@@ -209,11 +233,14 @@ export async function handleAgCliAdmin(
       };
     }
 
-    const servers = parsed.mcpServers ?? {};
+    const servers =
+      parsed && typeof parsed === 'object' && parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)
+        ? parsed.mcpServers
+        : {};
     const dryRun = input.dryRun ?? true;
     const syncedServers: NonNullable<AgCliAdminToolOutput['syncedServers']> = [];
 
-    for (const [name, def] of Object.entries(servers)) {
+    for (const [name, rawDef] of Object.entries(servers)) {
       if (name === 'antigravity-delegate') {
         syncedServers.push({
           name,
@@ -226,6 +253,11 @@ export async function handleAgCliAdmin(
         syncedServers.push({ name, status: 'skipped', detail: 'Invalid MCP server name.' });
         continue;
       }
+      if (!rawDef || typeof rawDef !== 'object' || Array.isArray(rawDef)) {
+        syncedServers.push({ name, status: 'skipped', detail: 'Invalid MCP server definition.' });
+        continue;
+      }
+      const def = rawDef as Record<string, unknown>;
 
       const command = typeof def.command === 'string' ? def.command : undefined;
       const url = typeof def.url === 'string' ? def.url : undefined;
@@ -267,7 +299,7 @@ export async function handleAgCliAdmin(
         name,
         commandOrUrl,
         args,
-        serverType: url ? 'http' : 'stdio',
+        serverType: command ? 'stdio' : 'http',
         envVars,
         headers,
       });
@@ -279,11 +311,12 @@ export async function handleAgCliAdmin(
           detail: `agy ${formatRedactedCliArgs(addArgs)}`,
         });
       } else {
-        const res = await runCli(cliPath, addArgs, detection.platform, 20_000);
+        const res = await runCli(cliPath, addArgs, detection.platform, 20_000, workspaceRoot);
+        const extraSecrets = extractSecretValues(envVars, headers);
         syncedServers.push({
           name,
           status: res.exitCode === 0 ? 'synced' : 'failed',
-          detail: maskSecrets((res.stdout || res.stderr).trim() || `exit ${res.exitCode}`),
+          detail: maskSecrets((res.stdout || res.stderr).trim() || `exit ${res.exitCode}`, extraSecrets),
         });
       }
     }
@@ -419,9 +452,12 @@ export async function handleAgCliAdmin(
       break;
   }
 
-  const res = await runCli(cliPath, cliArgs, detection.platform, timeoutMs);
+  const res = await runCli(cliPath, cliArgs, detection.platform, timeoutMs, workspaceRoot);
+  const extraSecrets =
+    input.action === 'mcp_add' ? extractSecretValues(input.envVars, input.headers) : [];
   const combined = maskSecrets(
     [res.stdout.trim(), res.stderr.trim()].filter(Boolean).join('\n'),
+    extraSecrets,
   );
   const maxLines = Math.min(300, Math.max(10, input.maxLines ?? 80));
   const output = truncateLines(combined, maxLines);
