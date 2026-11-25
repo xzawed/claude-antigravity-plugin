@@ -2,17 +2,24 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { assertSafeTaskId, getBridgeDir } from './bridge-fs.js';
+import {
+  assertNoSymlinkChain,
+  assertSafeTaskId,
+  BRIDGE_DIR_NAME,
+  getBridgeDir,
+  hasSymlinkInChain,
+} from './bridge-fs.js';
 import { requireExecutable, resolveExecutable } from './exec-path.js';
+import { nativeRealPathOrNearestParent } from './path-guard.js';
 import { AgPluginError, BridgeManifest, GitGuardPolicy, GitStatusInfo } from './types.js';
 
 /**
  * Git Guard's plumbing runs no command the repository configures: a repository delivered with its
  * `.git/` can set `core.fsmonitor` (run by status and stash create), ship hooks (reference-transaction
- * runs on update-ref), and — as a partial clone — make `reset --hard` lazily fetch through a remote
- * whose `core.sshCommand` it chose (all measured). Git Guard never needs the network, so every
- * transport is refused. Clean/smudge filters stay on: checkpoints must store real content (Git
- * LFS). ARC-003 §8, TC-S20 ~ TC-S20c.
+ * runs on update-ref), enable submodule recursion, and — as a partial clone — make `reset --hard`
+ * lazily fetch through a remote whose `core.sshCommand` it chose (all measured). Git Guard never
+ * needs the network, so every transport is refused. Clean/smudge filters stay on: checkpoints must
+ * store real content (Git LFS). ARC-003 §8, TC-S20 ~ TC-S20c.
  */
 const NO_REPO_COMMANDS = [
   '-c',
@@ -21,6 +28,8 @@ const NO_REPO_COMMANDS = [
   'core.hooksPath=/dev/null',
   '-c',
   'protocol.allow=never',
+  '-c',
+  'submodule.recurse=false',
 ];
 
 /**
@@ -36,40 +45,44 @@ function gitTimeoutMs(): number {
 }
 
 export interface PosixGroupScan {
-  members: number;
+  ok: boolean;
+  pids: number[];
   includesSelf: boolean;
 }
 
 function scanPosixGroup(pgid: number): PosixGroupScan {
   const psPath = resolveExecutable('ps');
   if (!psPath) {
-    return { members: 0, includesSelf: false };
+    return { ok: false, pids: [], includesSelf: false };
   }
   try {
-    const res = spawnSync(psPath, ['-eo', 'pid=,pgid='], {
+    // Separate `-o pid= -o pgid=` is required for BSD/macOS `ps` (which treats everything after the
+    // first `=` inside one `-o` argument as a single header string) and also works on Linux procps.
+    const res = spawnSync(psPath, ['-e', '-o', 'pid=', '-o', 'pgid='], {
       cwd: os.tmpdir(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5_000,
     });
     if (res.status !== 0 || typeof res.stdout !== 'string') {
-      return { members: 0, includesSelf: false };
+      return { ok: false, pids: [], includesSelf: false };
     }
-    let members = 0;
+    const pids: number[] = [];
     let includesSelf = false;
     for (const line of res.stdout.split(/\r?\n/)) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 2 && Number(parts[1]) === pgid) {
-        if (Number(parts[0]) === process.pid) {
+        const pid = Number(parts[0]);
+        if (pid === process.pid) {
           includesSelf = true;
-        } else {
-          members += 1;
+        } else if (Number.isInteger(pid) && pid > 0) {
+          pids.push(pid);
         }
       }
     }
-    return { members, includesSelf };
+    return { ok: true, pids, includesSelf };
   } catch {
-    return { members: 0, includesSelf: false };
+    return { ok: false, pids: [], includesSelf: false };
   }
 }
 
@@ -79,7 +92,7 @@ function scanPosixGroup(pgid: number): PosixGroupScan {
  * this wrapper a timed-out git's clean/smudge filter children are reparented to PID 1 while sharing
  * the MCP server's own process group.
  * - Linux: `setsid -- <git> ...` (native util-linux binary; child is not a group leader so no fork)
- * - macOS / fallback: `perl -e 'setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127' <git> ...`
+ * - macOS / fallback: `perl -e 'setpgrp(0,0) or exit 127; exec { $ARGV[0] } @ARGV or exit 127' <git> ...`
  */
 function buildPosixGitCommand(
   gitBin: string,
@@ -97,7 +110,7 @@ function buildPosixGitCommand(
   if (perlPath) {
     return {
       command: perlPath,
-      args: ['-e', 'setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127', gitBin, ...gitArgs],
+      args: ['-e', 'setpgrp(0,0) or exit 127; exec { $ARGV[0] } @ARGV or exit 127', gitBin, ...gitArgs],
       isolatedGroup: true,
     };
   }
@@ -110,10 +123,9 @@ function buildPosixGitCommand(
 
 /**
  * End any filter/helper subprocesses left running in a timed-out git's POSIX process group.
- * Because `tryRunGit` places POSIX git calls in their own process group (`PGID === pid`), any
- * clean/smudge filter spawned by git inherits that PGID even after git exits and is reaped, so
- * `kill(-pgid, 'SIGKILL')` stops the whole tree without racing reparenting to PID 1
- * (ARC-003 §5.4, TC-U34d ~ TC-U34e).
+ * Fail-closed when `ps` cannot verify group membership (`!firstScan.ok`), never signals a group
+ * containing the MCP server (`includesSelf`), returns 0 on `ESRCH`/`EPERM`, and deduplicates PIDs
+ * across the two passes (ARC-003 §5.4, TC-U34d ~ TC-U34e).
  */
 export function endPosixLeftovers(
   pgid: number,
@@ -124,51 +136,45 @@ export function endPosixLeftovers(
     return 0;
   }
   const firstScan = scanFn(pgid);
-  if (firstScan.includesSelf) {
+  if (!firstScan.ok || firstScan.includesSelf) {
     return 0;
   }
   try {
     killFn(-pgid, 0);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === 'ESRCH') {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ESRCH' || code === 'EPERM') {
       return 0;
     }
   }
   try {
     killFn(-pgid, 'SIGKILL');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === 'ESRCH') {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ESRCH' || code === 'EPERM') {
       return 0;
     }
   }
+  const killed = new Set<number>(firstScan.pids);
   const secondScan = scanFn(pgid);
-  if (!secondScan.includesSelf && secondScan.members > 0) {
-    try {
-      killFn(-pgid, 'SIGKILL');
-    } catch {
-      // ignore
+  if (secondScan.ok && !secondScan.includesSelf && secondScan.pids.length > 0) {
+    const fresh = secondScan.pids.filter((pid) => !killed.has(pid));
+    if (fresh.length > 0) {
+      try {
+        killFn(-pgid, 'SIGKILL');
+      } catch {
+        // ignore
+      }
+      for (const pid of fresh) killed.add(pid);
     }
   }
-  return Math.max(firstScan.members + (secondScan.includesSelf ? 0 : secondScan.members), 1);
+  return Math.max(killed.size, 1);
 }
 
 /**
  * End what a timed-out git left running on Windows, and say how many processes that was.
- *
- * `git` on PATH is usually Git for Windows' launcher (cmd\git.exe). The time limit kills only the
- * launcher; the real git it started runs on through its filters and holds the work tree (measured:
- * still running after the cut, gone at 6.9 s; TC-U34b). Running mingw64\bin\git.exe directly is no
- * way out: with the launcher's PATH its sh filters fail ("cannot spawn sh") while status and
- * `stash create` still exit 0.
- *
- * One PowerShell walks the ParentProcessId links down from the launcher and stops each process
- * found. A child must have been created between the launcher's start and the cut, and a deeper one
- * after its parent, so a reused pid is never followed. Best effort: 0 when anything fails.
  */
 function endWindowsLeftovers(launcherPid: number, startedAt: Date, cutAt: Date): number {
-  // Times are compared in UTC throughout (a local-time compare breaks across a DST fall-back), the
-  // window is tight (the launcher's children were all made before the cut), and a second look stops
-  // what a found process started between the listing and its stop (reviewers' points, ARC-003 §5.4).
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
     "function Get-Procs { @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, @{ n = 'Created'; e = { $_.CreationDate.ToUniversalTime() } }) }",
@@ -180,7 +186,11 @@ function endWindowsLeftovers(launcherPid: number, startedAt: Date, cutAt: Date):
     '$seen = @{}',
     'while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and -not $seen.ContainsKey($_.ProcessId) }) }',
     'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }',
-    '$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })',
+    '$stopCutoff = [datetime]::UtcNow.AddMilliseconds(250)',
+    '$all2 = Get-Procs',
+    '$lateQueue = @($all2 | Where-Object { $c = $_; -not $seen.ContainsKey($c.ProcessId) -and $c.Created -le $stopCutoff -and @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })',
+    '$late = @()',
+    'while ($lateQueue.Count -gt 0) { $p = $lateQueue[0]; $lateQueue = @($lateQueue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $late += $p; $lateQueue += @($all2 | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and $_.Created -le $stopCutoff -and -not $seen.ContainsKey($_.ProcessId) }) }',
     'foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }',
     '$found.Count + $late.Count',
   ].join('; ');
@@ -256,18 +266,11 @@ function tryRunGit(
     leftoversEnded > 0
       ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? '' : 'es'} it left running)`
       : '';
-  const rawStderr =
-    typeof res.stderr === 'string' && res.stderr.length > 0
-      ? res.stderr
-      : res.error instanceof Error
-        ? res.error.message
-        : res.error
-          ? String(res.error)
-          : '';
-  const stderr =
-    timedOut && rawStderr.trim().length === 0
-      ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}`
-      : rawStderr;
+  const childStderr = typeof res.stderr === 'string' ? res.stderr.trim() : '';
+  const stderr = timedOut
+    ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}${childStderr ? `: ${childStderr}` : ''}`
+    : childStderr ||
+      (res.error instanceof Error ? res.error.message : res.error ? String(res.error) : '');
   return { ok: false, stdout: '', stderr, timedOut, leftoversEnded };
 }
 
@@ -346,7 +349,7 @@ export function listGitChangedFiles(workspaceRoot: string): string[] {
     const entry = entries[i];
     if (entry.length < 4) continue;
     // "XY path", and for a rename or copy the next entry is the original path
-    if (entry[0] === 'R' || entry[0] === 'C') i++;
+    if (entry[0] === 'R' || entry[0] === 'C' || entry[1] === 'R' || entry[1] === 'C') i++;
     const file = entry.slice(3);
     if (!isBridgePath(file)) files.add(file);
   }
@@ -444,6 +447,7 @@ function snapshotUntracked(
   const files: string[] = [];
   let bytes = 0;
   for (const rel of baseline) {
+    if (linkOnTheWay(workspaceRoot, rel)) continue;
     let st: fs.Stats;
     try {
       st = fs.lstatSync(path.join(workspaceRoot, rel));
@@ -524,10 +528,23 @@ function regularFilesUnder(dir: string, prefix = ''): string[] {
 
 function bytesUnder(dir: string): number {
   let total = 0;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  let dirents: fs.Dirent[];
+  try {
+    dirents = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of dirents) {
     const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) total += bytesUnder(abs);
-    else if (entry.isFile()) total += fs.statSync(abs).size;
+    if (entry.isDirectory()) {
+      total += bytesUnder(abs);
+    } else if (entry.isFile()) {
+      try {
+        total += fs.statSync(abs).size;
+      } catch {
+        // ignore concurrently removed or unreadable entry
+      }
+    }
   }
   return total;
 }
@@ -543,26 +560,33 @@ export function pruneRecoveryArtifacts(
   policy: RecoveryRetention = RECOVERY_RETENTION,
   now: number = Date.now(),
 ): string[] {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, 'recovery'])) {
+    return [];
+  }
   const root = recoveryRoot(workspaceRoot);
-  let entries: Array<{ id: string; mtimeMs: number; bytes: number }>;
+  const entries: Array<{ id: string; mtimeMs: number; bytes: number }> = [];
+  let dirents: fs.Dirent[];
   try {
-    entries = fs
-      .readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => {
-        const dir = path.join(root, e.name);
-        return { id: e.name, mtimeMs: fs.statSync(dir).mtimeMs, bytes: bytesUnder(dir) };
-      });
+    dirents = fs.readdirSync(root, { withFileTypes: true });
   } catch {
     return [];
   }
+  for (const e of dirents) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(root, e.name);
+    try {
+      entries.push({ id: e.name, mtimeMs: fs.statSync(dir).mtimeMs, bytes: bytesUnder(dir) });
+    } catch {
+      // ignore concurrently removed recovery directory
+    }
+  }
   entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
   const kept = entries.filter((e) => e.id === keepTaskId);
-  const pruned: string[] = [];
+  const toPrune: string[] = [];
   for (const e of entries) {
     if (e.id === keepTaskId) continue;
     if (kept.length < policy.maxTasks && now - e.mtimeMs <= policy.maxAgeMs) kept.push(e);
-    else pruned.push(e.id);
+    else toPrune.push(e.id);
   }
   let total = kept.reduce((sum, e) => sum + e.bytes, 0);
   while (total > policy.maxBytes) {
@@ -570,11 +594,17 @@ export function pruneRecoveryArtifacts(
     if (!oldest) break;
     kept.splice(kept.indexOf(oldest), 1);
     total -= oldest.bytes;
-    pruned.push(oldest.id);
+    toPrune.push(oldest.id);
   }
-  for (const id of pruned) {
-    fs.rmSync(path.join(root, id), { recursive: true, force: true });
-    tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/pre-rollback/${id}`]);
+  const pruned: string[] = [];
+  for (const id of toPrune) {
+    try {
+      fs.rmSync(path.join(root, id), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/pre-rollback/${id}`]);
+      pruned.push(id);
+    } catch {
+      // Leave pre-rollback ref intact if directory removal failed (e.g. locked on Windows)
+    }
   }
   return pruned;
 }
@@ -738,25 +768,37 @@ export function rollbackCheckpoint(
 
   // Record the state before reverting, so the rollback itself can be undone (TC-S24e): the commit
   // HEAD is on, and — when there are uncommitted tracked changes — a `stash create` of them.
+  // If the agent left unmerged conflict entries in the index (`git ls-files -u`), `stash create`
+  // refuses to run; skip only the pre-rollback stash so recovery is never blocked by conflicts.
   const taskId = assertSafeTaskId(manifest.taskId);
   const preHeadRes = tryRunGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD']);
-  const preStashRes = tryRunGit(workspaceRoot, ['stash', 'create', `ag-bridge-pre-rollback-${taskId}`]);
-  if (!preHeadRes.ok || !preStashRes.ok) {
+  if (!preHeadRes.ok) {
     throw new AgPluginError(
       'GIT_CHECKPOINT_FAILED',
-      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr || preStashRes.stderr}`,
+      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr}`,
     );
   }
   const preRollbackHead = preHeadRes.stdout.trim();
   let preRollbackRef: string | undefined;
-  if (preStashRes.stdout.trim()) {
-    preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
-    const pinRes = tryRunGit(workspaceRoot, ['update-ref', preRollbackRef, preStashRes.stdout.trim()]);
-    if (!pinRes.ok) {
+  const unmergedRes = tryRunGit(workspaceRoot, ['ls-files', '-u']);
+  const hasUnmergedIndex = unmergedRes.ok && unmergedRes.stdout.trim().length > 0;
+  if (!hasUnmergedIndex) {
+    const preStashRes = tryRunGit(workspaceRoot, ['stash', 'create', `ag-bridge-pre-rollback-${taskId}`]);
+    if (!preStashRes.ok) {
       throw new AgPluginError(
         'GIT_CHECKPOINT_FAILED',
-        `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`,
+        `Could not record the state before rollback; nothing was changed: ${preStashRes.stderr}`,
       );
+    }
+    if (preStashRes.stdout.trim()) {
+      preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
+      const pinRes = tryRunGit(workspaceRoot, ['update-ref', preRollbackRef, preStashRes.stdout.trim()]);
+      if (!pinRes.ok) {
+        throw new AgPluginError(
+          'GIT_CHECKPOINT_FAILED',
+          `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`,
+        );
+      }
     }
   }
 
@@ -777,10 +819,13 @@ export function rollbackCheckpoint(
   };
 
   // With no baseline (an older manifest, or one written by hand) nothing tells the user's
-  // untracked files from the agent's: keep all (TC-S22).
+  // untracked files from the agent's: keep all (TC-S22). On case-insensitive filesystems
+  // (Windows/macOS), fold case so a case-only untracked rename is still recognized as the user's.
+  const foldCase = process.platform === 'win32' || process.platform === 'darwin';
+  const normalizeRelKey = (rel: string): string => (foldCase ? rel.toLowerCase() : rel);
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === undefined;
-  const baselineSet = new Set(baseline ?? []);
+  const baselineSet = new Set((baseline ?? []).map(normalizeRelKey));
 
   // Everything now in the index that the checkpoint does not have leaves the index first:
   // - the user's untracked files the agent staged or committed (`git add -A`) — reset --hard deleted
@@ -808,13 +853,28 @@ export function rollbackCheckpoint(
 
   // A file at a path the agent removed from git (`git rm`) and then wrote again is untracked now;
   // reset --hard overwrote it with the checkpoint's version and kept no copy (Antigravity review,
-  // measured; TC-S24i). Move it aside first; reset then writes the checkpoint's file.
+  // measured; TC-S24i). Also move aside any regular file obstructing a parent directory needed to
+  // restore the checkpoint's path (file-vs-directory type change).
   const removedFromIndexRes = tryRunGit(workspaceRoot, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=D', ref, '--']);
   if (!removedFromIndexRes.ok) {
     throw new AgPluginError('GIT_CHECKPOINT_FAILED', `Failed to read the index before rollback: ${removedFromIndexRes.stderr}`);
   }
   for (const rel of removedFromIndexRes.stdout.split('\0')) {
     if (rel.length === 0 || isBridgePath(rel) || linkOnTheWay(workspaceRoot, rel)) continue;
+    const segments = rel.split('/');
+    for (let i = 1; i < segments.length; i++) {
+      const ancRel = segments.slice(0, i).join('/');
+      if (linkOnTheWay(workspaceRoot, ancRel)) break;
+      try {
+        const ancStat = fs.lstatSync(path.join(workspaceRoot, ancRel));
+        if (!ancStat.isDirectory() && !ancStat.isSymbolicLink()) {
+          moveAside(ancRel, 'replaced');
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
     let present = true;
     try {
       fs.lstatSync(path.join(workspaceRoot, rel));
@@ -877,7 +937,7 @@ export function rollbackCheckpoint(
   const pathsBehindLinks: string[] = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
-      if (baselineSet.has(relFile)) continue;
+      if (baselineSet.has(normalizeRelKey(relFile))) continue;
       if (linkOnTheWay(workspaceRoot, relFile)) {
         pathsBehindLinks.push(relFile);
         continue;
@@ -897,14 +957,26 @@ export function rollbackCheckpoint(
 
   // The user's untracked files the agent edited or deleted come back from the snapshot; the agent's
   // version goes to `replaced/`. Only this task's own snapshot folder is read — the manifest is data
-  // the agent could rewrite — and every folder on the way is made a real folder first (TC-S24c, f).
+  // the agent could rewrite — every path must be in the checkpoint's untracked baseline (and never
+  // `.git/` or `.ag-bridge/`), and every folder on the way is made a real folder first (TC-S24c, f, TC-S36).
   const restoredUntrackedFiles: string[] = [];
   const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
   const snapshotRecorded = manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir);
   // retention may already have removed it (TC-S24j): say so rather than restore nothing silently
-  const untrackedSnapshotMissing = snapshotRecorded && !fs.existsSync(snapshotDir);
+  const snapshotSymlinked = hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, 'recovery', taskId, 'untracked']);
+  const untrackedSnapshotMissing = snapshotRecorded && (!fs.existsSync(snapshotDir) || snapshotSymlinked);
   if (snapshotRecorded && !untrackedSnapshotMissing) {
     for (const rel of regularFilesUnder(snapshotDir)) {
+      const lowered = rel.toLowerCase();
+      if (
+        !baselineSet.has(normalizeRelKey(rel)) ||
+        isBridgePath(rel) ||
+        lowered === '.git' ||
+        lowered.startsWith('.git/') ||
+        rel.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')
+      ) {
+        continue;
+      }
       const saved = path.join(snapshotDir, rel);
       const current = path.join(workspaceRoot, rel);
       realFoldersTo(workspaceRoot, rel, (partRel) => moveAside(partRel, 'replaced'));
@@ -923,7 +995,7 @@ export function rollbackCheckpoint(
   }
 
   // Clean up pinned ref if present
-  tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
+  tryRunGit(workspaceRoot, ['update-ref', '-d', `refs/ag-bridge/checkpoints/${taskId}`]);
   pruneRecoveryArtifacts(workspaceRoot, taskId);
 
   return {
@@ -946,6 +1018,8 @@ export interface WorktreeInfo {
   worktreePath: string;
   branchName: string;
   baseCommit: string;
+  parentDirty?: boolean;
+  warning?: string;
 }
 
 export interface WorktreeRemoveResult {
@@ -956,24 +1030,73 @@ export interface WorktreeRemoveResult {
 
 const worktreesRoot = (workspaceRoot: string): string => path.join(getBridgeDir(workspaceRoot), 'worktrees');
 
-function normalizeForContainment(p: string): string {
-  const resolved = path.resolve(p);
-  let canonical = resolved;
-  try {
-    canonical = fs.realpathSync.native(resolved);
-  } catch {
-    // Path may not exist yet; keep resolved form
-  }
+function normalizeCanonicalPath(p: string): string {
+  const canonical = nativeRealPathOrNearestParent(p);
   return process.platform === 'win32' || process.platform === 'darwin'
     ? canonical.toLowerCase()
     : canonical;
 }
 
-function isStrictlyInside(parentDir: string, candidatePath: string): boolean {
-  const parent = normalizeForContainment(parentDir);
-  const candidate = normalizeForContainment(candidatePath);
-  const rel = path.relative(parent, candidate);
-  return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+/**
+ * Resolve the canonical path of a task's isolated worktree under `.ag-bridge/worktrees/<taskId>`,
+ * verifying that no symlink exists along `.ag-bridge/worktrees` or on the worktree directory itself.
+ * When `candidatePath` is supplied (for example from a manifest), returns `null` unless it resolves
+ * to the exact expected worktree directory for `taskId`.
+ */
+export function resolveSafeWorktreeRoot(
+  workspaceRoot: string,
+  taskId: string,
+  candidatePath?: string,
+): string | null {
+  let safeId: string;
+  try {
+    safeId = assertSafeTaskId(taskId);
+  } catch {
+    return null;
+  }
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, 'worktrees'])) {
+    return null;
+  }
+
+  let canonicalExpected: string;
+  try {
+    canonicalExpected = path.join(
+      nativeRealPathOrNearestParent(workspaceRoot),
+      BRIDGE_DIR_NAME,
+      'worktrees',
+      safeId,
+    );
+  } catch {
+    return null;
+  }
+
+  try {
+    if (fs.lstatSync(canonicalExpected).isSymbolicLink()) {
+      return null;
+    }
+  } catch {
+    // Worktree directory may not exist yet or may have already been removed
+  }
+
+  if (candidatePath !== undefined) {
+    const resolvedCandidate = path.resolve(workspaceRoot, candidatePath);
+    try {
+      if (fs.lstatSync(resolvedCandidate).isSymbolicLink()) {
+        return null;
+      }
+    } catch {
+      // May not exist
+    }
+    try {
+      if (normalizeCanonicalPath(resolvedCandidate) !== normalizeCanonicalPath(canonicalExpected)) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return canonicalExpected;
 }
 
 /**
@@ -984,6 +1107,13 @@ function isStrictlyInside(parentDir: string, candidatePath: string): boolean {
  */
 export function createTaskWorktree(workspaceRoot: string, taskId: string): WorktreeInfo {
   const safeId = assertSafeTaskId(taskId);
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, 'worktrees'], '.ag-bridge/worktrees');
+  assertNoSymlinkChain(
+    workspaceRoot,
+    [BRIDGE_DIR_NAME, 'worktrees', safeId],
+    `.ag-bridge/worktrees/${safeId}`,
+  );
+
   const info = getGitInfo(workspaceRoot);
   if (!info.isGitRepo) {
     throw new AgPluginError(
@@ -1008,25 +1138,51 @@ export function createTaskWorktree(workspaceRoot: string, taskId: string): Workt
   const worktreePath = path.join(wtRoot, safeId);
   const branchName = `${WORKTREE_BRANCH_PREFIX}${safeId}`;
 
+  const branchExistedBefore = tryRunGit(workspaceRoot, [
+    'show-ref',
+    '--verify',
+    '--quiet',
+    `refs/heads/${branchName}`,
+  ]).ok;
+
   const addRes = tryRunGit(workspaceRoot, ['worktree', 'add', '-b', branchName, worktreePath, baseCommit]);
   if (!addRes.ok) {
+    // Best-effort cleanup of any partially created worktree directory or branch
+    tryRunGit(workspaceRoot, ['worktree', 'remove', '--force', '--force', worktreePath]);
+    tryRunGit(workspaceRoot, ['worktree', 'prune']);
+    try {
+      fs.rmSync(worktreePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // ignore
+    }
+    if (!branchExistedBefore) {
+      tryRunGit(workspaceRoot, ['branch', '-D', branchName]);
+    }
     throw new AgPluginError(
       'GIT_CHECKPOINT_FAILED',
       `Failed to create isolated git worktree at ${worktreePath}: ${addRes.stderr}`,
     );
   }
 
+  const parentDirty = Boolean(info.isDirty);
   return {
     worktreePath,
     branchName,
     baseCommit,
+    ...(parentDirty
+      ? {
+          parentDirty: true,
+          warning:
+            'Parent workspace has uncommitted changes; the isolated worktree was created from HEAD and does not include uncommitted edits.',
+        }
+      : {}),
   };
 }
 
 /**
  * Safely remove a previously created task worktree and optionally delete its `ag-task/<taskId>`
- * branch. Refuses paths outside `.ag-bridge/worktrees/` or symlink escapes, and never deletes
- * branches outside the `ag-task/` namespace (TC-S27).
+ * branch. Refuses paths outside `.ag-bridge/worktrees/<taskId>` or symlink escapes, and never
+ * deletes branches outside the `ag-task/` namespace (TC-S27, TC-S35).
  */
 export function removeTaskWorktree(
   workspaceRoot: string,
@@ -1034,20 +1190,10 @@ export function removeTaskWorktree(
   branchName?: string,
   deleteBranch = true,
 ): WorktreeRemoveResult {
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, 'worktrees'], '.ag-bridge/worktrees');
   const wtRoot = worktreesRoot(workspaceRoot);
-  const resolvedTarget = path.resolve(worktreePath);
+  const resolvedTarget = path.resolve(workspaceRoot, worktreePath);
 
-  // Guard against symlinked .ag-bridge/worktrees or symlinked target directory
-  try {
-    if (fs.lstatSync(wtRoot).isSymbolicLink()) {
-      throw new AgPluginError(
-        'PATH_TRAVERSAL_BLOCKED',
-        'Refusing to remove worktree: .ag-bridge/worktrees is a symbolic link.',
-      );
-    }
-  } catch (err) {
-    if (err instanceof AgPluginError) throw err;
-  }
   try {
     if (fs.lstatSync(resolvedTarget).isSymbolicLink()) {
       throw new AgPluginError(
@@ -1059,17 +1205,27 @@ export function removeTaskWorktree(
     if (err instanceof AgPluginError) throw err;
   }
 
-  if (!isStrictlyInside(wtRoot, resolvedTarget)) {
+  const canonicalWtRoot = normalizeCanonicalPath(wtRoot);
+  const canonicalTarget = normalizeCanonicalPath(resolvedTarget);
+  const rel = path.relative(canonicalWtRoot, canonicalTarget);
+  if (
+    rel.length === 0 ||
+    rel.startsWith('..') ||
+    path.isAbsolute(rel) ||
+    rel.includes('/') ||
+    rel.includes('\\')
+  ) {
     throw new AgPluginError(
       'PATH_TRAVERSAL_BLOCKED',
-      `Refusing to remove worktree outside .ag-bridge/worktrees/: "${worktreePath}".`,
+      `Refusing to remove worktree outside .ag-bridge/worktrees/<taskId>: "${worktreePath}".`,
     );
   }
+  assertSafeTaskId(rel);
 
   const warnings: string[] = [];
   let removed = false;
 
-  const removeRes = tryRunGit(workspaceRoot, ['worktree', 'remove', '--force', resolvedTarget]);
+  const removeRes = tryRunGit(workspaceRoot, ['worktree', 'remove', '--force', '--force', resolvedTarget]);
   if (removeRes.ok) {
     removed = true;
   } else {
@@ -1092,7 +1248,16 @@ export function removeTaskWorktree(
 
   let branchDeleted = false;
   if (deleteBranch && branchName) {
-    if (!branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+    let validTaskBranch = false;
+    if (branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+      try {
+        assertSafeTaskId(branchName.slice(WORKTREE_BRANCH_PREFIX.length));
+        validTaskBranch = true;
+      } catch {
+        validTaskBranch = false;
+      }
+    }
+    if (!validTaskBranch) {
       warnings.push(
         `Refused to delete branch "${branchName}": only branches under "${WORKTREE_BRANCH_PREFIX}" may be deleted automatically.`,
       );

@@ -269,12 +269,50 @@ describe('bridge-fs & cli-init (TC-U04 ~ TC-U06, TC-U10, TC-S08 ~ TC-S10)', () =
     writeManifest(tmpRoot, stale);
 
     const res = acquireBridgeLock(tmpRoot, 300);
-    expect(res.warnings.length).toBe(1);
-    expect(res.warnings[0]).toContain('ag-stale-1');
+    try {
+      expect(res.warnings.length).toBe(1);
+      expect(res.warnings[0]).toContain('ag-stale-1');
 
-    const archived = readArchivedManifest(tmpRoot, 'ag-stale-1');
-    expect(archived?.status).toBe('FAILED');
-    expect(archived?.errorCode).toBe('TASK_TIMEOUT');
+      const archived = readArchivedManifest(tmpRoot, 'ag-stale-1');
+      expect(archived?.status).toBe('FAILED');
+      expect(archived?.errorCode).toBe('TASK_TIMEOUT');
+    } finally {
+      res.release();
+    }
+  });
+
+  it('TC-U47: acquireBridgeLock respects active task recorded timeoutSec, quarantines corrupt manifests, and enforces atomic dispatch.lock', () => {
+    // 1. Short-timeout caller cannot evict a longer-timeout active task
+    const nowMs = Date.now();
+    const longTask: BridgeManifest = {
+      schemaVersion: 1,
+      taskId: 'ag-long-1',
+      title: 'Long running task',
+      mode: 'subscription',
+      status: 'RUNNING',
+      timeoutSec: 600,
+      lockedPaths: ['src/'],
+      createdAt: new Date(nowMs - 60_000).toISOString(),
+      updatedAt: new Date(nowMs - 60_000).toISOString(),
+      artifacts: [],
+    };
+    writeManifest(tmpRoot, longTask);
+    expect(() => acquireBridgeLock(tmpRoot, 10, nowMs)).toThrow(AgPluginError);
+
+    // 2. Corrupt manifest.json is quarantined instead of causing permanent lockout
+    fs.writeFileSync(path.join(getBridgeDir(tmpRoot), 'manifest.json'), '{not-valid-json', 'utf8');
+    const recovered = acquireBridgeLock(tmpRoot, 60, nowMs);
+    try {
+      expect(recovered.warnings.some((w) => w.includes('Quarantined corrupted'))).toBe(true);
+      // 3. While dispatch.lock is held, a concurrent caller is rejected with BRIDGE_BUSY
+      expect(() => acquireBridgeLock(tmpRoot, 60, nowMs)).toThrow(AgPluginError);
+    } finally {
+      recovered.release();
+    }
+
+    // 4. After release(), a fresh lock succeeds
+    const next = acquireBridgeLock(tmpRoot, 60, nowMs);
+    next.release();
   });
 
   it('TC-U10: cli-init initializes config, .gitignore, and syncs claude-handoff.md (including .agents/ mirror)', () => {

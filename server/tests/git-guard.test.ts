@@ -903,7 +903,7 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     },
   );
 
-  it('TC-U34e: endPosixLeftovers guards unsafe pgids, skips empty or self-containing groups, and SIGKILLs live groups', () => {
+  it('TC-U34e: endPosixLeftovers guards unsafe pgids, fails closed on scan failure or EPERM, skips self-containing groups, and deduplicates SIGKILL passes', () => {
     const calls: Array<{ pid: number; signal?: NodeJS.Signals | number }> = [];
     const recordKill = (pid: number, signal?: NodeJS.Signals | number): boolean => {
       calls.push({ pid, signal });
@@ -911,12 +911,14 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     };
 
     // Unsafe pgids never trigger kill
-    expect(endPosixLeftovers(0, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
-    expect(endPosixLeftovers(1, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
-    expect(endPosixLeftovers(-42, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
-    expect(endPosixLeftovers(process.pid, recordKill, () => ({ members: 2, includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(0, recordKill, () => ({ ok: true, pids: [101, 102], includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(1, recordKill, () => ({ ok: true, pids: [101, 102], includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(-42, recordKill, () => ({ ok: true, pids: [101, 102], includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(process.pid, recordKill, () => ({ ok: true, pids: [101, 102], includesSelf: false }))).toBe(0);
     // Group that includes the current MCP server process is never signaled
-    expect(endPosixLeftovers(42423, recordKill, () => ({ members: 2, includesSelf: true }))).toBe(0);
+    expect(endPosixLeftovers(42423, recordKill, () => ({ ok: true, pids: [101, 102], includesSelf: true }))).toBe(0);
+    // Failed ps scan fails closed (no blind kill(-pgid, 'SIGKILL'))
+    expect(endPosixLeftovers(42423, recordKill, () => ({ ok: false, pids: [], includesSelf: false }))).toBe(0);
     expect(calls).toEqual([]);
 
     // Empty process group (ESRCH on probe) returns 0 without SIGKILL
@@ -926,13 +928,27 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
       err.code = 'ESRCH';
       throw err;
     };
-    expect(endPosixLeftovers(42424, esrchKill, () => ({ members: 0, includesSelf: false }))).toBe(0);
+    expect(endPosixLeftovers(42424, esrchKill, () => ({ ok: true, pids: [], includesSelf: false }))).toBe(0);
     expect(calls).toEqual([{ pid: -42424, signal: 0 }]);
 
-    // Live process group with 2 initial members + 1 late spawn receives SIGKILL twice and reports 3
+    // EPERM on probe returns 0 without SIGKILL
+    calls.length = 0;
+    const epermKill = (pid: number, signal?: NodeJS.Signals | number): boolean => {
+      calls.push({ pid, signal });
+      const err = new Error('EPERM') as NodeJS.ErrnoException;
+      err.code = 'EPERM';
+      throw err;
+    };
+    expect(endPosixLeftovers(42424, epermKill, () => ({ ok: true, pids: [201], includesSelf: false }))).toBe(0);
+    expect(calls).toEqual([{ pid: -42424, signal: 0 }]);
+
+    // Live process group with 2 initial PIDs + 1 duplicate zombie + 1 late spawn receives SIGKILL twice and reports 3 unique PIDs
     calls.length = 0;
     let scanPass = 0;
-    const scanSeq = () => (scanPass++ === 0 ? { members: 2, includesSelf: false } : { members: 1, includesSelf: false });
+    const scanSeq = () =>
+      scanPass++ === 0
+        ? { ok: true, pids: [301, 302], includesSelf: false }
+        : { ok: true, pids: [301, 303], includesSelf: false };
     expect(endPosixLeftovers(42425, recordKill, scanSeq)).toBe(3);
     expect(calls).toEqual([
       { pid: -42425, signal: 0 },
@@ -941,10 +957,11 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     ]);
   });
 
-  it('TC-U45: createTaskWorktree isolates edits on ag-task/<id> while keeping parent clean, and removeTaskWorktree cleans up', () => {
+  it('TC-U45: createTaskWorktree isolates edits on ag-task/<id> while keeping parent clean, warns when dirty, and removeTaskWorktree cleans up idempotently', () => {
     initRepo(tmpRoot);
     const wt = createTaskWorktree(tmpRoot, 'ag-wt-1');
     expect(wt.branchName).toBe('ag-task/ag-wt-1');
+    expect(wt.parentDirty).toBeUndefined();
     expect(fs.existsSync(path.join(wt.worktreePath, 'app.ts'))).toBe(true);
 
     // Edit inside the isolated worktree must not dirty the parent workspace
@@ -957,6 +974,17 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(rm.branchDeleted).toBe(true);
     expect(fs.existsSync(wt.worktreePath)).toBe(false);
     expect(git(tmpRoot, ['branch', '--list', wt.branchName])).toBe('');
+
+    // Second remove on an already-deleted worktree succeeds cleanly (no containment false positive)
+    const rmAgain = removeTaskWorktree(tmpRoot, wt.worktreePath, undefined, false);
+    expect(rmAgain.removed).toBe(true);
+
+    // Dirty parent emits warning when creating a new isolated worktree
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2;\n', 'utf8');
+    const wtDirty = createTaskWorktree(tmpRoot, 'ag-wt-dirty');
+    expect(wtDirty.parentDirty).toBe(true);
+    expect(wtDirty.warning).toContain('uncommitted changes');
+    removeTaskWorktree(tmpRoot, wtDirty.worktreePath, wtDirty.branchName, true);
   });
 
   it('TC-S27: removeTaskWorktree blocks paths outside .ag-bridge/worktrees/ and refuses deleting non-ag-task branches', () => {
@@ -967,6 +995,7 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
 
     expect(() => removeTaskWorktree(tmpRoot, outsideDir, 'ag-task/fake', true)).toThrow(AgPluginError);
     expect(() => removeTaskWorktree(tmpRoot, path.join(tmpRoot, '.ag-bridge', 'worktrees', '..', 'history'), 'ag-task/fake', true)).toThrow(AgPluginError);
+    expect(() => removeTaskWorktree(tmpRoot, path.join(tmpRoot, '.ag-bridge', 'worktrees', 'a', 'nested'), 'ag-task/fake', true)).toThrow(AgPluginError);
     expect(fs.existsSync(outsideDir)).toBe(true);
 
     // Tampered manifest naming the user's main branch must never delete it
@@ -978,5 +1007,99 @@ describe('git-guard (TC-U07 ~ TC-U09, TC-S14)', () => {
     expect(git(tmpRoot, ['branch', '--list', mainBranch])).toContain(mainBranch);
     // Clean up the actual task branch
     git(tmpRoot, ['branch', '-D', wt.branchName]);
+  });
+
+  it('TC-S35: createTaskWorktree and removeTaskWorktree block symlinked .ag-bridge/worktrees', () => {
+    initRepo(tmpRoot);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-wt-outside-'));
+    try {
+      fs.mkdirSync(path.join(tmpRoot, '.ag-bridge'), { recursive: true });
+      fs.symlinkSync(outside, path.join(tmpRoot, '.ag-bridge', 'worktrees'), 'junction');
+
+      expect(() => createTaskWorktree(tmpRoot, 'ag-wt-sym')).toThrow(AgPluginError);
+      expect(() =>
+        removeTaskWorktree(tmpRoot, path.join(tmpRoot, '.ag-bridge', 'worktrees', 'ag-wt-sym'), 'ag-task/ag-wt-sym', true),
+      ).toThrow(AgPluginError);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('TC-S36: rollbackCheckpoint ignores planted .git/config in snapshotDir and skips unmerged stash failure', () => {
+    initRepo(tmpRoot);
+    fs.writeFileSync(path.join(tmpRoot, 'note.txt'), 'user-untracked\n', 'utf8');
+    const cp = createCheckpoint(tmpRoot, 'ag-snap-sec', 'best_effort');
+    expect(cp.untrackedSnapshotDir).toBeTruthy();
+
+    // Agent tampers with snapshot directory by planting .git/config and an extra non-baseline file
+    const snapAbs = path.join(tmpRoot, cp.untrackedSnapshotDir!);
+    fs.mkdirSync(path.join(snapAbs, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(snapAbs, '.git', 'config'), '[core]\n\tfsmonitor = evil\n', 'utf8');
+    fs.writeFileSync(path.join(snapAbs, 'planted.txt'), 'not-in-baseline\n', 'utf8');
+
+    const origGitConfig = fs.readFileSync(path.join(tmpRoot, '.git', 'config'), 'utf8');
+    fs.writeFileSync(path.join(tmpRoot, 'note.txt'), 'agent-corrupted\n', 'utf8');
+
+    const rb = rollbackCheckpoint(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-snap-sec',
+      title: 'Snapshot security test',
+      mode: 'api',
+      status: 'FAILED',
+      lockedPaths: ['app.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: cp.checkpointRef,
+      gitCheckpointIsStash: cp.isStashSnapshot,
+      gitUntrackedBaseline: cp.untrackedBaseline,
+      gitCheckpointHeadRef: cp.headRef,
+      gitUntrackedSnapshotDir: cp.untrackedSnapshotDir,
+      artifacts: [],
+    });
+
+    expect(fs.readFileSync(path.join(tmpRoot, '.git', 'config'), 'utf8')).toBe(origGitConfig);
+    expect(fs.existsSync(path.join(tmpRoot, 'planted.txt'))).toBe(false);
+    expect(fs.readFileSync(path.join(tmpRoot, 'note.txt'), 'utf8')).toBe('user-untracked\n');
+    expect(rb.restoredUntrackedFiles).toEqual(['note.txt']);
+  });
+
+  it('TC-U46: rollbackCheckpoint succeeds even when agent left an unmerged merge-conflict index', () => {
+    initRepo(tmpRoot);
+    const cp = createCheckpoint(tmpRoot, 'ag-unmerged-1', 'best_effort');
+
+    // Simulate a merge conflict on app.ts left behind by an agent
+    git(tmpRoot, ['checkout', '-q', '-b', 'conflict-branch']);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 2;\n', 'utf8');
+    git(tmpRoot, ['commit', '-qam', 'branch edit']);
+    const baseBranch = cp.headRef!.replace(/^refs\/heads\//, '');
+    git(tmpRoot, ['checkout', '-q', baseBranch]);
+    fs.writeFileSync(path.join(tmpRoot, 'app.ts'), 'export const version = 3;\n', 'utf8');
+    git(tmpRoot, ['commit', '-qam', 'main edit']);
+    try {
+      git(tmpRoot, ['merge', 'conflict-branch']);
+    } catch {
+      // expected merge conflict
+    }
+    expect(git(tmpRoot, ['ls-files', '-u']).length).toBeGreaterThan(0);
+
+    const rb = rollbackCheckpoint(tmpRoot, {
+      schemaVersion: 1,
+      taskId: 'ag-unmerged-1',
+      title: 'Unmerged index rollback',
+      mode: 'api',
+      status: 'FAILED',
+      lockedPaths: ['app.ts'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      gitCheckpointRef: cp.checkpointRef,
+      gitCheckpointIsStash: cp.isStashSnapshot,
+      gitUntrackedBaseline: cp.untrackedBaseline,
+      gitCheckpointHeadRef: cp.headRef,
+      artifacts: [],
+    });
+
+    expect(rb.restoredCheckpointRef).toBe(cp.checkpointRef);
+    expect(fs.readFileSync(path.join(tmpRoot, 'app.ts'), 'utf8')).toBe('export const version = 1;\n');
+    expect(git(tmpRoot, ['ls-files', '-u'])).toBe('');
   });
 });

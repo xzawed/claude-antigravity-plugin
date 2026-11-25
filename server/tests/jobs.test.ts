@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readManifest, writeReportMarkdown } from '../src/bridge-fs.js';
+import { readManifest, writeManifest, writeReportMarkdown } from '../src/bridge-fs.js';
+import { handleListArtifacts } from '../src/artifacts.js';
 import { DetectorDeps } from '../src/detector.js';
 import { ExecutionContext, ExecutionEngine, ExecutionResult } from '../src/engines/base.js';
 import { attachStreamJsonHeartbeat, buildHandoffPrompt } from '../src/engines/subscription.js';
@@ -472,5 +473,169 @@ describe('Async background jobs & power prompt parity (TC-U22 ~ TC-U26)', () => 
     expect(rb2.worktreeBranchDeleted).toBe(true);
     expect(fs.existsSync(job1.worktreePath!)).toBe(false);
     expect(fs.existsSync(job2.worktreePath!)).toBe(false);
+  });
+
+  it('TC-S37: rollback_ag_task refuses ambiguous omitted taskId after worktree run, blocks active worktree removal, and ignores tampered parent worktreePath', async () => {
+    const runGitCmd = (args: string[]) =>
+      execFileSync('git', args, { cwd: tmpRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+    runGitCmd(['init']);
+    runGitCmd(['config', 'user.email', 'sec@example.com']);
+    runGitCmd(['config', 'user.name', 'Sec User']);
+    runGitCmd(['config', 'core.autocrlf', 'false']);
+    fs.writeFileSync(path.join(tmpRoot, 'main.ts'), 'export const v = 1;\n', 'utf8');
+    runGitCmd(['add', 'main.ts']);
+    runGitCmd(['commit', '-m', 'init']);
+
+    let releaseWt!: () => void;
+    const wtGate = new Promise<void>((r) => {
+      releaseWt = r;
+    });
+
+    const quickEngine: ExecutionEngine = {
+      mode: 'subscription',
+      async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+        if (ctx.manifest.worktreePath) {
+          await wtGate;
+        } else {
+          fs.writeFileSync(path.join(ctx.workspaceRoot, 'main.ts'), 'export const v = 2;\n', 'utf8');
+        }
+        return {
+          status: 'VERIFIED',
+          reportMarkdown: '# OK',
+          changedFiles: [],
+          artifacts: [],
+          warnings: [],
+        };
+      },
+    };
+
+    // 1. Run a main-workspace task T1
+    const mainJob = await handleStartAgTask(
+      {
+        title: 'Main task T1',
+        instructions: 'Edit main.ts',
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: quickEngine, jobManager: manager },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    // 2. Run an isolated worktree task T2 (newer than T1)
+    const wtJob = await handleStartAgTask(
+      {
+        title: 'Worktree task T2',
+        instructions: 'Run in isolated worktree',
+        isolateWorktree: true,
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: quickEngine, jobManager: manager },
+    );
+
+    // 3. Attempting to remove the still-running worktree refuses with BRIDGE_BUSY
+    await expect(
+      handleRollbackAgTask({ taskId: wtJob.taskId, workspaceRoot: tmpRoot }, { jobManager: manager }),
+    ).rejects.toMatchObject({ code: 'BRIDGE_BUSY' });
+
+    releaseWt();
+    await new Promise((r) => setTimeout(r, 60));
+
+    // 4. Omitting taskId refuses instead of silently rolling back older main task T1
+    await expect(
+      handleRollbackAgTask({ workspaceRoot: tmpRoot }, { jobManager: manager }),
+    ).rejects.toMatchObject({ code: 'ROLLBACK_NO_CHECKPOINT' });
+    expect(fs.readFileSync(path.join(tmpRoot, 'main.ts'), 'utf8')).toBe('export const v = 2;\n');
+
+    // 5. Tampered worktreePath inside parent manifest.json must NOT bypass main workspace rollback
+    const parentManifest = readManifest(tmpRoot)!;
+    writeManifest(tmpRoot, {
+      ...parentManifest,
+      worktreePath: wtJob.worktreePath,
+      worktreeBranch: wtJob.worktreeBranch,
+    });
+    const rbMain = await handleRollbackAgTask({ taskId: mainJob.taskId, workspaceRoot: tmpRoot }, { jobManager: manager });
+    expect(rbMain.ok).toBe(true);
+    expect(rbMain.worktreeRemoved).toBeUndefined();
+    expect(fs.readFileSync(path.join(tmpRoot, 'main.ts'), 'utf8')).toBe('export const v = 1;\n');
+    expect(fs.existsSync(wtJob.worktreePath!)).toBe(true);
+
+    // 6. Explicit rollback of T2 cleanly removes worktree
+    const rbWt = await handleRollbackAgTask({ taskId: wtJob.taskId, workspaceRoot: tmpRoot }, { jobManager: manager });
+    expect(rbWt.ok).toBe(true);
+    expect(rbWt.worktreeRemoved).toBe(true);
+    expect(rbWt.worktreeBranchDeleted).toBe(true);
+  });
+
+  it('TC-U48: isolateWorktree supports absolute lockedPaths and exposes report, artifacts, and logTail via disk fallback and list_ag_artifacts', async () => {
+    const runGitCmd = (args: string[]) =>
+      execFileSync('git', args, { cwd: tmpRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+    runGitCmd(['init']);
+    runGitCmd(['config', 'user.email', 'art@example.com']);
+    runGitCmd(['config', 'user.name', 'Art User']);
+    runGitCmd(['config', 'core.autocrlf', 'false']);
+    fs.mkdirSync(path.join(tmpRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, 'src', 'ui.ts'), 'export const ui = 1;\n', 'utf8');
+    runGitCmd(['add', 'src/ui.ts']);
+    runGitCmd(['commit', '-m', 'init']);
+
+    const mockEngine: ExecutionEngine = {
+      mode: 'subscription',
+      async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
+        const artDir = path.join(ctx.workspaceRoot, '.ag-bridge', 'artifacts', ctx.manifest.taskId);
+        fs.mkdirSync(artDir, { recursive: true });
+        fs.writeFileSync(path.join(artDir, 'agy-cli.log'), 'line1\nworktree-log-tail\n', 'utf8');
+        fs.writeFileSync(path.join(artDir, 'shot.png'), 'pngbytes', 'utf8');
+        writeReportMarkdown(ctx.workspaceRoot, '# Worktree Verification Report\nAll passed.');
+        return {
+          status: 'VERIFIED',
+          reportMarkdown: '# Worktree Verification Report\nAll passed.',
+          changedFiles: ['src/ui.ts'],
+          artifacts: [`.ag-bridge/artifacts/${ctx.manifest.taskId}/shot.png`],
+          warnings: [],
+        };
+      },
+    };
+
+    // Absolute lockedPath inside parent workspace must normalize and re-validate cleanly inside worktree
+    const absLocked = path.join(tmpRoot, 'src', 'ui.ts');
+    const started = await handleStartAgTask(
+      {
+        title: 'Worktree artifact check',
+        instructions: 'Verify UI in worktree',
+        lockedPaths: [absLocked],
+        isolateWorktree: true,
+        modeOverride: 'subscription',
+        workspaceRoot: tmpRoot,
+      },
+      { detectorDeps: makeAgyDetectorDeps(), subscriptionEngine: mockEngine, jobManager: manager },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Fresh manager simulates MCP server restart -> disk fallback must read from worktree
+    const freshManager = new BackgroundJobManager();
+    const diskJob = await handleGetAgJob(
+      { jobId: started.jobId, workspaceRoot: tmpRoot, includeLogTail: true },
+      { jobManager: freshManager },
+    );
+    expect(diskJob.ok).toBe(true);
+    expect(diskJob.job?.status).toBe('VERIFIED');
+    expect(diskJob.job?.reportMarkdown).toContain('Worktree Verification Report');
+    expect(diskJob.job?.logTail).toContain('worktree-log-tail');
+    expect(diskJob.job?.artifacts?.some((a) => a.includes('shot.png'))).toBe(true);
+
+    // list_ag_artifacts also discovers worktree artifacts, report, and logTail
+    const listed = handleListArtifacts({ taskId: started.taskId, workspaceRoot: tmpRoot });
+    expect(listed.ok).toBe(true);
+    expect(listed.artifacts.some((a) => a.name === 'shot.png')).toBe(true);
+    expect(listed.reportMarkdown).toContain('Worktree Verification Report');
+    expect(listed.logTail).toContain('worktree-log-tail');
+
+    // Clean up
+    const rb = await handleRollbackAgTask({ taskId: started.taskId, workspaceRoot: tmpRoot }, { jobManager: freshManager });
+    expect(rb.ok).toBe(true);
+    expect(rb.worktreeRemoved).toBe(true);
   });
 });

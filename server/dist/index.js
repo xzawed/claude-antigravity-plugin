@@ -7256,12 +7256,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f3;
     };
-    function addFormats(ajv, list, fs15, exportName) {
+    function addFormats(ajv, list, fs16, exportName) {
       var _a4;
       var _b;
       (_a4 = (_b = ajv.opts.code).formats) !== null && _a4 !== void 0 ? _a4 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f3 of list)
-        ajv.addFormat(f3, fs15[f3]);
+        ajv.addFormat(f3, fs16[f3]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -19264,7 +19264,7 @@ var require_util3 = __commonJS({
     exports.removeUndefinedValuesInObject = removeUndefinedValuesInObject;
     exports.isValidFile = isValidFile;
     exports.getWellKnownCertificateConfigFileLocation = getWellKnownCertificateConfigFileLocation;
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var os4 = __require("os");
     var path16 = __require("path");
     var WELL_KNOWN_CERTIFICATE_CONFIG_FILE = "certificate_config.json";
@@ -19352,7 +19352,7 @@ var require_util3 = __commonJS({
     }
     async function isValidFile(filePath) {
       try {
-        const stats = await fs15.promises.lstat(filePath);
+        const stats = await fs16.promises.lstat(filePath);
         return stats.isFile();
       } catch (e2) {
         return false;
@@ -21307,10 +21307,10 @@ var require_getCredentials = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getCredentials = getCredentials;
     var path16 = __require("path");
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var util_1 = __require("util");
     var errorWithCode_1 = require_errorWithCode();
-    var readFile = fs15.readFile ? (0, util_1.promisify)(fs15.readFile) : async () => {
+    var readFile = fs16.readFile ? (0, util_1.promisify)(fs16.readFile) : async () => {
       throw new errorWithCode_1.ErrorWithCode("use key rather than keyFile.", "MISSING_CREDENTIALS");
     };
     var ExtensionFiles;
@@ -22987,12 +22987,12 @@ var require_filesubjecttokensupplier = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.FileSubjectTokenSupplier = void 0;
     var util_1 = __require("util");
-    var fs15 = __require("fs");
-    var readFile = (0, util_1.promisify)(fs15.readFile ?? (() => {
+    var fs16 = __require("fs");
+    var readFile = (0, util_1.promisify)(fs16.readFile ?? (() => {
     }));
-    var realpath = (0, util_1.promisify)(fs15.realpath ?? (() => {
+    var realpath = (0, util_1.promisify)(fs16.realpath ?? (() => {
     }));
-    var lstat = (0, util_1.promisify)(fs15.lstat ?? (() => {
+    var lstat = (0, util_1.promisify)(fs16.lstat ?? (() => {
     }));
     var FileSubjectTokenSupplier = class {
       filePath;
@@ -23110,7 +23110,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CertificateSubjectTokenSupplier = exports.InvalidConfigurationError = exports.CertificateSourceUnavailableError = exports.CERTIFICATE_CONFIGURATION_ENV_VARIABLE = void 0;
     var util_1 = require_util3();
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var crypto_1 = __require("crypto");
     var https2 = __require("https");
     exports.CERTIFICATE_CONFIGURATION_ENV_VARIABLE = "GOOGLE_API_CERTIFICATE_CONFIG";
@@ -23204,7 +23204,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
         const configPath = this.certificateConfigPath;
         let fileContents;
         try {
-          fileContents = await fs15.promises.readFile(configPath, "utf8");
+          fileContents = await fs16.promises.readFile(configPath, "utf8");
         } catch (err) {
           throw new CertificateSourceUnavailableError(`Failed to read certificate config file at: ${configPath}`);
         }
@@ -23229,14 +23229,14 @@ var require_certificatesubjecttokensupplier = __commonJS({
       async #getKeyAndCert(certPath, keyPath) {
         let cert, key;
         try {
-          cert = await fs15.promises.readFile(certPath);
+          cert = await fs16.promises.readFile(certPath);
           new crypto_1.X509Certificate(cert);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           throw new CertificateSourceUnavailableError(`Failed to read certificate file at ${certPath}: ${message}`);
         }
         try {
-          key = await fs15.promises.readFile(keyPath);
+          key = await fs16.promises.readFile(keyPath);
           (0, crypto_1.createPrivateKey)(key);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -23255,7 +23255,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
           return JSON.stringify([leafCert.raw.toString("base64")]);
         }
         try {
-          const chainPems = await fs15.promises.readFile(this.trustChainPath, "utf8");
+          const chainPems = await fs16.promises.readFile(this.trustChainPath, "utf8");
           const pemBlocks = chainPems.match(/-----BEGIN CERTIFICATE-----[^-]+-----END CERTIFICATE-----/g) ?? [];
           const chainCerts = pemBlocks.map((pem, index) => {
             try {
@@ -23957,7 +23957,7 @@ var require_pluggable_auth_handler = __commonJS({
     exports.PluggableAuthHandler = exports.ExecutableError = void 0;
     var executable_response_1 = require_executable_response();
     var childProcess = __require("child_process");
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var ExecutableError = class extends Error {
       /**
        * The exit code returned by the executable.
@@ -24042,14 +24042,14 @@ var require_pluggable_auth_handler = __commonJS({
         }
         let filePath;
         try {
-          filePath = await fs15.promises.realpath(this.outputFile);
+          filePath = await fs16.promises.realpath(this.outputFile);
         } catch {
           return void 0;
         }
-        if (!(await fs15.promises.lstat(filePath)).isFile()) {
+        if (!(await fs16.promises.lstat(filePath)).isFile()) {
           return void 0;
         }
-        const responseString = await fs15.promises.readFile(filePath, {
+        const responseString = await fs16.promises.readFile(filePath, {
           encoding: "utf8"
         });
         if (responseString === "") {
@@ -24460,7 +24460,7 @@ var require_gdchclient = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GdchClient = exports.GDCH_SERVICE_ACCOUNT_TYPE = void 0;
     var crypto5 = __require("crypto");
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var https2 = __require("https");
     var oauth2client_1 = require_oauth2client();
     var DEFAULT_LIFETIME_IN_SECONDS = 3600;
@@ -24683,7 +24683,7 @@ var require_gdchclient = __commonJS({
         const currentPath = this.caCertPath;
         this.caAgentPromise = (async () => {
           try {
-            const ca = await fs15.promises.readFile(currentPath);
+            const ca = await fs16.promises.readFile(currentPath);
             return new https2.Agent({ ca });
           } catch (err) {
             if (this.cachedCaCertPath === currentPath) {
@@ -24743,7 +24743,7 @@ var require_googleauth = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GoogleAuth = exports.GoogleAuthExceptionMessages = void 0;
     var child_process_1 = __require("child_process");
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var gaxios_1 = require_src2();
     var gcpMetadata = require_src4();
     var os4 = __require("os");
@@ -25045,7 +25045,7 @@ var require_googleauth = __commonJS({
           return null;
         }
         const location = path16.join(configDir, "application_default_credentials.json");
-        if (!fs15.existsSync(location)) {
+        if (!fs16.existsSync(location)) {
           return null;
         }
         const client = await this._getApplicationCredentialsFromFilePath(location, options);
@@ -25062,8 +25062,8 @@ var require_googleauth = __commonJS({
           throw new Error("The file path is invalid.");
         }
         try {
-          filePath = fs15.realpathSync(filePath);
-          if (!fs15.lstatSync(filePath).isFile()) {
+          filePath = fs16.realpathSync(filePath);
+          if (!fs16.lstatSync(filePath).isFile()) {
             throw new Error();
           }
         } catch (err) {
@@ -25072,7 +25072,7 @@ var require_googleauth = __commonJS({
           }
           throw err;
         }
-        const readStream = fs15.createReadStream(filePath);
+        const readStream = fs16.createReadStream(filePath);
         return this.fromStream(readStream, options);
       }
       /**
@@ -25400,7 +25400,7 @@ var require_googleauth = __commonJS({
           return this._cacheClientFromJSON(this.jsonContent, this.clientOptions);
         } else if (this.keyFilename) {
           const filePath = path16.resolve(this.keyFilename);
-          const stream = fs15.createReadStream(filePath);
+          const stream = fs16.createReadStream(filePath);
           return await this.fromStreamAsync(stream, this.clientOptions);
         } else if (this.apiKey) {
           const client = await this.fromAPIKey(this.apiKey, this.clientOptions);
@@ -29674,7 +29674,7 @@ var require_websocket_server = __commonJS({
 });
 
 // src/index.ts
-import fs14 from "node:fs";
+import fs15 from "node:fs";
 import path15 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
@@ -59437,10 +59437,17 @@ function archiveManifest(workspaceRoot, manifest) {
   const archivePath = path.join(historyDir, `${safeId}.json`);
   atomicWriteFile(archivePath, `${JSON.stringify(manifest, null, 2)}
 `);
-  const files = fs.readdirSync(historyDir).filter((f3) => f3.endsWith(".json")).map((f3) => ({
-    name: f3,
-    mtime: fs.statSync(path.join(historyDir, f3)).mtimeMs
-  })).sort((a, b) => b.mtime - a.mtime);
+  const files = [];
+  for (const f3 of fs.readdirSync(historyDir)) {
+    if (!f3.endsWith(".json")) continue;
+    try {
+      const st = fs.lstatSync(path.join(historyDir, f3));
+      if (!st.isFile()) continue;
+      files.push({ name: f3, mtime: st.mtimeMs });
+    } catch {
+    }
+  }
+  files.sort((a, b) => b.mtime - a.mtime);
   for (const excess of files.slice(MAX_HISTORY_ITEMS)) {
     try {
       fs.unlinkSync(path.join(historyDir, excess.name));
@@ -59481,39 +59488,154 @@ function readAllTaskManifests(workspaceRoot) {
     return tb - ta;
   });
 }
-function acquireBridgeLock(workspaceRoot, timeoutSec, nowMs = Date.now()) {
-  const warnings = [];
-  const current = readManifest(workspaceRoot);
-  if (!current) {
-    return { warnings };
+function getDispatchLockPath(workspaceRoot) {
+  return path.join(getBridgeDir(workspaceRoot), "dispatch.lock");
+}
+function releaseBridgeLock(workspaceRoot) {
+  try {
+    fs.rmSync(getDispatchLockPath(workspaceRoot), { force: true });
+  } catch {
   }
-  if (current.status === "DISPATCHED" || current.status === "RUNNING") {
-    const updatedMs = Date.parse(current.updatedAt);
-    const elapsedMs = Number.isNaN(updatedMs) ? Number.POSITIVE_INFINITY : nowMs - updatedMs;
-    if (elapsedMs <= timeoutSec * 1e3) {
+}
+function acquireAtomicDispatchLockFile(workspaceRoot, timeoutSec, nowMs) {
+  ensureBridgeDirs(workspaceRoot);
+  const lockPath = getDispatchLockPath(workspaceRoot);
+  const payload = `${JSON.stringify({ pid: process.pid, acquiredAt: new Date(nowMs).toISOString(), timeoutSec })}
+`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      try {
+        fs.writeFileSync(fd, payload, "utf8");
+      } finally {
+        fs.closeSync(fd);
+      }
+      return;
+    } catch (err) {
+      const code = err?.code;
+      if (code !== "EEXIST") {
+        throw err;
+      }
+      let stale = false;
+      try {
+        const st = fs.lstatSync(lockPath);
+        const raw = st.isFile() ? fs.readFileSync(lockPath, "utf8") : "";
+        let acquiredMs = st.mtimeMs;
+        let lockTimeoutSec = Math.max(timeoutSec, 60);
+        try {
+          const parsed = JSON.parse(raw);
+          const parsedMs = parsed.acquiredAt ? Date.parse(parsed.acquiredAt) : Number.NaN;
+          if (!Number.isNaN(parsedMs)) acquiredMs = parsedMs;
+          if (typeof parsed.timeoutSec === "number" && parsed.timeoutSec > 0) {
+            lockTimeoutSec = Math.max(parsed.timeoutSec, 60);
+          }
+        } catch {
+        }
+        const elapsedMs = Math.max(0, nowMs - acquiredMs);
+        if (elapsedMs > lockTimeoutSec * 1e3) {
+          stale = true;
+        }
+      } catch {
+        stale = true;
+      }
+      if (stale && attempt === 0) {
+        try {
+          fs.rmSync(lockPath, { force: true });
+        } catch {
+        }
+        continue;
+      }
       throw new AgPluginError(
         "BRIDGE_BUSY",
-        `Another delegation task (${current.taskId}, status=${current.status}) is currently active (${Math.round(elapsedMs / 1e3)}s elapsed). Wait for completion or inspect .ag-bridge/manifest.json.`,
-        { activeTaskId: current.taskId, status: current.status }
+        "Another delegation is currently initializing a checkpoint/lock for this workspace. Retry shortly or inspect .ag-bridge/dispatch.lock."
       );
     }
-    const staleManifest = {
-      ...current,
-      status: "FAILED",
-      updatedAt: new Date(nowMs).toISOString(),
-      errorCode: "TASK_TIMEOUT",
-      error: `Recovered stale task lock after ${Math.round(elapsedMs / 1e3)}s without updates.`
-    };
-    archiveManifest(workspaceRoot, staleManifest);
-    warnings.push(
-      `Recovered stale active task "${current.taskId}" (exceeded ${timeoutSec}s timeout) and archived it to .ag-bridge/history/.`
-    );
-    return { warnings };
   }
-  if (current.status === "VERIFIED" || current.status === "FAILED") {
-    archiveManifest(workspaceRoot, current);
+}
+function acquireBridgeLock(workspaceRoot, timeoutSec, nowMs = Date.now()) {
+  const warnings = [];
+  acquireAtomicDispatchLockFile(workspaceRoot, timeoutSec, nowMs);
+  const release = () => releaseBridgeLock(workspaceRoot);
+  try {
+    let current = null;
+    try {
+      current = readManifest(workspaceRoot);
+    } catch (err) {
+      const manifestPath = getManifestPath(workspaceRoot);
+      const quarantinePath = path.join(
+        getBridgeDir(workspaceRoot),
+        `manifest.corrupt-${nowMs}.json`
+      );
+      try {
+        if (fs.existsSync(manifestPath)) {
+          fs.renameSync(manifestPath, quarantinePath);
+        }
+      } catch {
+        try {
+          fs.rmSync(manifestPath, { force: true });
+        } catch {
+        }
+      }
+      warnings.push(
+        `Quarantined corrupted .ag-bridge/manifest.json (${err instanceof Error ? err.message : String(err)}) to recover bridge lock.`
+      );
+      return { warnings, release };
+    }
+    if (!current) {
+      return { warnings, release };
+    }
+    let safeCurrentId = null;
+    try {
+      safeCurrentId = assertSafeTaskId(current.taskId);
+    } catch {
+      const manifestPath = getManifestPath(workspaceRoot);
+      try {
+        fs.renameSync(
+          manifestPath,
+          path.join(getBridgeDir(workspaceRoot), `manifest.invalid-id-${nowMs}.json`)
+        );
+      } catch {
+      }
+      warnings.push(
+        `Quarantined manifest with invalid taskId "${String(current.taskId)}" to recover bridge lock.`
+      );
+      return { warnings, release };
+    }
+    if (current.status === "DISPATCHED" || current.status === "RUNNING") {
+      const updatedMs = Date.parse(current.updatedAt);
+      const elapsedMs = Number.isNaN(updatedMs) ? Number.POSITIVE_INFINITY : Math.max(0, nowMs - updatedMs);
+      const activeTimeoutSec = typeof current.timeoutSec === "number" && Number.isFinite(current.timeoutSec) && current.timeoutSec > 0 ? current.timeoutSec : timeoutSec;
+      if (elapsedMs <= activeTimeoutSec * 1e3) {
+        release();
+        throw new AgPluginError(
+          "BRIDGE_BUSY",
+          `Another delegation task (${safeCurrentId}, status=${current.status}) is currently active (${Math.round(elapsedMs / 1e3)}s elapsed). Wait for completion or inspect .ag-bridge/manifest.json.`,
+          { activeTaskId: safeCurrentId, status: current.status }
+        );
+      }
+      const staleManifest = {
+        ...current,
+        taskId: safeCurrentId,
+        status: "FAILED",
+        updatedAt: new Date(nowMs).toISOString(),
+        errorCode: "TASK_TIMEOUT",
+        error: `Recovered stale task lock after ${Math.round(elapsedMs / 1e3)}s without updates.`
+      };
+      archiveManifest(workspaceRoot, staleManifest);
+      writeManifest(workspaceRoot, staleManifest);
+      warnings.push(
+        `Recovered stale active task "${safeCurrentId}" (exceeded ${activeTimeoutSec}s timeout) and archived it to .ag-bridge/history/.`
+      );
+      return { warnings, release };
+    }
+    if (current.status === "VERIFIED" || current.status === "FAILED") {
+      archiveManifest(workspaceRoot, { ...current, taskId: safeCurrentId });
+    }
+    return { warnings, release };
+  } catch (err) {
+    release();
+    throw err;
   }
-  return { warnings };
 }
 function generateTaskId(now = /* @__PURE__ */ new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -59760,16 +59882,282 @@ function windowsShell(env = process.env) {
 
 // src/git-guard.ts
 import { execFileSync, spawnSync } from "node:child_process";
-import fs3 from "node:fs";
+import fs4 from "node:fs";
 import os from "node:os";
+import path4 from "node:path";
+
+// src/path-guard.ts
+import fs3 from "node:fs";
 import path3 from "node:path";
+var IS_WINDOWS = process.platform === "win32";
+function normalizeForComparison(p) {
+  const normalized = path3.resolve(p);
+  return IS_WINDOWS ? normalized.toLowerCase() : normalized;
+}
+function toPosixRelative(workspaceRoot, absolutePath) {
+  const rel = path3.relative(workspaceRoot, absolutePath);
+  return rel.split(path3.sep).join("/");
+}
+function isInsideRoot(rootPath, candidatePath) {
+  const rootCmp = normalizeForComparison(rootPath);
+  const candCmp = normalizeForComparison(candidatePath);
+  if (candCmp === rootCmp) {
+    return true;
+  }
+  const prefix = rootCmp.endsWith(path3.sep) ? rootCmp : rootCmp + path3.sep;
+  return candCmp.startsWith(prefix);
+}
+var MAX_SYMLINK_HOPS = 40;
+function nativeRealPathOrNearestParent(targetPath, depth = 0) {
+  if (depth > MAX_SYMLINK_HOPS) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Path "${targetPath}" exceeded maximum symbolic link depth (${MAX_SYMLINK_HOPS}).`
+    );
+  }
+  let current = path3.resolve(targetPath);
+  const trailingSegments = [];
+  for (; ; ) {
+    try {
+      const real = fs3.realpathSync.native(current);
+      return trailingSegments.length > 0 ? path3.join(real, ...trailingSegments) : real;
+    } catch {
+      let lstat = null;
+      try {
+        lstat = fs3.lstatSync(current);
+      } catch (lstatErr) {
+        const code = lstatErr?.code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") {
+          throw new AgPluginError(
+            "PATH_TRAVERSAL_BLOCKED",
+            `Cannot safely inspect path "${current}" (${code ?? "unknown error"}).`
+          );
+        }
+      }
+      if (lstat?.isSymbolicLink()) {
+        const linkTarget = fs3.readlinkSync(current);
+        const resolvedLink = path3.resolve(path3.dirname(current), linkTarget);
+        const nextPath = trailingSegments.length > 0 ? path3.join(resolvedLink, ...trailingSegments) : resolvedLink;
+        return nativeRealPathOrNearestParent(nextPath, depth + 1);
+      }
+      const parent = path3.dirname(current);
+      if (parent === current) {
+        return path3.resolve(targetPath);
+      }
+      trailingSegments.unshift(path3.basename(current));
+      current = parent;
+    }
+  }
+}
+function isInsideWorkspace(workspaceRoot, candidatePath) {
+  return isInsideRoot(
+    nativeRealPathOrNearestParent(workspaceRoot),
+    nativeRealPathOrNearestParent(candidatePath)
+  );
+}
+function assertNoWindowsAlias(posixRel, what) {
+  if (!IS_WINDOWS) {
+    return;
+  }
+  for (const segment of posixRel.split("/")) {
+    if (segment.includes(":") || /[. ]$/.test(segment)) {
+      throw new AgPluginError(
+        "PATH_TRAVERSAL_BLOCKED",
+        `${what}: "${posixRel}" uses a Windows path alias (an alternate data stream, or a name ending in a dot or space).`
+      );
+    }
+  }
+}
+function realWorkspaceRoot(workspaceRoot) {
+  return fs3.realpathSync.native(path3.resolve(workspaceRoot));
+}
+function isEnvFileName(base) {
+  return base === ".env" || base.startsWith(".env.") || base === ".envrc" || base.startsWith(".env_") || base.startsWith(".env-");
+}
+function isProtectedWritePath(posixRel) {
+  const lower2 = posixRel.toLowerCase();
+  const segments = lower2.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return true;
+  }
+  if (segments[0] === ".git" || segments.includes(".git")) {
+    return true;
+  }
+  if (segments[0] === "node_modules" || segments.includes("node_modules")) {
+    return true;
+  }
+  if (lower2 === ".ag-bridge/config.json") {
+    return true;
+  }
+  const base = segments[segments.length - 1];
+  if (isEnvFileName(base)) {
+    return true;
+  }
+  return false;
+}
+function isProtectedReadPath(posixRel) {
+  const lower2 = posixRel.toLowerCase();
+  const segments = lower2.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return false;
+  }
+  if (segments.includes(".ssh")) {
+    return true;
+  }
+  if (lower2 === ".ag-bridge/config.json") {
+    return true;
+  }
+  const base = segments[segments.length - 1];
+  if (isEnvFileName(base) && base !== ".env.example" && base !== ".env.sample") {
+    return true;
+  }
+  if (base.endsWith(".pem") || base.endsWith(".key") || base === "id_rsa" || base === "id_ed25519") {
+    return true;
+  }
+  return false;
+}
+function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
+  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
+    throw new AgPluginError(
+      "INVALID_LOCKED_PATHS",
+      "lockedPaths must contain at least one relative file or directory path inside the workspace."
+    );
+  }
+  const realRoot = realWorkspaceRoot(workspaceRoot);
+  const normalizedScopes = [];
+  for (const rawScope of lockedPaths) {
+    const scope = rawScope.trim();
+    if (!scope || scope.includes("\0")) {
+      throw new AgPluginError("INVALID_LOCKED_PATHS", `Invalid lockedPath entry: "${rawScope}"`);
+    }
+    const resolved = path3.resolve(realRoot, scope);
+    if (!isInsideRoot(realRoot, resolved)) {
+      throw new AgPluginError(
+        "INVALID_LOCKED_PATHS",
+        `lockedPath "${scope}" resolves outside the workspace root.`
+      );
+    }
+    assertNoWindowsAlias(toPosixRelative(realRoot, resolved), "lockedPath");
+    const realScope = nativeRealPathOrNearestParent(resolved);
+    if (!isInsideRoot(realRoot, realScope)) {
+      throw new AgPluginError(
+        "INVALID_LOCKED_PATHS",
+        `lockedPath "${scope}" escapes the workspace via symlink.`
+      );
+    }
+    const rel = toPosixRelative(realRoot, realScope);
+    if (isProtectedWritePath(rel)) {
+      throw new AgPluginError(
+        "PROTECTED_PATH_BLOCKED",
+        `lockedPath "${scope}" targets a protected path (.git, .env*, node_modules, or .ag-bridge/config.json).`
+      );
+    }
+    normalizedScopes.push(rel);
+  }
+  return normalizedScopes;
+}
+function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
+  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
+    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
+  }
+  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
+    throw new AgPluginError(
+      "PATH_OUTSIDE_LOCKED_SCOPE",
+      "Write denied: lockedPaths is empty (fail-closed policy)."
+    );
+  }
+  const realRoot = realWorkspaceRoot(workspaceRoot);
+  const resolvedTarget = path3.resolve(realRoot, targetPath);
+  if (!isInsideRoot(realRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Write denied: "${targetPath}" resolves outside the workspace root.`
+    );
+  }
+  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), "Write denied");
+  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
+  if (!isInsideRoot(realRoot, realTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Write denied: "${targetPath}" escapes the workspace root via symlink.`
+    );
+  }
+  const relTarget = toPosixRelative(realRoot, realTarget);
+  if (isProtectedWritePath(relTarget)) {
+    throw new AgPluginError(
+      "PROTECTED_PATH_BLOCKED",
+      `Write denied: "${relTarget}" is a protected path and cannot be modified by delegated agents.`
+    );
+  }
+  const matchesScope = lockedPaths.some((scope) => {
+    const trimmed = scope.trim();
+    if (!trimmed || trimmed.includes("\0")) {
+      return false;
+    }
+    const resolvedScope = path3.resolve(realRoot, trimmed);
+    if (!isInsideRoot(realRoot, resolvedScope)) {
+      return false;
+    }
+    const realScope = nativeRealPathOrNearestParent(resolvedScope);
+    if (!isInsideRoot(realRoot, realScope)) {
+      return false;
+    }
+    const scopeCmp = normalizeForComparison(realScope);
+    const targetCmp = normalizeForComparison(realTarget);
+    if (targetCmp === scopeCmp) {
+      return true;
+    }
+    const dirPrefix = scopeCmp.endsWith(path3.sep) ? scopeCmp : scopeCmp + path3.sep;
+    return targetCmp.startsWith(dirPrefix);
+  });
+  if (!matchesScope) {
+    throw new AgPluginError(
+      "PATH_OUTSIDE_LOCKED_SCOPE",
+      `Write denied: "${relTarget}" is outside allowed lockedPaths [${lockedPaths.join(", ")}].`
+    );
+  }
+  return realTarget;
+}
+function assertReadablePath(workspaceRoot, targetPath) {
+  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
+    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
+  }
+  const realRoot = realWorkspaceRoot(workspaceRoot);
+  const resolvedTarget = path3.resolve(realRoot, targetPath);
+  if (!isInsideRoot(realRoot, resolvedTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Read denied: "${targetPath}" resolves outside the workspace root.`
+    );
+  }
+  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), "Read denied");
+  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
+  if (!isInsideRoot(realRoot, realTarget)) {
+    throw new AgPluginError(
+      "PATH_TRAVERSAL_BLOCKED",
+      `Read denied: "${targetPath}" escapes the workspace root via symlink.`
+    );
+  }
+  const relTarget = toPosixRelative(realRoot, realTarget);
+  if (isProtectedReadPath(relTarget)) {
+    throw new AgPluginError(
+      "PROTECTED_PATH_BLOCKED",
+      `Read denied: "${relTarget}" is a protected secret file.`
+    );
+  }
+  return realTarget;
+}
+
+// src/git-guard.ts
 var NO_REPO_COMMANDS = [
   "-c",
   "core.fsmonitor=false",
   "-c",
   "core.hooksPath=/dev/null",
   "-c",
-  "protocol.allow=never"
+  "protocol.allow=never",
+  "-c",
+  "submodule.recurse=false"
 ];
 var DEFAULT_GIT_TIMEOUT_MS = 12e4;
 function gitTimeoutMs() {
@@ -59779,33 +60167,34 @@ function gitTimeoutMs() {
 function scanPosixGroup(pgid) {
   const psPath = resolveExecutable("ps");
   if (!psPath) {
-    return { members: 0, includesSelf: false };
+    return { ok: false, pids: [], includesSelf: false };
   }
   try {
-    const res = spawnSync(psPath, ["-eo", "pid=,pgid="], {
+    const res = spawnSync(psPath, ["-e", "-o", "pid=", "-o", "pgid="], {
       cwd: os.tmpdir(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5e3
     });
     if (res.status !== 0 || typeof res.stdout !== "string") {
-      return { members: 0, includesSelf: false };
+      return { ok: false, pids: [], includesSelf: false };
     }
-    let members2 = 0;
+    const pids = [];
     let includesSelf = false;
     for (const line of res.stdout.split(/\r?\n/)) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 2 && Number(parts[1]) === pgid) {
-        if (Number(parts[0]) === process.pid) {
+        const pid = Number(parts[0]);
+        if (pid === process.pid) {
           includesSelf = true;
-        } else {
-          members2 += 1;
+        } else if (Number.isInteger(pid) && pid > 0) {
+          pids.push(pid);
         }
       }
     }
-    return { members: members2, includesSelf };
+    return { ok: true, pids, includesSelf };
   } catch {
-    return { members: 0, includesSelf: false };
+    return { ok: false, pids: [], includesSelf: false };
   }
 }
 function buildPosixGitCommand(gitBin, gitArgs) {
@@ -59821,7 +60210,7 @@ function buildPosixGitCommand(gitBin, gitArgs) {
   if (perlPath) {
     return {
       command: perlPath,
-      args: ["-e", "setpgrp(0,0); exec { $ARGV[0] } @ARGV or exit 127", gitBin, ...gitArgs],
+      args: ["-e", "setpgrp(0,0) or exit 127; exec { $ARGV[0] } @ARGV or exit 127", gitBin, ...gitArgs],
       isolatedGroup: true
     };
   }
@@ -59836,31 +60225,38 @@ function endPosixLeftovers(pgid, killFn = process.kill.bind(process), scanFn = s
     return 0;
   }
   const firstScan = scanFn(pgid);
-  if (firstScan.includesSelf) {
+  if (!firstScan.ok || firstScan.includesSelf) {
     return 0;
   }
   try {
     killFn(-pgid, 0);
   } catch (err) {
-    if (err?.code === "ESRCH") {
+    const code = err?.code;
+    if (code === "ESRCH" || code === "EPERM") {
       return 0;
     }
   }
   try {
     killFn(-pgid, "SIGKILL");
   } catch (err) {
-    if (err?.code === "ESRCH") {
+    const code = err?.code;
+    if (code === "ESRCH" || code === "EPERM") {
       return 0;
     }
   }
+  const killed = new Set(firstScan.pids);
   const secondScan = scanFn(pgid);
-  if (!secondScan.includesSelf && secondScan.members > 0) {
-    try {
-      killFn(-pgid, "SIGKILL");
-    } catch {
+  if (secondScan.ok && !secondScan.includesSelf && secondScan.pids.length > 0) {
+    const fresh = secondScan.pids.filter((pid) => !killed.has(pid));
+    if (fresh.length > 0) {
+      try {
+        killFn(-pgid, "SIGKILL");
+      } catch {
+      }
+      for (const pid of fresh) killed.add(pid);
     }
   }
-  return Math.max(firstScan.members + (secondScan.includesSelf ? 0 : secondScan.members), 1);
+  return Math.max(killed.size, 1);
 }
 function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
   const script = [
@@ -59874,7 +60270,11 @@ function endWindowsLeftovers(launcherPid, startedAt, cutAt) {
     "$seen = @{}",
     "while ($queue.Count -gt 0) { $p = $queue[0]; $queue = @($queue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $found += $p; $queue += @($all | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and -not $seen.ContainsKey($_.ProcessId) }) }",
     "foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force }",
-    "$late = @(Get-Procs | Where-Object { $c = $_; @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })",
+    "$stopCutoff = [datetime]::UtcNow.AddMilliseconds(250)",
+    "$all2 = Get-Procs",
+    "$lateQueue = @($all2 | Where-Object { $c = $_; -not $seen.ContainsKey($c.ProcessId) -and $c.Created -le $stopCutoff -and @($found | Where-Object { $_.ProcessId -eq $c.ParentProcessId -and $c.Created -ge $_.Created }).Count -gt 0 })",
+    "$late = @()",
+    "while ($lateQueue.Count -gt 0) { $p = $lateQueue[0]; $lateQueue = @($lateQueue | Select-Object -Skip 1); if ($seen.ContainsKey($p.ProcessId)) { continue }; $seen[$p.ProcessId] = $true; $late += $p; $lateQueue += @($all2 | Where-Object { $_.ParentProcessId -eq $p.ProcessId -and $_.Created -ge $p.Created -and $_.Created -le $stopCutoff -and -not $seen.ContainsKey($_.ProcessId) }) }",
     "foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force }",
     "$found.Count + $late.Count"
   ].join("; ");
@@ -59927,8 +60327,8 @@ function tryRunGit(workspaceRoot, args, input2) {
   const pid = res.pid;
   const leftoversEnded = timedOut && typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? process.platform === "win32" ? endWindowsLeftovers(pid, startedAt, /* @__PURE__ */ new Date()) : launch.isolatedGroup ? endPosixLeftovers(pid) : 0 : 0;
   const cleanup = leftoversEnded > 0 ? ` (ended ${leftoversEnded} process${leftoversEnded === 1 ? "" : "es"} it left running)` : "";
-  const rawStderr = typeof res.stderr === "string" && res.stderr.length > 0 ? res.stderr : res.error instanceof Error ? res.error.message : res.error ? String(res.error) : "";
-  const stderr = timedOut && rawStderr.trim().length === 0 ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}` : rawStderr;
+  const childStderr = typeof res.stderr === "string" ? res.stderr.trim() : "";
+  const stderr = timedOut ? `Git did not answer within ${gitTimeoutMs()} ms${cleanup}${childStderr ? `: ${childStderr}` : ""}` : childStderr || (res.error instanceof Error ? res.error.message : res.error ? String(res.error) : "");
   return { ok: false, stdout: "", stderr, timedOut, leftoversEnded };
 }
 var isBridgePath = (p) => p === ".ag-bridge" || p.startsWith(".ag-bridge/");
@@ -59979,7 +60379,7 @@ function listGitChangedFiles(workspaceRoot) {
   for (let i2 = 0; i2 < entries.length; i2++) {
     const entry = entries[i2];
     if (entry.length < 4) continue;
-    if (entry[0] === "R" || entry[0] === "C") i2++;
+    if (entry[0] === "R" || entry[0] === "C" || entry[1] === "R" || entry[1] === "C") i2++;
     const file2 = entry.slice(3);
     if (!isBridgePath(file2)) files.add(file2);
   }
@@ -60015,16 +60415,17 @@ var RECOVERY_RETENTION = {
   maxAgeMs: 7 * 24 * 60 * 60 * 1e3,
   maxBytes: 250 * 1024 * 1024
 };
-var recoveryRoot = (workspaceRoot) => path3.join(getBridgeDir(workspaceRoot), "recovery");
-var relativeTo = (workspaceRoot, abs) => path3.relative(workspaceRoot, abs).split(path3.sep).join("/");
-var snapshotDirFor = (workspaceRoot, taskId) => path3.join(recoveryRoot(workspaceRoot), assertSafeTaskId(taskId), "untracked");
+var recoveryRoot = (workspaceRoot) => path4.join(getBridgeDir(workspaceRoot), "recovery");
+var relativeTo = (workspaceRoot, abs) => path4.relative(workspaceRoot, abs).split(path4.sep).join("/");
+var snapshotDirFor = (workspaceRoot, taskId) => path4.join(recoveryRoot(workspaceRoot), assertSafeTaskId(taskId), "untracked");
 function snapshotUntracked(workspaceRoot, taskId, baseline) {
   const files = [];
   let bytes = 0;
   for (const rel of baseline) {
+    if (linkOnTheWay(workspaceRoot, rel)) continue;
     let st;
     try {
-      st = fs3.lstatSync(path3.join(workspaceRoot, rel));
+      st = fs4.lstatSync(path4.join(workspaceRoot, rel));
     } catch {
       continue;
     }
@@ -60041,12 +60442,12 @@ function snapshotUntracked(workspaceRoot, taskId, baseline) {
   const dir = snapshotDirFor(workspaceRoot, taskId);
   try {
     for (const rel of files) {
-      const dst = path3.join(dir, rel);
-      fs3.mkdirSync(path3.dirname(dst), { recursive: true });
-      fs3.copyFileSync(path3.join(workspaceRoot, rel), dst);
+      const dst = path4.join(dir, rel);
+      fs4.mkdirSync(path4.dirname(dst), { recursive: true });
+      fs4.copyFileSync(path4.join(workspaceRoot, rel), dst);
     }
   } catch (err) {
-    fs3.rmSync(dir, { recursive: true, force: true });
+    fs4.rmSync(dir, { recursive: true, force: true });
     const why = err instanceof Error ? err.message : String(err);
     return { warning: `The untracked files were not snapshotted (${why}), so a rollback cannot undo an agent's edit or delete of one.` };
   }
@@ -60056,22 +60457,22 @@ function realFoldersTo(workspaceRoot, rel, moveAside) {
   const parts = rel.split("/").slice(0, -1);
   for (let i2 = 1; i2 <= parts.length; i2++) {
     const partRel = parts.slice(0, i2).join("/");
-    const abs = path3.join(workspaceRoot, partRel);
+    const abs = path4.join(workspaceRoot, partRel);
     let st;
     try {
-      st = fs3.lstatSync(abs);
+      st = fs4.lstatSync(abs);
     } catch {
       st = void 0;
     }
     if (st && (st.isSymbolicLink() || !st.isDirectory())) moveAside(partRel);
-    if (!st || st.isSymbolicLink() || !st.isDirectory()) fs3.mkdirSync(abs);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) fs4.mkdirSync(abs);
   }
 }
 function linkOnTheWay(workspaceRoot, rel) {
   const parts = rel.split("/").filter((p) => p.length > 0).slice(0, -1);
   for (let i2 = 1; i2 <= parts.length; i2++) {
     try {
-      if (fs3.lstatSync(path3.join(workspaceRoot, parts.slice(0, i2).join("/"))).isSymbolicLink()) return true;
+      if (fs4.lstatSync(path4.join(workspaceRoot, parts.slice(0, i2).join("/"))).isSymbolicLink()) return true;
     } catch {
       return false;
     }
@@ -60080,40 +60481,61 @@ function linkOnTheWay(workspaceRoot, rel) {
 }
 function regularFilesUnder(dir, prefix = "") {
   const out = [];
-  for (const entry of fs3.readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of fs4.readdirSync(dir, { withFileTypes: true })) {
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) out.push(...regularFilesUnder(path3.join(dir, entry.name), rel));
+    if (entry.isDirectory()) out.push(...regularFilesUnder(path4.join(dir, entry.name), rel));
     else if (entry.isFile()) out.push(rel);
   }
   return out;
 }
 function bytesUnder(dir) {
   let total = 0;
-  for (const entry of fs3.readdirSync(dir, { withFileTypes: true })) {
-    const abs = path3.join(dir, entry.name);
-    if (entry.isDirectory()) total += bytesUnder(abs);
-    else if (entry.isFile()) total += fs3.statSync(abs).size;
+  let dirents;
+  try {
+    dirents = fs4.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of dirents) {
+    const abs = path4.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      total += bytesUnder(abs);
+    } else if (entry.isFile()) {
+      try {
+        total += fs4.statSync(abs).size;
+      } catch {
+      }
+    }
   }
   return total;
 }
 function pruneRecoveryArtifacts(workspaceRoot, keepTaskId, policy = RECOVERY_RETENTION, now = Date.now()) {
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, "recovery"])) {
+    return [];
+  }
   const root = recoveryRoot(workspaceRoot);
-  let entries;
+  const entries = [];
+  let dirents;
   try {
-    entries = fs3.readdirSync(root, { withFileTypes: true }).filter((e2) => e2.isDirectory()).map((e2) => {
-      const dir = path3.join(root, e2.name);
-      return { id: e2.name, mtimeMs: fs3.statSync(dir).mtimeMs, bytes: bytesUnder(dir) };
-    });
+    dirents = fs4.readdirSync(root, { withFileTypes: true });
   } catch {
     return [];
   }
+  for (const e2 of dirents) {
+    if (!e2.isDirectory()) continue;
+    const dir = path4.join(root, e2.name);
+    try {
+      entries.push({ id: e2.name, mtimeMs: fs4.statSync(dir).mtimeMs, bytes: bytesUnder(dir) });
+    } catch {
+    }
+  }
   entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
   const kept = entries.filter((e2) => e2.id === keepTaskId);
-  const pruned = [];
+  const toPrune = [];
   for (const e2 of entries) {
     if (e2.id === keepTaskId) continue;
     if (kept.length < policy.maxTasks && now - e2.mtimeMs <= policy.maxAgeMs) kept.push(e2);
-    else pruned.push(e2.id);
+    else toPrune.push(e2.id);
   }
   let total = kept.reduce((sum, e2) => sum + e2.bytes, 0);
   while (total > policy.maxBytes) {
@@ -60121,11 +60543,16 @@ function pruneRecoveryArtifacts(workspaceRoot, keepTaskId, policy = RECOVERY_RET
     if (!oldest) break;
     kept.splice(kept.indexOf(oldest), 1);
     total -= oldest.bytes;
-    pruned.push(oldest.id);
+    toPrune.push(oldest.id);
   }
-  for (const id of pruned) {
-    fs3.rmSync(path3.join(root, id), { recursive: true, force: true });
-    tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/pre-rollback/${id}`]);
+  const pruned = [];
+  for (const id of toPrune) {
+    try {
+      fs4.rmSync(path4.join(root, id), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/pre-rollback/${id}`]);
+      pruned.push(id);
+    } catch {
+    }
   }
   return pruned;
 }
@@ -60243,41 +60670,53 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   }
   const taskId = assertSafeTaskId(manifest.taskId);
   const preHeadRes = tryRunGit(workspaceRoot, ["rev-parse", "--verify", "HEAD"]);
-  const preStashRes = tryRunGit(workspaceRoot, ["stash", "create", `ag-bridge-pre-rollback-${taskId}`]);
-  if (!preHeadRes.ok || !preStashRes.ok) {
+  if (!preHeadRes.ok) {
     throw new AgPluginError(
       "GIT_CHECKPOINT_FAILED",
-      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr || preStashRes.stderr}`
+      `Could not record the state before rollback; nothing was changed: ${preHeadRes.stderr}`
     );
   }
   const preRollbackHead = preHeadRes.stdout.trim();
   let preRollbackRef;
-  if (preStashRes.stdout.trim()) {
-    preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
-    const pinRes = tryRunGit(workspaceRoot, ["update-ref", preRollbackRef, preStashRes.stdout.trim()]);
-    if (!pinRes.ok) {
+  const unmergedRes = tryRunGit(workspaceRoot, ["ls-files", "-u"]);
+  const hasUnmergedIndex = unmergedRes.ok && unmergedRes.stdout.trim().length > 0;
+  if (!hasUnmergedIndex) {
+    const preStashRes = tryRunGit(workspaceRoot, ["stash", "create", `ag-bridge-pre-rollback-${taskId}`]);
+    if (!preStashRes.ok) {
       throw new AgPluginError(
         "GIT_CHECKPOINT_FAILED",
-        `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`
+        `Could not record the state before rollback; nothing was changed: ${preStashRes.stderr}`
       );
+    }
+    if (preStashRes.stdout.trim()) {
+      preRollbackRef = `refs/ag-bridge/pre-rollback/${taskId}`;
+      const pinRes = tryRunGit(workspaceRoot, ["update-ref", preRollbackRef, preStashRes.stdout.trim()]);
+      if (!pinRes.ok) {
+        throw new AgPluginError(
+          "GIT_CHECKPOINT_FAILED",
+          `Could not record the state before rollback; nothing was changed: ${pinRes.stderr}`
+        );
+      }
     }
   }
   let runDir;
   const moveAside = (rel, kind) => {
-    runDir ??= path3.join(recoveryRoot(workspaceRoot), taskId, `rollback-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
-    const dst = path3.join(runDir, kind, rel);
-    fs3.mkdirSync(path3.dirname(dst), { recursive: true });
-    const src = path3.join(workspaceRoot, rel);
+    runDir ??= path4.join(recoveryRoot(workspaceRoot), taskId, `rollback-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
+    const dst = path4.join(runDir, kind, rel);
+    fs4.mkdirSync(path4.dirname(dst), { recursive: true });
+    const src = path4.join(workspaceRoot, rel);
     try {
-      fs3.renameSync(src, dst);
+      fs4.renameSync(src, dst);
     } catch {
-      fs3.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
-      fs3.rmSync(src, { recursive: true, force: true });
+      fs4.cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+      fs4.rmSync(src, { recursive: true, force: true });
     }
   };
+  const foldCase = process.platform === "win32" || process.platform === "darwin";
+  const normalizeRelKey = (rel) => foldCase ? rel.toLowerCase() : rel;
   const baseline = manifest.gitUntrackedBaseline;
   const untrackedBaselineMissing = baseline === void 0;
-  const baselineSet = new Set(baseline ?? []);
+  const baselineSet = new Set((baseline ?? []).map(normalizeRelKey));
   const addedRes = tryRunGit(workspaceRoot, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=A", ref, "--"]);
   if (!addedRes.ok) {
     throw new AgPluginError("GIT_CHECKPOINT_FAILED", `Failed to read the index before rollback: ${addedRes.stderr}`);
@@ -60302,9 +60741,23 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   }
   for (const rel of removedFromIndexRes.stdout.split("\0")) {
     if (rel.length === 0 || isBridgePath(rel) || linkOnTheWay(workspaceRoot, rel)) continue;
+    const segments = rel.split("/");
+    for (let i2 = 1; i2 < segments.length; i2++) {
+      const ancRel = segments.slice(0, i2).join("/");
+      if (linkOnTheWay(workspaceRoot, ancRel)) break;
+      try {
+        const ancStat = fs4.lstatSync(path4.join(workspaceRoot, ancRel));
+        if (!ancStat.isDirectory() && !ancStat.isSymbolicLink()) {
+          moveAside(ancRel, "replaced");
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
     let present = true;
     try {
-      fs3.lstatSync(path3.join(workspaceRoot, rel));
+      fs4.lstatSync(path4.join(workspaceRoot, rel));
     } catch {
       present = false;
     }
@@ -60350,14 +60803,14 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   const pathsBehindLinks = [];
   if (!untrackedBaselineMissing) {
     for (const relFile of listUntrackedFiles(workspaceRoot) ?? []) {
-      if (baselineSet.has(relFile)) continue;
+      if (baselineSet.has(normalizeRelKey(relFile))) continue;
       if (linkOnTheWay(workspaceRoot, relFile)) {
         pathsBehindLinks.push(relFile);
         continue;
       }
       let present = true;
       try {
-        fs3.lstatSync(path3.join(workspaceRoot, relFile));
+        fs4.lstatSync(path4.join(workspaceRoot, relFile));
       } catch {
         present = false;
       }
@@ -60370,26 +60823,31 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   const restoredUntrackedFiles = [];
   const snapshotDir = snapshotDirFor(workspaceRoot, taskId);
   const snapshotRecorded = manifest.gitUntrackedSnapshotDir === relativeTo(workspaceRoot, snapshotDir);
-  const untrackedSnapshotMissing = snapshotRecorded && !fs3.existsSync(snapshotDir);
+  const snapshotSymlinked = hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, "recovery", taskId, "untracked"]);
+  const untrackedSnapshotMissing = snapshotRecorded && (!fs4.existsSync(snapshotDir) || snapshotSymlinked);
   if (snapshotRecorded && !untrackedSnapshotMissing) {
     for (const rel of regularFilesUnder(snapshotDir)) {
-      const saved = path3.join(snapshotDir, rel);
-      const current = path3.join(workspaceRoot, rel);
+      const lowered = rel.toLowerCase();
+      if (!baselineSet.has(normalizeRelKey(rel)) || isBridgePath(rel) || lowered === ".git" || lowered.startsWith(".git/") || rel.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
+        continue;
+      }
+      const saved = path4.join(snapshotDir, rel);
+      const current = path4.join(workspaceRoot, rel);
       realFoldersTo(workspaceRoot, rel, (partRel) => moveAside(partRel, "replaced"));
       let st;
       try {
-        st = fs3.lstatSync(current);
+        st = fs4.lstatSync(current);
       } catch {
         st = void 0;
       }
-      if (st?.isFile() && fs3.readFileSync(current).equals(fs3.readFileSync(saved))) continue;
+      if (st?.isFile() && fs4.readFileSync(current).equals(fs4.readFileSync(saved))) continue;
       if (st) moveAside(rel, "replaced");
-      fs3.copyFileSync(saved, current);
+      fs4.copyFileSync(saved, current);
       restoredUntrackedFiles.push(rel);
     }
     restoredUntrackedFiles.sort();
   }
-  tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${manifest.taskId}`]);
+  tryRunGit(workspaceRoot, ["update-ref", "-d", `refs/ag-bridge/checkpoints/${taskId}`]);
   pruneRecoveryArtifacts(workspaceRoot, taskId);
   return {
     restoredCheckpointRef: ref,
@@ -60405,24 +60863,64 @@ function rollbackCheckpoint(workspaceRoot, manifest) {
   };
 }
 var WORKTREE_BRANCH_PREFIX = "ag-task/";
-var worktreesRoot = (workspaceRoot) => path3.join(getBridgeDir(workspaceRoot), "worktrees");
-function normalizeForContainment(p) {
-  const resolved = path3.resolve(p);
-  let canonical = resolved;
-  try {
-    canonical = fs3.realpathSync.native(resolved);
-  } catch {
-  }
+var worktreesRoot = (workspaceRoot) => path4.join(getBridgeDir(workspaceRoot), "worktrees");
+function normalizeCanonicalPath(p) {
+  const canonical = nativeRealPathOrNearestParent(p);
   return process.platform === "win32" || process.platform === "darwin" ? canonical.toLowerCase() : canonical;
 }
-function isStrictlyInside(parentDir, candidatePath) {
-  const parent = normalizeForContainment(parentDir);
-  const candidate = normalizeForContainment(candidatePath);
-  const rel = path3.relative(parent, candidate);
-  return rel.length > 0 && !rel.startsWith("..") && !path3.isAbsolute(rel);
+function resolveSafeWorktreeRoot(workspaceRoot, taskId, candidatePath) {
+  let safeId;
+  try {
+    safeId = assertSafeTaskId(taskId);
+  } catch {
+    return null;
+  }
+  if (hasSymlinkInChain(workspaceRoot, [BRIDGE_DIR_NAME, "worktrees"])) {
+    return null;
+  }
+  let canonicalExpected;
+  try {
+    canonicalExpected = path4.join(
+      nativeRealPathOrNearestParent(workspaceRoot),
+      BRIDGE_DIR_NAME,
+      "worktrees",
+      safeId
+    );
+  } catch {
+    return null;
+  }
+  try {
+    if (fs4.lstatSync(canonicalExpected).isSymbolicLink()) {
+      return null;
+    }
+  } catch {
+  }
+  if (candidatePath !== void 0) {
+    const resolvedCandidate = path4.resolve(workspaceRoot, candidatePath);
+    try {
+      if (fs4.lstatSync(resolvedCandidate).isSymbolicLink()) {
+        return null;
+      }
+    } catch {
+    }
+    try {
+      if (normalizeCanonicalPath(resolvedCandidate) !== normalizeCanonicalPath(canonicalExpected)) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return canonicalExpected;
 }
 function createTaskWorktree(workspaceRoot, taskId) {
   const safeId = assertSafeTaskId(taskId);
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "worktrees"], ".ag-bridge/worktrees");
+  assertNoSymlinkChain(
+    workspaceRoot,
+    [BRIDGE_DIR_NAME, "worktrees", safeId],
+    `.ag-bridge/worktrees/${safeId}`
+  );
   const info = getGitInfo(workspaceRoot);
   if (!info.isGitRepo) {
     throw new AgPluginError(
@@ -60439,37 +60937,48 @@ function createTaskWorktree(workspaceRoot, taskId) {
   }
   const baseCommit = headRes.stdout.trim();
   const wtRoot = worktreesRoot(workspaceRoot);
-  fs3.mkdirSync(wtRoot, { recursive: true });
-  const worktreePath = path3.join(wtRoot, safeId);
+  fs4.mkdirSync(wtRoot, { recursive: true });
+  const worktreePath = path4.join(wtRoot, safeId);
   const branchName = `${WORKTREE_BRANCH_PREFIX}${safeId}`;
+  const branchExistedBefore = tryRunGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/heads/${branchName}`
+  ]).ok;
   const addRes = tryRunGit(workspaceRoot, ["worktree", "add", "-b", branchName, worktreePath, baseCommit]);
   if (!addRes.ok) {
+    tryRunGit(workspaceRoot, ["worktree", "remove", "--force", "--force", worktreePath]);
+    tryRunGit(workspaceRoot, ["worktree", "prune"]);
+    try {
+      fs4.rmSync(worktreePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+    }
+    if (!branchExistedBefore) {
+      tryRunGit(workspaceRoot, ["branch", "-D", branchName]);
+    }
     throw new AgPluginError(
       "GIT_CHECKPOINT_FAILED",
       `Failed to create isolated git worktree at ${worktreePath}: ${addRes.stderr}`
     );
   }
+  const parentDirty = Boolean(info.isDirty);
   return {
     worktreePath,
     branchName,
-    baseCommit
+    baseCommit,
+    ...parentDirty ? {
+      parentDirty: true,
+      warning: "Parent workspace has uncommitted changes; the isolated worktree was created from HEAD and does not include uncommitted edits."
+    } : {}
   };
 }
 function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranch = true) {
+  assertNoSymlinkChain(workspaceRoot, [BRIDGE_DIR_NAME, "worktrees"], ".ag-bridge/worktrees");
   const wtRoot = worktreesRoot(workspaceRoot);
-  const resolvedTarget = path3.resolve(worktreePath);
+  const resolvedTarget = path4.resolve(workspaceRoot, worktreePath);
   try {
-    if (fs3.lstatSync(wtRoot).isSymbolicLink()) {
-      throw new AgPluginError(
-        "PATH_TRAVERSAL_BLOCKED",
-        "Refusing to remove worktree: .ag-bridge/worktrees is a symbolic link."
-      );
-    }
-  } catch (err) {
-    if (err instanceof AgPluginError) throw err;
-  }
-  try {
-    if (fs3.lstatSync(resolvedTarget).isSymbolicLink()) {
+    if (fs4.lstatSync(resolvedTarget).isSymbolicLink()) {
       throw new AgPluginError(
         "PATH_TRAVERSAL_BLOCKED",
         `Refusing to remove worktree: target "${worktreePath}" is a symbolic link.`
@@ -60478,24 +60987,28 @@ function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranc
   } catch (err) {
     if (err instanceof AgPluginError) throw err;
   }
-  if (!isStrictlyInside(wtRoot, resolvedTarget)) {
+  const canonicalWtRoot = normalizeCanonicalPath(wtRoot);
+  const canonicalTarget = normalizeCanonicalPath(resolvedTarget);
+  const rel = path4.relative(canonicalWtRoot, canonicalTarget);
+  if (rel.length === 0 || rel.startsWith("..") || path4.isAbsolute(rel) || rel.includes("/") || rel.includes("\\")) {
     throw new AgPluginError(
       "PATH_TRAVERSAL_BLOCKED",
-      `Refusing to remove worktree outside .ag-bridge/worktrees/: "${worktreePath}".`
+      `Refusing to remove worktree outside .ag-bridge/worktrees/<taskId>: "${worktreePath}".`
     );
   }
+  assertSafeTaskId(rel);
   const warnings = [];
   let removed = false;
-  const removeRes = tryRunGit(workspaceRoot, ["worktree", "remove", "--force", resolvedTarget]);
+  const removeRes = tryRunGit(workspaceRoot, ["worktree", "remove", "--force", "--force", resolvedTarget]);
   if (removeRes.ok) {
     removed = true;
   } else {
     tryRunGit(workspaceRoot, ["worktree", "prune"]);
-    if (fs3.existsSync(resolvedTarget)) {
+    if (fs4.existsSync(resolvedTarget)) {
       try {
-        fs3.rmSync(resolvedTarget, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        fs4.rmSync(resolvedTarget, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         tryRunGit(workspaceRoot, ["worktree", "prune"]);
-        removed = !fs3.existsSync(resolvedTarget);
+        removed = !fs4.existsSync(resolvedTarget);
       } catch (err) {
         warnings.push(
           `Could not fully remove worktree directory (${err instanceof Error ? err.message : String(err)}).`
@@ -60507,7 +61020,16 @@ function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranc
   }
   let branchDeleted = false;
   if (deleteBranch && branchName) {
-    if (!branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+    let validTaskBranch = false;
+    if (branchName.startsWith(WORKTREE_BRANCH_PREFIX)) {
+      try {
+        assertSafeTaskId(branchName.slice(WORKTREE_BRANCH_PREFIX.length));
+        validTaskBranch = true;
+      } catch {
+        validTaskBranch = false;
+      }
+    }
+    if (!validTaskBranch) {
       warnings.push(
         `Refused to delete branch "${branchName}": only branches under "${WORKTREE_BRANCH_PREFIX}" may be deleted automatically.`
       );
@@ -60525,268 +61047,6 @@ function removeTaskWorktree(workspaceRoot, worktreePath, branchName, deleteBranc
     branchDeleted,
     ...warnings.length > 0 ? { warning: warnings.join(" ") } : {}
   };
-}
-
-// src/path-guard.ts
-import fs4 from "node:fs";
-import path4 from "node:path";
-var IS_WINDOWS = process.platform === "win32";
-function normalizeForComparison(p) {
-  const normalized = path4.resolve(p);
-  return IS_WINDOWS ? normalized.toLowerCase() : normalized;
-}
-function toPosixRelative(workspaceRoot, absolutePath) {
-  const rel = path4.relative(workspaceRoot, absolutePath);
-  return rel.split(path4.sep).join("/");
-}
-function isInsideRoot(rootPath, candidatePath) {
-  const rootCmp = normalizeForComparison(rootPath);
-  const candCmp = normalizeForComparison(candidatePath);
-  if (candCmp === rootCmp) {
-    return true;
-  }
-  const prefix = rootCmp.endsWith(path4.sep) ? rootCmp : rootCmp + path4.sep;
-  return candCmp.startsWith(prefix);
-}
-var MAX_SYMLINK_HOPS = 40;
-function nativeRealPathOrNearestParent(targetPath, depth = 0) {
-  if (depth > MAX_SYMLINK_HOPS) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Path "${targetPath}" exceeded maximum symbolic link depth (${MAX_SYMLINK_HOPS}).`
-    );
-  }
-  let current = path4.resolve(targetPath);
-  const trailingSegments = [];
-  for (; ; ) {
-    try {
-      const real = fs4.realpathSync.native(current);
-      return trailingSegments.length > 0 ? path4.join(real, ...trailingSegments) : real;
-    } catch {
-      let lstat = null;
-      try {
-        lstat = fs4.lstatSync(current);
-      } catch (lstatErr) {
-        const code = lstatErr?.code;
-        if (code !== "ENOENT" && code !== "ENOTDIR") {
-          throw new AgPluginError(
-            "PATH_TRAVERSAL_BLOCKED",
-            `Cannot safely inspect path "${current}" (${code ?? "unknown error"}).`
-          );
-        }
-      }
-      if (lstat?.isSymbolicLink()) {
-        const linkTarget = fs4.readlinkSync(current);
-        const resolvedLink = path4.resolve(path4.dirname(current), linkTarget);
-        const nextPath = trailingSegments.length > 0 ? path4.join(resolvedLink, ...trailingSegments) : resolvedLink;
-        return nativeRealPathOrNearestParent(nextPath, depth + 1);
-      }
-      const parent = path4.dirname(current);
-      if (parent === current) {
-        return path4.resolve(targetPath);
-      }
-      trailingSegments.unshift(path4.basename(current));
-      current = parent;
-    }
-  }
-}
-function isInsideWorkspace(workspaceRoot, candidatePath) {
-  return isInsideRoot(
-    nativeRealPathOrNearestParent(workspaceRoot),
-    nativeRealPathOrNearestParent(candidatePath)
-  );
-}
-function assertNoWindowsAlias(posixRel, what) {
-  if (!IS_WINDOWS) {
-    return;
-  }
-  for (const segment of posixRel.split("/")) {
-    if (segment.includes(":") || /[. ]$/.test(segment)) {
-      throw new AgPluginError(
-        "PATH_TRAVERSAL_BLOCKED",
-        `${what}: "${posixRel}" uses a Windows path alias (an alternate data stream, or a name ending in a dot or space).`
-      );
-    }
-  }
-}
-function realWorkspaceRoot(workspaceRoot) {
-  return fs4.realpathSync.native(path4.resolve(workspaceRoot));
-}
-function isEnvFileName(base) {
-  return base === ".env" || base.startsWith(".env.") || base === ".envrc" || base.startsWith(".env_") || base.startsWith(".env-");
-}
-function isProtectedWritePath(posixRel) {
-  const lower2 = posixRel.toLowerCase();
-  const segments = lower2.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return true;
-  }
-  if (segments[0] === ".git" || segments.includes(".git")) {
-    return true;
-  }
-  if (segments[0] === "node_modules" || segments.includes("node_modules")) {
-    return true;
-  }
-  if (lower2 === ".ag-bridge/config.json") {
-    return true;
-  }
-  const base = segments[segments.length - 1];
-  if (isEnvFileName(base)) {
-    return true;
-  }
-  return false;
-}
-function isProtectedReadPath(posixRel) {
-  const lower2 = posixRel.toLowerCase();
-  const segments = lower2.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return false;
-  }
-  if (segments.includes(".ssh")) {
-    return true;
-  }
-  if (lower2 === ".ag-bridge/config.json") {
-    return true;
-  }
-  const base = segments[segments.length - 1];
-  if (isEnvFileName(base) && base !== ".env.example" && base !== ".env.sample") {
-    return true;
-  }
-  if (base.endsWith(".pem") || base.endsWith(".key") || base === "id_rsa" || base === "id_ed25519") {
-    return true;
-  }
-  return false;
-}
-function validateLockedPathsConfig(workspaceRoot, lockedPaths) {
-  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
-    throw new AgPluginError(
-      "INVALID_LOCKED_PATHS",
-      "lockedPaths must contain at least one relative file or directory path inside the workspace."
-    );
-  }
-  const realRoot = realWorkspaceRoot(workspaceRoot);
-  const normalizedScopes = [];
-  for (const rawScope of lockedPaths) {
-    const scope = rawScope.trim();
-    if (!scope || scope.includes("\0")) {
-      throw new AgPluginError("INVALID_LOCKED_PATHS", `Invalid lockedPath entry: "${rawScope}"`);
-    }
-    const resolved = path4.resolve(realRoot, scope);
-    if (!isInsideRoot(realRoot, resolved)) {
-      throw new AgPluginError(
-        "INVALID_LOCKED_PATHS",
-        `lockedPath "${scope}" resolves outside the workspace root.`
-      );
-    }
-    assertNoWindowsAlias(toPosixRelative(realRoot, resolved), "lockedPath");
-    const realScope = nativeRealPathOrNearestParent(resolved);
-    if (!isInsideRoot(realRoot, realScope)) {
-      throw new AgPluginError(
-        "INVALID_LOCKED_PATHS",
-        `lockedPath "${scope}" escapes the workspace via symlink.`
-      );
-    }
-    const rel = toPosixRelative(realRoot, realScope);
-    if (isProtectedWritePath(rel)) {
-      throw new AgPluginError(
-        "PROTECTED_PATH_BLOCKED",
-        `lockedPath "${scope}" targets a protected path (.git, .env*, node_modules, or .ag-bridge/config.json).`
-      );
-    }
-    normalizedScopes.push(rel);
-  }
-  return normalizedScopes;
-}
-function assertWritablePath(workspaceRoot, targetPath, lockedPaths) {
-  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
-    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
-  }
-  if (!Array.isArray(lockedPaths) || lockedPaths.length === 0) {
-    throw new AgPluginError(
-      "PATH_OUTSIDE_LOCKED_SCOPE",
-      "Write denied: lockedPaths is empty (fail-closed policy)."
-    );
-  }
-  const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path4.resolve(realRoot, targetPath);
-  if (!isInsideRoot(realRoot, resolvedTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Write denied: "${targetPath}" resolves outside the workspace root.`
-    );
-  }
-  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), "Write denied");
-  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
-  if (!isInsideRoot(realRoot, realTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Write denied: "${targetPath}" escapes the workspace root via symlink.`
-    );
-  }
-  const relTarget = toPosixRelative(realRoot, realTarget);
-  if (isProtectedWritePath(relTarget)) {
-    throw new AgPluginError(
-      "PROTECTED_PATH_BLOCKED",
-      `Write denied: "${relTarget}" is a protected path and cannot be modified by delegated agents.`
-    );
-  }
-  const matchesScope = lockedPaths.some((scope) => {
-    const trimmed = scope.trim();
-    if (!trimmed || trimmed.includes("\0")) {
-      return false;
-    }
-    const resolvedScope = path4.resolve(realRoot, trimmed);
-    if (!isInsideRoot(realRoot, resolvedScope)) {
-      return false;
-    }
-    const realScope = nativeRealPathOrNearestParent(resolvedScope);
-    if (!isInsideRoot(realRoot, realScope)) {
-      return false;
-    }
-    const scopeCmp = normalizeForComparison(realScope);
-    const targetCmp = normalizeForComparison(realTarget);
-    if (targetCmp === scopeCmp) {
-      return true;
-    }
-    const dirPrefix = scopeCmp.endsWith(path4.sep) ? scopeCmp : scopeCmp + path4.sep;
-    return targetCmp.startsWith(dirPrefix);
-  });
-  if (!matchesScope) {
-    throw new AgPluginError(
-      "PATH_OUTSIDE_LOCKED_SCOPE",
-      `Write denied: "${relTarget}" is outside allowed lockedPaths [${lockedPaths.join(", ")}].`
-    );
-  }
-  return realTarget;
-}
-function assertReadablePath(workspaceRoot, targetPath) {
-  if (!targetPath || typeof targetPath !== "string" || targetPath.includes("\0")) {
-    throw new AgPluginError("PATH_TRAVERSAL_BLOCKED", "Target path is empty or contains null bytes.");
-  }
-  const realRoot = realWorkspaceRoot(workspaceRoot);
-  const resolvedTarget = path4.resolve(realRoot, targetPath);
-  if (!isInsideRoot(realRoot, resolvedTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Read denied: "${targetPath}" resolves outside the workspace root.`
-    );
-  }
-  assertNoWindowsAlias(toPosixRelative(realRoot, resolvedTarget), "Read denied");
-  const realTarget = nativeRealPathOrNearestParent(resolvedTarget);
-  if (!isInsideRoot(realRoot, realTarget)) {
-    throw new AgPluginError(
-      "PATH_TRAVERSAL_BLOCKED",
-      `Read denied: "${targetPath}" escapes the workspace root via symlink.`
-    );
-  }
-  const relTarget = toPosixRelative(realRoot, realTarget);
-  if (isProtectedReadPath(relTarget)) {
-    throw new AgPluginError(
-      "PROTECTED_PATH_BLOCKED",
-      `Read denied: "${relTarget}" is a protected secret file.`
-    );
-  }
-  return realTarget;
 }
 
 // src/config.ts
@@ -61002,6 +61262,15 @@ function maskSecrets(input2, extraSecrets = [], env = process.env) {
 }
 
 // src/artifacts.ts
+function resolveManifestRoot(workspaceRoot, m2) {
+  if (m2?.worktreePath) {
+    const safeWt = resolveSafeWorktreeRoot(workspaceRoot, m2.taskId, m2.worktreePath);
+    if (safeWt && fs6.existsSync(safeWt)) {
+      return safeWt;
+    }
+  }
+  return workspaceRoot;
+}
 function classifyArtifactKind(filePath) {
   const ext = path6.extname(filePath).toLowerCase();
   if ([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(ext)) return "screenshot";
@@ -61059,7 +61328,8 @@ function handleListArtifacts(input2 = {}) {
   const availableTasks = [];
   for (const m2 of allManifests) {
     seenIds.add(m2.taskId);
-    const files = collectArtifactFiles(workspaceRoot, m2.taskId);
+    const mRoot = resolveManifestRoot(workspaceRoot, m2);
+    const files = collectArtifactFiles(mRoot, m2.taskId);
     availableTasks.push({
       taskId: m2.taskId,
       title: m2.title,
@@ -61094,16 +61364,18 @@ function handleListArtifacts(input2 = {}) {
     };
   }
   const targetManifest = current?.taskId === targetTaskId ? current : readArchivedManifest(workspaceRoot, targetTaskId);
-  const artifacts = collectArtifactFiles(workspaceRoot, targetTaskId);
+  const targetRoot = resolveManifestRoot(workspaceRoot, targetManifest);
+  const artifacts = collectArtifactFiles(targetRoot, targetTaskId);
   const includeReport = input2.includeReport ?? true;
   const includeLogTail = input2.includeLogTail ?? true;
   const logTailLines = Math.min(200, Math.max(5, input2.logTailLines ?? 40));
   let reportMarkdown;
-  if (includeReport && current?.taskId === targetTaskId) {
-    const raw = readReportMarkdown(workspaceRoot);
+  const targetCurrent = targetRoot === workspaceRoot ? current : readManifest(targetRoot);
+  if (includeReport && targetCurrent?.taskId === targetTaskId) {
+    const raw = readReportMarkdown(targetRoot);
     if (raw) reportMarkdown = maskSecrets(raw);
   }
-  const logTail = includeLogTail ? readMaskedLogTail(workspaceRoot, targetTaskId, logTailLines) : void 0;
+  const logTail = includeLogTail ? readMaskedLogTail(targetRoot, targetTaskId, logTailLines) : void 0;
   return {
     ok: true,
     workspaceRoot,
@@ -63607,6 +63879,7 @@ ${summary || "(No eligible MCP servers found.)"}`,
 }
 
 // src/jobs.ts
+import fs14 from "node:fs";
 import path13 from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -82595,6 +82868,15 @@ function summarizeLiveJob(rec, includeDetails, includeLogTail) {
     errorMessage: rec.errorMessage ?? rec.result?.errorMessage
   };
 }
+function resolveManifestExecutionRoot(workspaceRoot, m2) {
+  if (m2.worktreePath) {
+    const safeWt = resolveSafeWorktreeRoot(workspaceRoot, m2.taskId, m2.worktreePath);
+    if (safeWt && fs14.existsSync(safeWt)) {
+      return safeWt;
+    }
+  }
+  return workspaceRoot;
+}
 function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail) {
   const createdMs = Date.parse(m2.createdAt);
   const updatedMs = Date.parse(m2.updatedAt);
@@ -82603,8 +82885,10 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
   if (m2.status === "VERIFIED") status = "VERIFIED";
   else if (m2.errorCode === "TASK_CANCELLED") status = "CANCELLED";
   else if (m2.status === "FAILED") status = "FAILED";
-  const currentManifest = readManifest(workspaceRoot);
+  const execRoot = resolveManifestExecutionRoot(workspaceRoot, m2);
+  const currentManifest = readManifest(execRoot);
   const isCurrent = currentManifest?.taskId === m2.taskId;
+  const diskArtifacts = includeDetails ? listTaskArtifacts(execRoot, m2.taskId) : void 0;
   return {
     jobId: m2.taskId,
     taskId: m2.taskId,
@@ -82622,12 +82906,12 @@ function summarizeDiskManifest(workspaceRoot, m2, includeDetails, includeLogTail
     model: m2.metrics?.model,
     metrics: m2.metrics,
     changedFiles: includeDetails ? m2.changedFiles : void 0,
-    artifacts: includeDetails ? listTaskArtifacts(workspaceRoot, m2.taskId) : void 0,
+    artifacts: includeDetails ? diskArtifacts && diskArtifacts.length > 0 ? diskArtifacts : m2.artifacts : void 0,
     reportMarkdown: includeDetails && isCurrent ? (() => {
-      const r2 = readReportMarkdown(workspaceRoot);
+      const r2 = readReportMarkdown(execRoot);
       return r2 ? maskSecrets(r2) : void 0;
     })() : void 0,
-    logTail: includeLogTail ? readLogTail(workspaceRoot, m2.taskId) : void 0,
+    logTail: includeLogTail ? readLogTail(execRoot, m2.taskId) : void 0,
     warnings: [],
     errorCode: m2.errorCode,
     errorMessage: m2.error
@@ -82670,45 +82954,68 @@ async function handleStartAgTask(input2, deps = {}) {
     executionRoot = wt.worktreePath;
     worktreePath = wt.worktreePath;
     worktreeBranch = wt.branchName;
-    if (input2.lockedPaths && input2.lockedPaths.length > 0) {
-      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input2.lockedPaths);
+    if (wt.warning) {
+      warnings.push(wt.warning);
     }
-    ensureBridgeDirs(executionRoot);
-    ensureGitignoreEntry(executionRoot);
   }
-  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
-  warnings.push(...lockRes.warnings);
-  const checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
-  if (checkpoint.warning) {
-    warnings.push(checkpoint.warning);
-  }
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let checkpoint;
+  let manifest;
+  let now;
   const acceptanceCriteria = input2.acceptanceCriteria && input2.acceptanceCriteria.length > 0 ? input2.acceptanceCriteria : ["Complete the delegated instructions and report verified results clearly."];
-  const manifest = {
-    schemaVersion: 1,
-    taskId,
-    title: input2.title,
-    mode: resolvedMode,
-    status: "DISPATCHED",
-    lockedPaths: normalizedLockedPaths,
-    verifyUrl: input2.verifyUrl,
-    createdAt: now,
-    updatedAt: now,
-    ...checkpointManifestFields(checkpoint),
-    ...worktreePath ? { worktreePath } : {},
-    ...worktreeBranch ? { worktreeBranch } : {},
-    artifacts: []
-  };
-  writeManifest(executionRoot, manifest);
-  if (worktreePath) {
-    archiveManifest(workspaceRoot, manifest);
+  let lockRelease;
+  try {
+    if (worktreePath) {
+      if (normalizedLockedPaths.length > 0) {
+        normalizedLockedPaths = validateLockedPathsConfig(executionRoot, normalizedLockedPaths);
+      }
+      ensureBridgeDirs(executionRoot);
+      ensureGitignoreEntry(executionRoot);
+    }
+    const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
+    lockRelease = lockRes.release;
+    warnings.push(...lockRes.warnings);
+    checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
+    if (checkpoint.warning) {
+      warnings.push(checkpoint.warning);
+    }
+    now = (/* @__PURE__ */ new Date()).toISOString();
+    manifest = {
+      schemaVersion: 1,
+      taskId,
+      title: input2.title,
+      mode: resolvedMode,
+      status: "DISPATCHED",
+      timeoutSec: effectiveTimeoutSec,
+      lockedPaths: normalizedLockedPaths,
+      verifyUrl: input2.verifyUrl,
+      createdAt: now,
+      updatedAt: now,
+      ...checkpointManifestFields(checkpoint),
+      ...worktreePath ? { worktreePath } : {},
+      ...worktreeBranch ? { worktreeBranch } : {},
+      artifacts: []
+    };
+    writeManifest(executionRoot, manifest);
+    if (worktreePath) {
+      archiveManifest(workspaceRoot, manifest);
+    }
+    clearReportMarkdown(executionRoot);
+    writeDispatchMarkdown(executionRoot, {
+      manifest,
+      instructions: input2.instructions,
+      acceptanceCriteria
+    });
+  } catch (err) {
+    if (worktreePath) {
+      try {
+        removeTaskWorktree(workspaceRoot, worktreePath, worktreeBranch, true);
+      } catch {
+      }
+    }
+    throw err;
+  } finally {
+    lockRelease?.();
   }
-  clearReportMarkdown(executionRoot);
-  writeDispatchMarkdown(executionRoot, {
-    manifest,
-    instructions: input2.instructions,
-    acceptanceCriteria
-  });
   const engine = resolvedMode === "subscription" ? deps.subscriptionEngine ?? new SubscriptionEngine() : deps.apiWorkerEngine ?? new ApiWorkerEngine();
   const abortController = new AbortController();
   const record2 = {
@@ -82734,7 +83041,7 @@ async function handleStartAgTask(input2, deps = {}) {
     if (!worktreePath) return;
     try {
       const disk = readManifest(executionRoot);
-      archiveManifest(workspaceRoot, {
+      const merged = {
         ...disk ?? manifest,
         status: finalStatus,
         worktreePath,
@@ -82745,7 +83052,11 @@ async function handleStartAgTask(input2, deps = {}) {
         errorCode: record2.errorCode,
         error: record2.errorMessage,
         updatedAt: record2.updatedAt
-      });
+      };
+      if (disk && disk.taskId === taskId && (disk.status === "DISPATCHED" || disk.status === "RUNNING")) {
+        writeManifest(executionRoot, merged);
+      }
+      archiveManifest(workspaceRoot, merged);
     } catch {
     }
   };
@@ -83602,7 +83913,7 @@ async function handleCheckEnvironment(workspaceRootInput, deps = {}) {
       agent: config2.subscription.agy_agent
     },
     bridge: {
-      initialized: fs14.existsSync(getBridgeDir(workspaceRoot)),
+      initialized: fs15.existsSync(getBridgeDir(workspaceRoot)),
       gitignoreProtected: isGitignoreProtected(workspaceRoot),
       currentStatus: manifest?.status ?? "IDLE",
       lastTaskId: manifest?.taskId,
@@ -83786,59 +84097,108 @@ async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
     executionRoot = wt.worktreePath;
     worktreePath = wt.worktreePath;
     worktreeBranch = wt.branchName;
-    if (input2.lockedPaths && input2.lockedPaths.length > 0) {
-      normalizedLockedPaths = validateLockedPathsConfig(executionRoot, input2.lockedPaths);
+    if (wt.warning) {
+      warnings.push(wt.warning);
     }
-    ensureBridgeDirs(executionRoot);
-    ensureGitignoreEntry(executionRoot);
   }
-  const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
-  warnings.push(...lockRes.warnings);
-  const checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
-  if (checkpoint.warning) {
-    warnings.push(checkpoint.warning);
-  }
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let checkpoint;
+  let manifest;
   const acceptanceCriteria = input2.acceptanceCriteria && input2.acceptanceCriteria.length > 0 ? input2.acceptanceCriteria : ["Complete the delegated instructions and report verified results clearly."];
-  const manifest = {
-    schemaVersion: 1,
-    taskId,
-    title: input2.title,
-    mode: resolvedMode,
-    status: "DISPATCHED",
-    lockedPaths: normalizedLockedPaths,
-    verifyUrl: input2.verifyUrl,
-    createdAt: now,
-    updatedAt: now,
-    ...checkpointManifestFields(checkpoint),
-    ...worktreePath ? { worktreePath } : {},
-    ...worktreeBranch ? { worktreeBranch } : {},
-    artifacts: []
-  };
-  writeManifest(executionRoot, manifest);
-  if (worktreePath) {
-    archiveManifest(workspaceRoot, manifest);
+  let lockRelease;
+  try {
+    if (worktreePath) {
+      if (normalizedLockedPaths.length > 0) {
+        normalizedLockedPaths = validateLockedPathsConfig(executionRoot, normalizedLockedPaths);
+      }
+      ensureBridgeDirs(executionRoot);
+      ensureGitignoreEntry(executionRoot);
+    }
+    const lockRes = acquireBridgeLock(executionRoot, effectiveTimeoutSec);
+    lockRelease = lockRes.release;
+    warnings.push(...lockRes.warnings);
+    checkpoint = createCheckpoint(executionRoot, taskId, config2.git_guard);
+    if (checkpoint.warning) {
+      warnings.push(checkpoint.warning);
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    manifest = {
+      schemaVersion: 1,
+      taskId,
+      title: input2.title,
+      mode: resolvedMode,
+      status: "DISPATCHED",
+      timeoutSec: effectiveTimeoutSec,
+      lockedPaths: normalizedLockedPaths,
+      verifyUrl: input2.verifyUrl,
+      createdAt: now,
+      updatedAt: now,
+      ...checkpointManifestFields(checkpoint),
+      ...worktreePath ? { worktreePath } : {},
+      ...worktreeBranch ? { worktreeBranch } : {},
+      artifacts: []
+    };
+    writeManifest(executionRoot, manifest);
+    if (worktreePath) {
+      archiveManifest(workspaceRoot, manifest);
+    }
+    clearReportMarkdown(executionRoot);
+    writeDispatchMarkdown(executionRoot, {
+      manifest,
+      instructions: input2.instructions,
+      acceptanceCriteria
+    });
+  } catch (err) {
+    if (worktreePath) {
+      try {
+        removeTaskWorktree(workspaceRoot, worktreePath, worktreeBranch, true);
+      } catch {
+      }
+    }
+    throw err;
+  } finally {
+    lockRelease?.();
   }
-  clearReportMarkdown(executionRoot);
-  writeDispatchMarkdown(executionRoot, {
-    manifest,
-    instructions: input2.instructions,
-    acceptanceCriteria
-  });
   const engine = resolvedMode === "subscription" ? deps.subscriptionEngine ?? new SubscriptionEngine() : deps.apiWorkerEngine ?? new ApiWorkerEngine();
-  const execRes = await engine.execute({
-    workspaceRoot: executionRoot,
-    pluginRoot,
-    manifest,
-    config: config2,
-    instructions: input2.instructions,
-    acceptanceCriteria,
-    detection,
-    agyOptions: extractAgyOptions2(input2),
-    timeoutSecOverride: input2.timeoutSec,
-    abortSignal: runtimeOptions?.abortSignal,
-    onProgress: runtimeOptions?.onProgress
-  });
+  let execRes;
+  try {
+    execRes = await engine.execute({
+      workspaceRoot: executionRoot,
+      pluginRoot,
+      manifest,
+      config: config2,
+      instructions: input2.instructions,
+      acceptanceCriteria,
+      detection,
+      agyOptions: extractAgyOptions2(input2),
+      timeoutSecOverride: input2.timeoutSec,
+      abortSignal: runtimeOptions?.abortSignal,
+      onProgress: runtimeOptions?.onProgress
+    });
+  } catch (err) {
+    const errMsg = maskSecrets(err instanceof Error ? err.message : String(err));
+    const errCode = err instanceof AgPluginError ? err.code : "INTERNAL_ERROR";
+    const failedAt = (/* @__PURE__ */ new Date()).toISOString();
+    try {
+      const disk = readManifest(executionRoot);
+      const updated = {
+        ...disk ?? manifest,
+        status: "FAILED",
+        errorCode: errCode,
+        error: errMsg,
+        updatedAt: failedAt
+      };
+      writeManifest(executionRoot, updated);
+      if (worktreePath) {
+        archiveManifest(workspaceRoot, {
+          ...updated,
+          worktreePath,
+          worktreeBranch
+        });
+      }
+    } catch {
+    }
+    throw err;
+  }
   if (worktreePath) {
     const disk = readManifest(executionRoot);
     archiveManifest(workspaceRoot, {
@@ -83872,18 +84232,35 @@ async function handleDelegateToAntigravity(input2, deps = {}, runtimeOptions) {
     errorMessage: execRes.errorMessage ? maskSecrets(execRes.errorMessage) : void 0
   };
 }
-async function handleRollbackAgTask(input2) {
+async function handleRollbackAgTask(input2, jobDeps) {
   const workspaceRoot = path15.resolve(input2.workspaceRoot ?? process.cwd());
   const currentManifest = readManifest(workspaceRoot);
   let targetManifest = null;
+  let fromArchive = false;
   if (input2.taskId) {
     if (currentManifest?.taskId === input2.taskId) {
       targetManifest = currentManifest;
+      fromArchive = false;
     } else {
       targetManifest = readArchivedManifest(workspaceRoot, input2.taskId);
+      fromArchive = true;
     }
   } else {
-    targetManifest = currentManifest;
+    const allManifests = readAllTaskManifests(workspaceRoot);
+    const newest = allManifests[0] ?? null;
+    if (currentManifest) {
+      if (newest && newest.taskId !== currentManifest.taskId && newest.worktreePath) {
+        throw new AgPluginError(
+          "ROLLBACK_NO_CHECKPOINT",
+          `Most recent task "${newest.taskId}" ran in an isolated worktree while main workspace manifest is "${currentManifest.taskId}". Specify taskId explicitly (e.g. "${newest.taskId}" or "${currentManifest.taskId}") to avoid rolling back the wrong workspace.`
+        );
+      }
+      targetManifest = currentManifest;
+      fromArchive = false;
+    } else if (newest && newest.worktreePath) {
+      targetManifest = newest;
+      fromArchive = true;
+    }
   }
   if (!targetManifest) {
     throw new AgPluginError(
@@ -83891,15 +84268,43 @@ async function handleRollbackAgTask(input2) {
       input2.taskId ? `No task manifest found for taskId "${input2.taskId}".` : "No active or recent delegation manifest found in .ag-bridge/manifest.json."
     );
   }
-  if (targetManifest.worktreePath) {
-    const wtRes = removeTaskWorktree(
-      workspaceRoot,
-      targetManifest.worktreePath,
-      targetManifest.worktreeBranch,
-      true
-    );
+  if (fromArchive && targetManifest.worktreePath) {
+    const safeId = assertSafeTaskId(targetManifest.taskId);
+    const safeWtRoot = resolveSafeWorktreeRoot(workspaceRoot, safeId, targetManifest.worktreePath);
+    if (!safeWtRoot) {
+      throw new AgPluginError(
+        "PATH_TRAVERSAL_BLOCKED",
+        `Refusing to remove worktree: recorded path "${targetManifest.worktreePath}" does not match .ag-bridge/worktrees/${safeId}.`
+      );
+    }
+    const manager = jobDeps?.jobManager ?? defaultJobManager;
+    const liveJob = manager.get(safeId);
+    let wtManifest = null;
+    if (fs15.existsSync(safeWtRoot)) {
+      try {
+        wtManifest = readManifest(safeWtRoot);
+      } catch {
+        wtManifest = null;
+      }
+    }
+    const archiveStillActive = targetManifest.status === "DISPATCHED" || targetManifest.status === "RUNNING";
+    if (liveJob?.active || archiveStillActive && wtManifest?.taskId === safeId && (wtManifest.status === "DISPATCHED" || wtManifest.status === "RUNNING")) {
+      throw new AgPluginError(
+        "BRIDGE_BUSY",
+        `Worktree task "${safeId}" is currently running. Cancel it first with cancel_ag_job before removing its worktree.`
+      );
+    }
+    const expectedBranch = `${WORKTREE_BRANCH_PREFIX}${safeId}`;
+    const wtRes = removeTaskWorktree(workspaceRoot, safeWtRoot, expectedBranch, true);
+    if (wtRes.removed) {
+      archiveManifest(workspaceRoot, {
+        ...targetManifest,
+        status: "IDLE",
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
     return {
-      ok: true,
+      ok: wtRes.removed,
       taskId: targetManifest.taskId,
       restoredCheckpointRef: targetManifest.gitCheckpointRef,
       revertedTrackedFiles: [],
@@ -84047,8 +84452,8 @@ function createAntigravityMcpServer(deps = {}) {
     },
     async (args) => {
       try {
-        const result = await handleRollbackAgTask(args);
-        return toJsonToolResponse(result, false);
+        const result = await handleRollbackAgTask(args, deps.jobDeps);
+        return toJsonToolResponse(result, !result.ok);
       } catch (err) {
         const code = err instanceof AgPluginError ? err.code : "INTERNAL_ERROR";
         const message = maskSecrets(err instanceof Error ? err.message : String(err));
