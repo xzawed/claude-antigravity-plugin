@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/github/v/release/xzawed/claude-antigravity-plugin?label=version&color=blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/latest)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#full-command--mcp-reference)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#visual-map-of-all-21-commands)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 🌐 **Language:** **English** · [한국어 공식 가이드 (README.ko.md)](./README.ko.md)
 
@@ -514,4 +514,4 @@ claude-antigravity-plugin/
 ## 📂 Engineering Docs, Contributing & License
 
 - **Documentation Hub ([docs/README.md](./docs/README.md)):** [PRD](./docs/01-planning/PRD.md) · [User Flows](./docs/01-planning/user-flows.md) · [Architecture](./docs/02-architecture/system-architecture.md) · [Bridge Protocol](./docs/02-architecture/bridge-protocol.md) · [Security & Git Guard](./docs/02-architecture/security-and-git-guard.md) · [MCP API](./docs/03-specs/mcp-tools-api.md) · [Execution Engines](./docs/03-specs/execution-engines.md) · [Prompts & Commands](./docs/03-specs/prompts-and-commands.md) · [Verification Report](./docs/05-verification/verification-report.md)
-- **Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) · **Security:** [SECURITY.md](./SECURITY.md) · **License:** [Apache License 2.0](./LICENSE)
+- **Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) · **Security:** [SECURITY.md](./SECURITY.md) · **License:** [MIT License](./LICENSE)

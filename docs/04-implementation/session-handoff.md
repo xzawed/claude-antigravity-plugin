@@ -5,7 +5,7 @@
 | **문서 ID** | `IMP-003` |
 | **버전** | `3.3.0` |
 | **상태** | `Active` |
-| **최종 수정일** | `2026-11-25` |
+| **최종 수정일** | `2026-11-28` |
 | **현재 진행 단계** | **`v1.7.0` 릴리스 완료 (`PR #1` ~ `#54`, 채팅창 1단어 플러그인 셀프 업데이트 `/ag-update plugin`·`all` 및 자동 업데이트 가이드 개편)** |
 | **관련 문서** | [구현 마스터 플랜](./implementation-plan.md), [작업 체크리스트](./task-checklist.md), [보안 & Git Guard](../02-architecture/security-and-git-guard.md), [AGENTS.md](../../AGENTS.md) |
 
@@ -13,7 +13,7 @@
 
 ## 1. 누적 릴리스 및 PR 이력 요약 (`#1` ~ `#54`)
 
-- **GitHub 저장소:** `xzawed/claude-antigravity-plugin` (`Apache License 2.0`)
+- **GitHub 저장소:** `xzawed/claude-antigravity-plugin` (`MIT License`)
 - **`v1.0.0` (`#1` ~ `#16`):** 듀얼 실행 엔진(`subscription` / `api`), Git Guard 체크포인트/롤백, Path Guard, MCP Stdio 서버, 3-OS × Node 20/22 CI, 영문/한글 README, `claude plugin validate` 통과
 - **`v1.4.0` (`#17` ~ `#21`):** 전체 `agy` CLI 플래그 패리티, `/ag-login` (`ag_auth`), 비동기 백그라운드 작업(`start_ag_task`/`get_ag_job`/`cancel_ag_job`), 지속 멀티턴 세션(`ag_session`), 아티팩트 뷰어(`list_ag_artifacts`), CLI 관리(`ag_cli_admin`), MCP Tool 12종·슬래시 커맨드 21종 완성
 - **`v1.4.1` (`#22` ~ `#24`):** `taskId` 경로 탈출 차단, 마켓플레이스 즉시 실행용 자체완결 번들 커밋([ADR-004](../06-adr/ADR-004-prebuilt-server-bundle.md)), `.git/info/exclude` 로컬 전용 무시 등록([ADR-005](../06-adr/ADR-005-local-git-exclude.md))
