@@ -1,7 +1,7 @@
 {
   "name": "claude-antigravity-plugin-server",
   "version": "1.7.0",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "description": "Embedded MCP server and dual-engine bridge for claude-antigravity-plugin",
   "type": "module",
   "main": "dist/index.js",

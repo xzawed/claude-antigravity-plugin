@@ -79,4 +79,4 @@ Please read [AGENTS.md](./AGENTS.md) and [docs/00-standards/documentation-standa
 
 ## 5. License
 
-By contributing to this repository, you agree that your contributions will be licensed under the [Apache License 2.0](./LICENSE).
+By contributing to this repository, you agree that your contributions will be licensed under the [MIT License](./LICENSE).

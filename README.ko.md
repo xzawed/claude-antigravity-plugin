@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/github/v/release/xzawed/claude-antigravity-plugin?label=version&color=blue)](https://github.com/xzawed/claude-antigravity-plugin/releases/latest)
 [![MCP Tools](https://img.shields.io/badge/MCP%20Tools-12-6B4FBB)](#전체-커맨드--mcp-상세-레퍼런스)
 [![Slash Commands](https://img.shields.io/badge/Slash%20Commands-21-0EA5E9)](#한눈에-보는-21개-슬래시-커맨드-지도)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 🌐 **언어:** [English (README.md)](./README.md) · **한국어 공식 가이드**
 
@@ -514,4 +514,4 @@ claude-antigravity-plugin/
 ## 📂 개발 문서 허브 · 기여 · 보안 · 라이선스
 
 - **개발 문서 허브 ([docs/README.md](./docs/README.md)):** [PRD](./docs/01-planning/PRD.md) · [사용자 플로우](./docs/01-planning/user-flows.md) · [시스템 아키텍처](./docs/02-architecture/system-architecture.md) · [브릿지 프로토콜](./docs/02-architecture/bridge-protocol.md) · [보안 & Git Guard](./docs/02-architecture/security-and-git-guard.md) · [MCP Tools API](./docs/03-specs/mcp-tools-api.md) · [듀얼 엔진](./docs/03-specs/execution-engines.md) · [프롬프트 & 커맨드](./docs/03-specs/prompts-and-commands.md) · [실측 검증 리포트](./docs/05-verification/verification-report.md)
-- **기여 가이드:** [CONTRIBUTING.md](./CONTRIBUTING.md) · **보안 정책:** [SECURITY.md](./SECURITY.md) · **라이선스:** [Apache License 2.0](./LICENSE)
+- **기여 가이드:** [CONTRIBUTING.md](./CONTRIBUTING.md) · **보안 정책:** [SECURITY.md](./SECURITY.md) · **라이선스:** [MIT License](./LICENSE)
